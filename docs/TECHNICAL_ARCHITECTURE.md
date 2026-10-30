@@ -1,8 +1,10 @@
 # Trezor — Technical Architecture
 
-Status: **Phase 1 implemented** (encrypted local storage). This document
-describes what is built, why, and how it differs from the Phase 1 proposal
-(git history: `docs: add Phase 1 technical architecture proposal`).
+Status: **Phase 1 implemented, plus Phase 1.1 corrections** (encrypted local
+storage). This document describes what is built, why, and how it differs from
+the Phase 1 proposal (git history: `docs: add Phase 1 technical architecture
+proposal`). Phase 1.1 fixed the findings of the Phase 1 security audit; see
+§10.1.
 
 Claims marked **[verified]** were checked by an automated test or on the
 Android emulator (API 37, arm64) on 2026-10-30. Everything else is design
@@ -22,9 +24,11 @@ StorageProvider                 (startup: opening → ready | error)
    ├── SqliteItemRepository     ─┐
    ├── SqliteSettingsRepository ─┤  SqlDatabase interface (src/storage/sql.ts)
    │                             │
+   │  serializeDatabase()  ──────┤  one FIFO for every statement on the connection
    │  openTrezorDatabase()  ─────┘  op-sqlite 19.0.3 + SQLCipher 4.19.0
    │      │
-   │      └── vault (TS) ── TrezorVault TurboModule (Kotlin) ── Android Keystore
+   │      ├── vault (TS) ── TrezorVault TurboModule (Kotlin) ── Android Keystore
+   │      └── databaseFiles (TS) ── TrezorDatabaseFiles TurboModule (Kotlin)
    │
    └── InMemoryItemRepository   (debug-only sample data, tests)
 ```
@@ -46,8 +50,13 @@ Rules:
 | `android/app/src/main/java/com/trezor/app/vault/` | `KeyVault` (Keystore + envelopes), `TrezorVaultModule` (JS bridge), typed `VaultException` |
 | `src/native/NativeTrezorVault.ts` | TurboModule spec (app-level codegen, `codegenConfig` in `package.json`) |
 | `src/storage/vault.ts` | TS wrapper; maps native rejections to `StorageError` |
-| `src/storage/database.ts` | Startup matrix, verification, pre-migration snapshot |
-| `src/storage/migrations.ts` | Schema v1, `user_version` migration runner |
+| `android/app/src/main/java/com/trezor/app/storage/` | `DatabaseFiles`: definite file state, no-replace rename, temp-only delete (database directory only) |
+| `src/native/NativeTrezorDatabaseFiles.ts`, `src/storage/databaseFiles.ts` | Spec and TS wrapper for the above |
+| `src/storage/database.ts` | Startup matrix, verification, snapshot, migrations |
+| `src/storage/sqlcipher.ts` | Key-format check, keyed `open()` (drops the key from op-sqlite's retained options), encryption/integrity verification |
+| `src/storage/snapshot.ts` | Atomic, verified pre-migration snapshots |
+| `src/storage/serialDatabase.ts` | Serializes every statement and transaction on the shared connection |
+| `src/storage/migrations.ts` | Schema v1, `user_version` migration runner, foreign-key procedure |
 | `src/storage/SqliteItemRepository.ts` | Row ↔ `Item` mapping, atomic writes |
 | `src/storage/SettingsRepository.ts` | Typed settings (`theme.preference`) |
 | `src/storage/StorageProvider.tsx`, `openStorage.ts` | Startup state for the app shell |
@@ -178,8 +187,12 @@ One JSON file per key in `noBackupFilesDir/keys/` (`database.key.json`, mode
 - **Unknown future versions** are rejected with `ENVELOPE_UNSUPPORTED`, never
   guessed at **[verified]**.
 - **Writes are atomic** (temp file + `fsync` + rename).
-- **Wiping:** plaintext key bytes are zeroed in Kotlin after use. The hex
-  string passed to JS can't be zeroed (see §4.4).
+- **Wiping (limited):** the plaintext key `ByteArray`s in Kotlin are zeroed
+  after use, and so is the `CharArray` used to build the hex string. The
+  resulting `java.lang.String` handed to React Native **cannot be zeroed**: it
+  stays on the Java heap until garbage-collected, and the JSI/Hermes and C++
+  (`std::string`) copies made on the way to SQLCipher aren't zeroed either.
+  See §4.4.
 
 ### 4.4 Can the database key stay out of JavaScript?
 
@@ -194,21 +207,37 @@ One JSON file per key in `noBackupFilesDir/keys/` (`database.key.json`, mode
   symbols (unsupported, breaks on any upgrade) or forking the library. Neither
   is justified for the remaining risk.
 
-**Exposure:** the 64-character hex key exists as a Hermes string from
-`vault.getKey()` until `open()` returns, and possibly longer until garbage
-collection. JS strings are immutable and can't be zeroed.
+**Where the key lives, and for how long (as implemented in Phase 1.1):**
 
-**Mitigations in place:**
-- The key is fetched only inside `openTrezorDatabase()` and never stored in
-  state, context or module-level variables.
-- It is never logged: the only storage logs are error *codes*, and the vault
-  doesn't log.
-- Error messages never include it.
+| Copy | Lifetime | Notes |
+| --- | --- | --- |
+| Keystore-wrapped envelope on disk | Until data is cleared | Only ciphertext |
+| Kotlin `ByteArray` (plaintext) | Zeroed right after hex conversion | `TrezorVaultModule.toHexAndZero` |
+| Kotlin `String` (hex) | Until Java GC | Immutable, can't be zeroed |
+| JS string from `vault.getKey()` (`keyHex`) | Local variable in `openTrezorDatabase()`; also passed to the snapshot code during a migration. Unreachable once that function returns; memory reclaimed whenever Hermes collects it | Immutable, can't be zeroed |
+| `x'…'` raw-key string in the `open()` options | **Removed from the options object as soon as `open()` returns** (`openEncrypted` in `sqlcipher.ts`) | op-sqlite closes over that options object for the connection's lifetime; before Phase 1.1 this kept the key reachable all session **[verified: Jest asserts no retained options object has `encryptionKey`]** |
+| `x'…'` string as a bound `ATTACH … KEY ?` parameter | Only during snapshot creation | Never part of SQL text |
+| C++ `std::string` in op-sqlite's `open` | Freed (not zeroed) when `open` returns | op-sqlite source |
+| SQLCipher codec context | Lifetime of each connection | Required to read and write; `cipher_memory_security` is off by default in SQLCipher 4.5+, so freed pages aren't wiped |
+
+**What this does and doesn't guarantee:**
+- Removing the key from op-sqlite's options shortens how long the key is
+  *reachable* from JavaScript.
+- It does **not** erase it from memory. JavaScript, Java and C++ strings can't
+  be reliably wiped, and copies may persist in freed heap memory until reused.
+
+**Other mitigations:**
+- Nothing logs the key: storage logs carry error codes only, the Kotlin
+  modules have no log calls, and op-sqlite's error messages contain only
+  `sqlite3_errmsg` text.
+- The key is never placed in SQL text.
+- Key format is validated (`^[0-9a-f]{64}$`) before use, so an empty or
+  malformed value can't become a weak passphrase (`INVALID_KEY_FORMAT`).
 - The database key is the only key that crosses into JS.
 
-**Residual risk:** an attacker able to read the app's process memory while it
-runs could find the key. That attacker is already out of scope (they could read
-decrypted data directly).
+**Residual risk:** code running inside the app process (or with root) while
+Trezor is open can read the key, or the decrypted data directly. That attacker
+is out of scope (§3).
 
 ### 4.5 Lifecycle scenarios
 
@@ -219,6 +248,8 @@ decrypted data directly).
 | App update (install over) | Keystore entry, envelope and DB all kept **[verified: debug → release install]** | Kept |
 | Uninstall / reinstall | Android deletes the app's Keystore entries and files | **Lost by design** (no backup yet) |
 | "Clear storage" in system settings | Files and Keystore entries removed → treated as a first launch | **Lost by design** |
+| Database file state can't be determined (I/O or permission error) | `DATABASE_STATE_UNKNOWN`; no key is created **[verified: Jest]** | Kept |
+| Vault returns a malformed key | `INVALID_KEY_FORMAT` before anything is opened **[verified: Jest]** | Kept |
 | Envelope missing, DB present | `KEY_MISSING_FOR_DATABASE` error screen; no new key, DB untouched **[verified: envelope moved aside]**; *Try again* recovers once the envelope is back **[verified]** | Kept on disk, unreadable |
 | Master key missing, envelope present | `MASTER_KEY_MISSING` **[verified: test]** | Kept on disk, unreadable |
 | Envelope tampered / corrupt | `UNWRAP_FAILED` **[verified: test]** | Kept on disk, unreadable |
@@ -281,44 +312,107 @@ tries to change an item's type is rejected **[verified]**.
 
 ---
 
-## 6. Migrations
+## 6. Migrations, snapshots and foreign keys
 
-- `PRAGMA user_version` holds the schema version. `migrations` is an
-  append-only array of `{ version, description, up(tx) }`.
-- **On every open** (`openTrezorDatabase`), in order:
-  1. Unwrap the key (never create one for an existing DB).
-  2. Open with the raw key.
-  3. Probe `SELECT count(*) FROM sqlite_master`. Code 26 →
-     `DATABASE_UNREADABLE`, code 11 → `DATABASE_CORRUPT`. A wrong key only
-     shows up at the first query, not at `open()` **[verified in spike]**.
-  4. Check `PRAGMA cipher_version` is non-empty. This refuses to run if
-     SQLCipher isn't actually active.
-  5. `PRAGMA quick_check` must be `ok`.
-  6. `PRAGMA foreign_keys = ON`.
-  7. If `0 < user_version < latest`:
-     - `PRAGMA cipher_integrity_check` (HMAC of every page);
-     - an **encrypted snapshot** through `ATTACH … KEY` +
-       `sqlcipher_export()`, saved as
-       `trezor.pre-migration-v<N>.db` in the same private directory. The
-       version is copied explicitly, because `sqlcipher_export` does not copy
-       `user_version`.
-  8. Run each pending migration and its `user_version` bump **in one
-     transaction**.
-  9. Then `PRAGMA foreign_key_check`.
-- A newer `user_version` than the app knows → `NEWER_SCHEMA`; nothing is written.
-- A failed migration → `MIGRATION_FAILED`; the DB stays at the last good
-  version and the snapshot is kept.
+`PRAGMA user_version` holds the schema version. `migrations` is an append-only
+array of `{ version, description, up(tx) }`.
+
+### 6.1 On every open (`openTrezorDatabase`)
+
+1. **Existence:** `databaseFiles.state()` returns `present` or `absent`. If it
+   can't tell, it rejects with `DATABASE_STATE_UNKNOWN`. It never guesses
+   "absent", so an I/O or permission problem can't lead to a new key.
+2. **Key:** unwrap the existing key, or create one only if there is no
+   envelope *and* no database. Validate the key format.
+3. **Open** with the raw key (`openEncrypted`). The key is applied by
+   `sqlite3_key_v2` before any statement, then removed from the retained
+   options object.
+   - The main connection is **not** opened with `failOnCreate`. Attached
+     databases inherit the connection's open flags, and the snapshot must be
+     able to `ATTACH` a new file. This was found on the device: with
+     `failOnCreate`, `ATTACH` failed with code 14.
+4. **Probe** `SELECT count(*) FROM sqlite_master`: code 26 →
+   `DATABASE_UNREADABLE`, code 11 → `DATABASE_CORRUPT`.
+5. **Check** that `PRAGMA cipher_version` is non-empty. This proves the library
+   is SQLCipher; the key itself is always applied (step 3).
+6. **Check** that `PRAGMA quick_check` returns `ok`.
+7. If `user_version` > latest → `NEWER_SCHEMA`. Nothing is written and no
+   snapshot is taken.
+8. If `0 < user_version < latest` → **verified snapshot** (§6.2). If that
+   fails, the migration never starts.
+9. **`runMigrations`** (§6.3).
+
+### 6.2 Snapshot procedure (`snapshot.ts`)
+
+Candidate names are `trezor.pre-migration-v<N>.db`, then `….2.db` … `….9.db`.
+
+1. **Reuse check:** for each existing candidate, verify it (step 5). It is
+   reused **only if** it passes *and* its schema and every row are identical to
+   the current database, for example on a retry after a failed migration.
+   Otherwise it is **left untouched** (never trusted, overwritten or deleted)
+   and the next free name is used.
+2. `PRAGMA cipher_integrity_check` on the live database.
+3. Export to a new **temporary** file
+   `trezor.pre-migration-v<N>.<random>.partial.db`:
+   `ATTACH … KEY ?` → `sqlcipher_export()` → `PRAGMA snapshot.user_version = N`
+   (the export doesn't copy it).
+4. `DETACH` closes the temporary database.
+5. **Verify** by reopening it as a separate connection with the key and
+   `failOnCreate`:
+   - it decrypts (probe query);
+   - `cipher_version` is present;
+   - `quick_check` is `ok`;
+   - `user_version` = N;
+   - schema (`sqlite_master`) and every row of every table (paged, rowid order)
+     equal the live database.
+6. Only then, **atomic rename** to the free final name. The native
+   `renameNoReplace` refuses to replace an existing file.
+7. **On any failure in 3–6:** delete only this attempt's temporary file. The
+   native `deleteTemporary` refuses any name not ending in `.partial.db`.
+   Throw `SNAPSHOT_FAILED`; the migration never starts.
+
+**Invalid or stale snapshots:** kept as they are (possible evidence, never
+auto-deleted), never used, and a new verified snapshot is written under the
+next name. If all nine names are taken by invalid snapshots, the migration
+fails with `SNAPSHOT_FAILED`.
+
+**Limitations:**
+- There is no automatic restore from a snapshot. Recovery from a failed
+  migration relies on the migration transaction rolling back (§6.3); snapshots
+  are a manual-recovery safety net.
+- Snapshots are never deleted automatically.
+- Temporary files from an attempt interrupted by a crash or kill can remain.
+  Their names are unique and they are never trusted.
+- Directory entries aren't `fsync`ed after the rename. Java can't `fsync` a
+  directory; the file contents are synced by SQLite on commit.
+
+### 6.3 Migration procedure (`runMigrations`)
+
+Follows SQLite's documented procedure for schema changes:
+
+1. With nothing pending, foreign keys are simply turned ON (and verified).
+2. Otherwise, **`PRAGMA foreign_keys = OFF` outside any transaction.** The
+   pragma is a no-op inside one. This stops a table rebuild (create new, copy,
+   `DROP`, `RENAME`) from firing `ON DELETE CASCADE`.
+3. **Each migration in its own transaction**: `up(tx)`, then
+   `PRAGMA foreign_key_check` **before commit**. Any violation rolls back the
+   whole step (`MIGRATION_FAILED`). The `user_version` bump is part of the same
+   transaction.
+4. **`PRAGMA foreign_keys = ON` in `finally`**, on success and failure. It is
+   read back to confirm; if it didn't take effect (e.g. the connection were
+   stuck in a transaction), the open fails.
+5. The foreign-key check no longer runs after commit or on every launch, so it
+   can't report a committed migration as failed (audit L2).
 
 **Verification:**
-- **Jest (node:sqlite):** fresh migrate, idempotent re-run, newer schema
-  refused, failing migration rolls back, additive migration keeps rows, `STRICT`
-  and `CHECK` enforcement, cascade **[verified]**.
-- **On-device self-test (SQLCipher):** a failed migration leaves v1; a v2
-  migration keeps data; the snapshot is encrypted, at v1, and unreadable
-  without the key; a newer schema is refused **[verified]**.
-
-Snapshots are not deleted automatically yet. They're encrypted and excluded
-from backup. Cleanup belongs to the backup phase.
+- **Jest (real SQLite via `node:sqlite`):**
+  - a *control* test shows the same rebuild with foreign keys ON wipes
+    dependent rows;
+  - the procedure keeps them;
+  - a violation rolls back;
+  - foreign keys are ON after success, failure, and with nothing pending.
+- **On-device self-test (SQLCipher):** table rebuild keeps dependent rows,
+  violation rolls back, foreign keys ON after open **[verified]**.
 
 ---
 
@@ -332,6 +426,18 @@ from backup. Cleanup belongs to the backup phase.
     uninstall.
 - **Writes:** `ItemsProvider` applies a change to state immediately, then
   queues the repository write (writes run strictly in order).
+  - Below that, **every statement and transaction on the shared connection
+    goes through one FIFO** (`serializeDatabase`, wrapped in `openStorage`).
+  - op-sqlite only serializes `transaction()` calls with each other. A plain
+    `execute()` issued during a transaction used to run *inside* it, so a theme
+    change could be rolled back with an unrelated failed item save.
+  - Now item saves, deletes, settings writes and reads are strictly
+    sequential; errors reach their caller; a failure doesn't block later
+    operations **[verified: Jest, including a control test reproducing the old
+    bug]**.
+  - Inside a `transaction()` callback, code must use the `tx` it receives.
+    Calling the outer database from inside would wait for itself and deadlock.
+    The repositories only use `tx`.
   - If a write fails, state is reloaded from storage and a dialog explains
     the change wasn't saved.
   - Covered by Jest **[verified]**.
@@ -370,11 +476,12 @@ The design keeps backup independent of this device's Keystore:
 
 | Kind | What | Result |
 | --- | --- | --- |
-| Jest (automated) | 36 tests: UUIDv7 (5), migrations (9), repository contract on in-memory **and** SQLite + storage details + settings (18), ItemsProvider persistence/rollback/sample isolation/ids (4), App smoke test (1) | **36/36 pass** |
-| Android instrumentation (automated, emulator) | `KeyVaultTest`, 12 tests against the real Keystore | **12/12 pass** |
-| On-device self-test (debug, dev menu → "Run storage self-test") | 13 SQLCipher checks: active cipher, correct/wrong/missing key, startup path, failed and successful migration, encrypted snapshot, newer schema | **13/13 pass** |
-| Manual (emulator) | First launch; create note/card/reminder; edit; delete; pin; complete; search; Done filter; Home counts, Pinned and Recently updated; theme; persistence across force-stop; missing-key error + retry; release installed over debug | All as expected |
-| Manual on-disk inspection | Raw `trezor.db`: no plaintext of entered data or schema; random header; host `sqlite3` refuses; envelope holds only the wrapped key | As expected |
+| Jest (automated) | 66 tests: UUIDv7 (5); migrations incl. foreign-key procedure (14); repository contract + storage details + settings (18); serialized writes (5); database opening, key format, file state, key-lifetime, snapshots incl. failure injection and regressions (20); ItemsProvider (4); App smoke test (1). SQLCipher is emulated by `test-utils/fakeSqlCipher.ts` (real SQLite files; key mismatch → code 26; no-create connections can't `ATTACH` new files, like SQLite) | **66/66 pass** |
+| Android instrumentation (automated, emulator) | `KeyVaultTest` (12) against the real Keystore; `DatabaseFilesTest` (9): present/absent, unreadable location is an error not "absent", no-replace rename, temp-only delete, path rejection | **21/21 pass** |
+| On-device self-test (debug, dev menu → "Run storage self-test") | 21 checks on real SQLCipher: active cipher; correct/wrong/missing key; native file guards; startup; foreign keys ON; failed migration leaves v1 with a verified snapshot; retry reuses it; migration keeps data; snapshot unreadable without key; invalid snapshot kept and a new one used; table rebuild keeps rows; violation rolls back; newer schema refused | **21/21 pass** |
+| Manual upgrade test (emulator) | Data created with the Phase 1 release build (`06b022c`), then the Phase 1.1 debug build installed over it: data, theme and envelope intact; no migration, no snapshot, `trezor.db` unchanged on open; new writes and theme change persisted across restart | As expected |
+| Manual (Phase 1, unchanged since) | First launch; create note/card/reminder; edit; delete; pin; complete; search; Done filter; Home counts, Pinned and Recently updated; theme; persistence across force-stop; missing-key error + retry; release installed over debug | All as expected |
+| Manual on-disk inspection (Phase 1) | Raw `trezor.db`: no plaintext of entered data or schema; random header; host `sqlite3` refuses; envelope holds only the wrapped key | As expected |
 
 Commands: `npx tsc --noEmit`, `npm run lint`, `npm test`,
 `cd android && ./gradlew :app:connectedDebugAndroidTest` (needs a running
@@ -398,6 +505,26 @@ emulator or device; **it uninstalls the app afterwards**).
 
 `minSdk` stays **24**. No dependency required raising it.
 
+### 10.1 Phase 1.1 corrections (audit follow-up)
+
+| Audit finding | Correction |
+| --- | --- |
+| M3 Foreign keys ON during migrations (cascade on table rebuild) | Foreign keys OFF outside the transaction, `foreign_key_check` before commit, ON again in `finally` (§6.3) |
+| L2 Foreign-key check after commit / on every launch | Moved inside each migration transaction |
+| M2 Partial snapshot trusted by file name | Temp file → close → reopen and verify (decrypt, cipher, `quick_check`, version, identical content) → no-replace rename; invalid snapshots never trusted or deleted (§6.2) |
+| M1 Key retained in op-sqlite's options closure; docs overstated mitigation | Key removed from the options object after `open()`; §4.3–4.4 rewritten to describe actual lifetimes |
+| L3 Writes outside the item queue could join another transaction | `serializeDatabase` for every statement on the shared connection (§7) |
+| L1 Any open error treated as "file absent" | Native `DatabaseFiles.state()` with definite answers; `DATABASE_STATE_UNKNOWN` otherwise; never leads to key creation |
+| L5 No key-format check | `^[0-9a-f]{64}$` enforced before use (`INVALID_KEY_FORMAT`) |
+| L9 Stale doc reference in `TrezorVaultModule` | Updated |
+
+Database format and schema version are **unchanged** (v1). Existing Phase 1
+databases open without any migration **[verified: upgrade test]**.
+
+New error codes: `DATABASE_STATE_UNKNOWN`, `INVALID_KEY_FORMAT`,
+`SNAPSHOT_FAILED`. They are mapped to the existing error-screen messages; no new
+UI.
+
 ---
 
 ## 11. Dependencies
@@ -418,7 +545,13 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Risk | Status / mitigation |
 | --- | --- |
 | **Key loss = data loss.** Uninstall, "Clear storage" or Keystore loss make data unrecoverable | By design until encrypted backup exists. The error screen warns against uninstalling |
-| Database key passes through JS (§4.4) | Documented; minimal lifetime; never logged |
+| Database key passes through JS (§4.4) | No longer retained by op-sqlite after `open()`; still present until GC in immutable JS/Java/C++ strings that can't be zeroed; never logged |
+| No automatic restore from snapshots; snapshots and crashed-attempt temp files are never cleaned up (audit L7) | Manual-recovery artifacts only. Retention, cleanup and restore belong to the backup phase |
+| Shared connection is serialized; calling the outer database from inside a `transaction()` callback would deadlock | Repositories use only `tx`; documented in `serialDatabase.ts` |
+| StrongBox fallback only on `StrongBoxUnavailableException`; other StrongBox failures make the first launch fail, and software-backed keys are accepted silently (audit L4) | Untested on hardware; review with real devices |
+| op-sqlite enables `load_extension` on every Android connection (audit L6) | Not exploitable with static or parameterized SQL; needs an op-sqlite option or patch |
+| OpenSSL 3.3.2 (to our knowledge, past end of support) and no Gradle dependency verification or wrapper checksum (audit M4) | Planned with release hardening |
+| Dev-only self-test reuses the production key id and could create it on a fresh install; a failed `listAll` after open leaks a connection on retry (audit L8) | Debug-only / minor |
 | Emulator Keystore is software-backed | Hardware backing depends on the device; untested on real hardware |
 | op-sqlite small maintainer base, frequent majors | Exact pin; driver isolated behind `SqlDatabase` |
 | Third-party OpenSSL Maven artifact | Supply-chain dependency. **Not yet done:** Gradle dependency verification (checksums) |

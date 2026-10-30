@@ -1,6 +1,7 @@
 import type { Item } from '../data/types';
 import { openTrezorDatabase } from './database';
 import { ItemRepository } from './ItemRepository';
+import { serializeDatabase } from './serialDatabase';
 import {
   SettingsRepository,
   SettingValues,
@@ -18,7 +19,9 @@ export interface OpenedStorage {
 
 /** Opens the encrypted database and loads what the first screen needs. */
 export async function openStorage(): Promise<OpenedStorage> {
-  const { db } = await openTrezorDatabase();
+  const opened = await openTrezorDatabase();
+  // Every read and write on the shared connection goes through one queue.
+  const db = serializeDatabase(opened.db);
   const items = new SqliteItemRepository(db);
   const settings = new SqliteSettingsRepository(db);
   const [initialItems, theme] = await Promise.all([

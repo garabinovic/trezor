@@ -42,8 +42,16 @@ const generic: ErrorCopy = {
     'Something went wrong while opening secure storage. Nothing has been deleted.',
 };
 
+const migrationProblem: ErrorCopy = {
+  icon: TriangleAlert,
+  title: 'Trezor couldn’t finish updating',
+  message:
+    'Your data couldn’t be upgraded to this version, so it was left exactly as it was.',
+};
+
 const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
   KEY_MISSING_FOR_DATABASE: keyProblem,
+  INVALID_KEY_FORMAT: keyProblem,
   MASTER_KEY_MISSING: keyProblem,
   KEY_INVALIDATED: keyProblem,
   UNWRAP_FAILED: keyProblem,
@@ -52,12 +60,8 @@ const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
   NEWER_SCHEMA: updateNeeded,
   DATABASE_UNREADABLE: unreadable,
   DATABASE_CORRUPT: unreadable,
-  MIGRATION_FAILED: {
-    icon: TriangleAlert,
-    title: 'Trezor couldn’t finish updating',
-    message:
-      'Your data couldn’t be upgraded to this version, so it was left exactly as it was.',
-  },
+  MIGRATION_FAILED: migrationProblem,
+  SNAPSHOT_FAILED: migrationProblem,
 };
 
 interface StorageErrorScreenProps {

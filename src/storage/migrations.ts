@@ -89,9 +89,36 @@ export function pendingMigrations(
   return list.filter(m => m.version > current);
 }
 
+async function foreignKeysEnabled(db: SqlExecutor): Promise<boolean> {
+  const rows = await db.execute('PRAGMA foreign_keys');
+  return Number(rows[0]?.foreign_keys) === 1;
+}
+
+/** Turns enforcement on and confirms it took effect (it cannot inside a transaction). */
+export async function enableForeignKeys(db: SqlExecutor): Promise<void> {
+  await db.execute('PRAGMA foreign_keys = ON');
+  if (!(await foreignKeysEnabled(db))) {
+    throw new StorageError(
+      'MIGRATION_FAILED',
+      'Foreign key enforcement could not be re-enabled (connection left in a transaction?)',
+    );
+  }
+}
+
 /**
- * Brings the schema up to date. Each migration and its version bump commit
- * atomically, so a failure leaves the database at the last good version.
+ * Brings the schema up to date, following SQLite's procedure for schema
+ * changes (https://sqlite.org/lang_altertable.html#otheralter):
+ *
+ * 1. Foreign keys OFF, outside any transaction (the pragma is a no-op inside
+ *    one). Otherwise rebuilding a table (create new, copy, DROP, RENAME) would
+ *    fire ON DELETE CASCADE and wipe dependent rows.
+ * 2. Each migration in its own transaction: `up`, then `PRAGMA
+ *    foreign_key_check`; any violation rolls the whole step back.
+ * 3. `user_version` bumped inside the same transaction.
+ * 4. Foreign keys back ON on every path (success and failure), verified.
+ *
+ * With nothing pending, only step 4 runs. A failure leaves the database at the
+ * last fully committed version.
  */
 export async function runMigrations(
   db: SqlDatabase,
@@ -107,29 +134,40 @@ export async function runMigrations(
     );
   }
 
-  for (const migration of pendingMigrations(from, list)) {
+  const pending = pendingMigrations(from, list);
+  if (pending.length > 0) {
+    await db.execute('PRAGMA foreign_keys = OFF');
     try {
-      await db.transaction(async tx => {
-        await migration.up(tx);
-        // PRAGMA cannot take bound parameters; version is a trusted integer.
-        await tx.execute(
-          `PRAGMA user_version = ${Math.trunc(migration.version)}`,
-        );
-      });
-    } catch (e) {
-      throw new StorageError(
-        'MIGRATION_FAILED',
-        `Migration to v${migration.version} failed: ${(e as Error).message}`,
-      );
+      for (const migration of pending) {
+        try {
+          await db.transaction(async tx => {
+            await migration.up(tx);
+            const violations = await tx.execute('PRAGMA foreign_key_check');
+            if (violations.length > 0) {
+              throw new Error(
+                `${violations.length} foreign key violation(s); rolled back`,
+              );
+            }
+            // PRAGMA cannot take bound parameters; version is a trusted integer.
+            await tx.execute(
+              `PRAGMA user_version = ${Math.trunc(migration.version)}`,
+            );
+          });
+        } catch (e) {
+          throw new StorageError(
+            'MIGRATION_FAILED',
+            `Migration to v${migration.version} failed: ${
+              (e as Error).message
+            }`,
+          );
+        }
+      }
+    } finally {
+      await enableForeignKeys(db);
     }
+  } else {
+    await enableForeignKeys(db);
   }
 
-  const violations = await db.execute('PRAGMA foreign_key_check');
-  if (violations.length > 0) {
-    throw new StorageError(
-      'MIGRATION_FAILED',
-      `${violations.length} foreign key violation(s) after migration`,
-    );
-  }
   return { from, to: await getUserVersion(db) };
 }

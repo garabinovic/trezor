@@ -6,7 +6,7 @@ import java.io.File
 
 /**
  * JS bridge for [KeyVault]. Keys are returned to JS as lowercase hex because op-sqlite
- * only accepts the SQLCipher key from JavaScript (see docs/TECHNICAL_ARCHITECTURE.md §3).
+ * only accepts the SQLCipher key from JavaScript (see docs/TECHNICAL_ARCHITECTURE.md §4.4).
  */
 class TrezorVaultModule(reactContext: ReactApplicationContext) :
     NativeTrezorVaultSpec(reactContext) {
