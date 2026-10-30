@@ -48,5 +48,13 @@
   },
   "op-sqlite": {
     "sqlcipher": true
+  },
+  "codegenConfig": {
+    "name": "TrezorSpec",
+    "type": "modules",
+    "jsSrcsDir": "src/native",
+    "android": {
+      "javaPackageName": "com.trezor.app.vault"
+    }
   }
 }
