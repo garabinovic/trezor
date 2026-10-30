@@ -1,0 +1,12 @@
+<resources>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <!-- Matches the Trezor palette; also tints native date/time pickers. -->
+        <item name="colorPrimary">@color/trezor_accent</item>
+        <item name="colorAccent">@color/trezor_accent</item>
+        <item name="android:windowBackground">@color/trezor_background</item>
+    </style>
+
+</resources>

@@ -1,0 +1,4 @@
+<resources>
+    <color name="trezor_background">#F7F6F3</color>
+    <color name="trezor_accent">#2E6A5C</color>
+</resources>
