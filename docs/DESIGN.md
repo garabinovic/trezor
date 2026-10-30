@@ -161,13 +161,18 @@ their own colours, font sizes or spacing.
 - **Language** — English only, sentence case everywhere, short verbs on buttons
   ("Save", "Delete", "Mark as done").
 
-## 9. Phase 0 data
+## 9. Data
 
-The app runs on in-memory sample data (`src/data/`). Changes made in the app
-(create, edit, delete, complete) last only until the app is closed, and Settings
-says so. Settings → Preview → "Show sample data" switches to an empty state, which
-makes it possible to review the first-launch experience. `src/data/ItemsProvider`
-is the seam that Phase 1 replaces with real local persistence.
+Since Phase 1, items and settings are stored in an encrypted SQLCipher database
+on the device (see [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)).
+The UI reads and writes only through `ItemsProvider` and `ThemeProvider`.
+
+Development builds keep a Settings → Preview → "Show sample data" switch. It
+shows in-memory sample data that is never written to, or mixed with, saved
+items. Release builds don't include it.
+
+If storage can't be opened, the app shows a calm error screen with the reason,
+an error code and *Try again*. It never erases data on its own.
 
 ## 10. Privacy guarantees in the build
 

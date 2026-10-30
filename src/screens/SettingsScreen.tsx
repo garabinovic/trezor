@@ -19,7 +19,7 @@ import {
   Section,
   ValueRow,
 } from '../components';
-import { SAMPLE_DATA_AVAILABLE, useItems } from '../data';
+import { useItems } from '../data';
 import { RootStackParamList } from '../navigation/types';
 import {
   spacing,
@@ -99,7 +99,7 @@ export function SettingsScreen({ navigation }: Props) {
           />
         </Section>
 
-        {SAMPLE_DATA_AVAILABLE && (
+        {__DEV__ && (
           <Section
             title="Preview"
             grouped

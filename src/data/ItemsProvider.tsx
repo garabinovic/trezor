@@ -13,11 +13,7 @@ import {
   ItemRepository,
 } from '../storage/ItemRepository';
 import { vault } from '../storage/vault';
-import { createSampleItems } from './sampleData';
 import { Item, ItemOfType, ItemType } from './types';
-
-/** Sample data exists only in development builds; release builds never see it. */
-export const SAMPLE_DATA_AVAILABLE = __DEV__;
 
 /**
  * The UI's single source of items. Updates are applied to state immediately
@@ -91,9 +87,12 @@ export function ItemsProvider({
 
   const setSampleDataEnabled = useCallback(
     (enabled: boolean) => {
-      if (!SAMPLE_DATA_AVAILABLE) {
+      // Inline __DEV__ (not the exported constant) so release bundles drop
+      // this branch and the sample data module entirely.
+      if (!__DEV__) {
         return;
       }
+      const { createSampleItems } = require('./sampleData');
       setSampleDataEnabledState(enabled);
       // Sample data lives in a separate in-memory repository, so it can never
       // be written to, or mixed with, the user's saved items.
