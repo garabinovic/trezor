@@ -19,7 +19,7 @@ import {
   Section,
   ValueRow,
 } from '../components';
-import { useItems } from '../data';
+import { SAMPLE_DATA_AVAILABLE, useItems } from '../data';
 import { RootStackParamList } from '../navigation/types';
 import {
   spacing,
@@ -99,27 +99,32 @@ export function SettingsScreen({ navigation }: Props) {
           />
         </Section>
 
-        <Section
-          title="Preview"
-          grouped
-          footer="This is a preview build. Changes you make are kept only until the app is closed."
-        >
-          <ListItem
-            icon={FlaskConical}
-            title="Show sample data"
-            subtitle="Turn off to see the first-launch experience"
-            subtitleLines={2}
-            trailing={
-              <Switch
-                accessibilityLabel="Show sample data"
-                value={sampleDataEnabled}
-                onValueChange={setSampleDataEnabled}
-                trackColor={{ false: colors.borderStrong, true: colors.accent }}
-                thumbColor={scheme === 'dark' ? colors.text : colors.surface}
-              />
-            }
-          />
-        </Section>
+        {SAMPLE_DATA_AVAILABLE && (
+          <Section
+            title="Preview"
+            grouped
+            footer="Development builds only. Sample data is kept in memory and is never mixed with your saved items."
+          >
+            <ListItem
+              icon={FlaskConical}
+              title="Show sample data"
+              subtitle="Turn off to see the first-launch experience"
+              subtitleLines={2}
+              trailing={
+                <Switch
+                  accessibilityLabel="Show sample data"
+                  value={sampleDataEnabled}
+                  onValueChange={setSampleDataEnabled}
+                  trackColor={{
+                    false: colors.borderStrong,
+                    true: colors.accent,
+                  }}
+                  thumbColor={scheme === 'dark' ? colors.text : colors.surface}
+                />
+              }
+            />
+          </Section>
+        )}
 
         <Section title="About" grouped>
           <ValueRow label="Version" value="0.1.0 (preview)" />

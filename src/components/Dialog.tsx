@@ -9,7 +9,8 @@ interface DialogProps {
   title: string;
   message?: string;
   confirmLabel: string;
-  cancelLabel?: string;
+  /** `null` hides the cancel button (single-action notice). */
+  cancelLabel?: string | null;
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -50,12 +51,14 @@ export function Dialog({
             </Text>
           )}
           <View style={styles.actions}>
-            <Button
-              label={cancelLabel}
-              onPress={onCancel}
-              variant="ghost"
-              size="sm"
-            />
+            {cancelLabel !== null && (
+              <Button
+                label={cancelLabel}
+                onPress={onCancel}
+                variant="ghost"
+                size="sm"
+              />
+            )}
             <Button
               label={confirmLabel}
               onPress={onConfirm}

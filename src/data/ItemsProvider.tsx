@@ -4,57 +4,156 @@ import React, {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from 'react';
+import { uuidv7 } from '../storage/ids';
+import {
+  InMemoryItemRepository,
+  ItemRepository,
+} from '../storage/ItemRepository';
+import { vault } from '../storage/vault';
 import { createSampleItems } from './sampleData';
 import { Item, ItemOfType, ItemType } from './types';
 
+/** Sample data exists only in development builds; release builds never see it. */
+export const SAMPLE_DATA_AVAILABLE = __DEV__;
+
 /**
- * Phase 0 session store. Holds items in memory only — nothing is written to
- * disk and everything resets when the app closes. Phase 1 replaces the
- * internals with real local persistence while keeping this interface.
+ * The UI's single source of items. Updates are applied to state immediately
+ * and written to the repository in order; if a write fails, state is reloaded
+ * from storage and `writeError` is set so the UI can tell the user.
  */
 interface ItemsContextValue {
   items: Item[];
+  /** Development builds only: show in-memory sample data instead of saved items. */
   sampleDataEnabled: boolean;
   setSampleDataEnabled: (enabled: boolean) => void;
   saveItem: (item: Item) => void;
   deleteItem: (id: string) => void;
   togglePinned: (id: string) => void;
   setReminderCompleted: (id: string, completed: boolean) => void;
+  writeError: boolean;
+  dismissWriteError: () => void;
 }
 
 const ItemsContext = createContext<ItemsContextValue | null>(null);
 
-export function ItemsProvider({ children }: { children: ReactNode }) {
-  const [sampleDataEnabled, setSampleDataEnabledState] = useState(true);
-  const [items, setItems] = useState<Item[]>(() => createSampleItems());
+interface ItemsProviderProps {
+  /** Persistent storage for the user's items. */
+  repository: ItemRepository;
+  /** Items already loaded from `repository`, so the first render is complete. */
+  initialItems: Item[];
+  children: ReactNode;
+}
 
-  const setSampleDataEnabled = useCallback((enabled: boolean) => {
-    setSampleDataEnabledState(enabled);
-    setItems(enabled ? createSampleItems() : []);
+export function ItemsProvider({
+  repository,
+  initialItems,
+  children,
+}: ItemsProviderProps) {
+  const [items, setItemsState] = useState<Item[]>(initialItems);
+  const [sampleDataEnabled, setSampleDataEnabledState] = useState(false);
+  const [writeError, setWriteError] = useState(false);
+
+  // Refs give callbacks the latest values without re-creating them.
+  const itemsRef = useRef(items);
+  const activeRepo = useRef<ItemRepository>(repository);
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
+
+  const setItems = useCallback((next: Item[]) => {
+    itemsRef.current = next;
+    setItemsState(next);
   }, []);
 
-  const saveItem = useCallback((item: Item) => {
-    setItems(current => {
+  /** Applies a change locally, then persists it after any earlier writes. */
+  const commit = useCallback(
+    (next: Item[], write: (repo: ItemRepository) => Promise<void>) => {
+      const repo = activeRepo.current;
+      setItems(next);
+      writeQueue.current = writeQueue.current
+        .then(() => write(repo))
+        .catch(async () => {
+          setWriteError(true);
+          // Fall back to what is actually stored.
+          try {
+            const stored = await repo.listAll();
+            if (activeRepo.current === repo) {
+              setItems(stored);
+            }
+          } catch {
+            // Keep current state; the error dialog is already showing.
+          }
+        });
+    },
+    [setItems],
+  );
+
+  const setSampleDataEnabled = useCallback(
+    (enabled: boolean) => {
+      if (!SAMPLE_DATA_AVAILABLE) {
+        return;
+      }
+      setSampleDataEnabledState(enabled);
+      // Sample data lives in a separate in-memory repository, so it can never
+      // be written to, or mixed with, the user's saved items.
+      const repo = enabled
+        ? new InMemoryItemRepository(createSampleItems())
+        : repository;
+      activeRepo.current = repo;
+      writeQueue.current = writeQueue.current
+        .then(() => repo.listAll())
+        .then(loaded => {
+          if (activeRepo.current === repo) {
+            setItems(loaded);
+          }
+        })
+        .catch(() => setWriteError(true));
+    },
+    [repository, setItems],
+  );
+
+  const saveItem = useCallback(
+    (item: Item) => {
+      const current = itemsRef.current;
       const exists = current.some(i => i.id === item.id);
-      return exists
-        ? current.map(i => (i.id === item.id ? item : i))
-        : [item, ...current];
-    });
-  }, []);
+      commit(
+        exists
+          ? current.map(i => (i.id === item.id ? item : i))
+          : [item, ...current],
+        repo => repo.save(item),
+      );
+    },
+    [commit],
+  );
 
-  const deleteItem = useCallback((id: string) => {
-    setItems(current => current.filter(i => i.id !== id));
-  }, []);
+  const deleteItem = useCallback(
+    (id: string) => {
+      commit(
+        itemsRef.current.filter(i => i.id !== id),
+        repo => repo.delete(id),
+      );
+    },
+    [commit],
+  );
 
-  const update = useCallback((id: string, change: (item: Item) => Item) => {
-    setItems(current =>
-      current.map(i =>
-        i.id === id ? { ...change(i), updatedAt: new Date().toISOString() } : i,
-      ),
-    );
-  }, []);
+  const update = useCallback(
+    (id: string, change: (item: Item) => Item) => {
+      const target = itemsRef.current.find(i => i.id === id);
+      if (!target) {
+        return;
+      }
+      const updated = {
+        ...change(target),
+        updatedAt: new Date().toISOString(),
+      } as Item;
+      commit(
+        itemsRef.current.map(i => (i.id === id ? updated : i)),
+        repo => repo.save(updated),
+      );
+    },
+    [commit],
+  );
 
   const togglePinned = useCallback(
     (id: string) => update(id, i => ({ ...i, pinned: !i.pinned })),
@@ -67,6 +166,8 @@ export function ItemsProvider({ children }: { children: ReactNode }) {
     [update],
   );
 
+  const dismissWriteError = useCallback(() => setWriteError(false), []);
+
   const value = useMemo(
     () => ({
       items,
@@ -76,6 +177,8 @@ export function ItemsProvider({ children }: { children: ReactNode }) {
       deleteItem,
       togglePinned,
       setReminderCompleted,
+      writeError,
+      dismissWriteError,
     }),
     [
       items,
@@ -85,6 +188,8 @@ export function ItemsProvider({ children }: { children: ReactNode }) {
       deleteItem,
       togglePinned,
       setReminderCompleted,
+      writeError,
+      dismissWriteError,
     ],
   );
 
@@ -114,6 +219,7 @@ export function useItem(id: string | undefined): Item | undefined {
   return useMemo(() => items.find(i => i.id === id), [items, id]);
 }
 
+/** New item id: UUIDv7 with randomness from the platform's secure generator. */
 export function createId(): string {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return uuidv7(Date.now(), vault.randomBytes(10));
 }

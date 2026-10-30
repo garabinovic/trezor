@@ -1,6 +1,7 @@
 import React, {
   createContext,
   ReactNode,
+  useCallback,
   useContext,
   useMemo,
   useState,
@@ -18,10 +19,30 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
+interface ThemeProviderProps {
+  /** Saved preference, read before the first render to avoid a theme flash. */
+  initialPreference?: ThemePreference;
+  /** Called when the user changes the preference, to persist it. */
+  onPreferenceChange?: (preference: ThemePreference) => void;
+  children: ReactNode;
+}
+
+export function ThemeProvider({
+  initialPreference = 'system',
+  onPreferenceChange,
+  children,
+}: ThemeProviderProps) {
   const systemScheme = useColorScheme();
-  // Kept in memory for Phase 0; persisted with the rest of the settings later.
-  const [preference, setPreference] = useState<ThemePreference>('system');
+  const [preference, setPreferenceState] =
+    useState<ThemePreference>(initialPreference);
+
+  const setPreference = useCallback(
+    (next: ThemePreference) => {
+      setPreferenceState(next);
+      onPreferenceChange?.(next);
+    },
+    [onPreferenceChange],
+  );
 
   const scheme =
     preference === 'system'
@@ -32,7 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(
     () => ({ theme: createTheme(scheme), preference, setPreference }),
-    [scheme, preference],
+    [scheme, preference, setPreference],
   );
 
   return (

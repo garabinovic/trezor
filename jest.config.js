@@ -1,5 +1,7 @@
 module.exports = {
   preset: '@react-native/jest-preset',
+  setupFiles: ['<rootDir>/jest.setup.js'],
+  testPathIgnorePatterns: ['/node_modules/', '/android/', '/ios/'],
   moduleNameMapper: {
     // Jest resolves the ESM "react-native" entry; use the CommonJS build.
     '^lucide-react-native$':
