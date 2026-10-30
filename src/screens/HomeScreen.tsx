@@ -19,17 +19,14 @@ import {
   Item,
   ItemType,
   itemTypes,
-  Reminder,
   useItems,
 } from '../data';
+import { buildHomeOverview, COMING_UP_LIMIT } from '../data/organizer';
 import { tabForType } from '../navigation/types';
 import { gutter, Theme, useStyles } from '../theme';
 import { HeaderActions } from './shared/HeaderActions';
 import { ItemRow } from './shared/ItemRow';
 import { NewItemSheet } from './shared/NewItemSheet';
-
-const COMING_UP_LIMIT = 3;
-const RECENT_LIMIT = 4;
 
 export function HomeScreen() {
   const styles = useStyles(createStyles);
@@ -37,29 +34,10 @@ export function HomeScreen() {
   const { items } = useItems();
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const { counts, comingUp, pinned, recent } = useMemo(() => {
-    const countsByType = Object.fromEntries(
-      itemTypes.map(t => [t, items.filter(i => i.type === t).length]),
-    ) as Record<ItemType, number>;
-    const openReminders = items
-      .filter((i): i is Reminder => i.type === 'reminder' && !i.completed)
-      .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
-    const pinnedItems = items.filter(i => i.pinned);
-    const shown = new Set<string>([
-      ...openReminders.slice(0, COMING_UP_LIMIT).map(i => i.id),
-      ...pinnedItems.map(i => i.id),
-    ]);
-    const recentItems = items
-      .filter(i => !shown.has(i.id) && i.type !== 'reminder')
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, RECENT_LIMIT);
-    return {
-      counts: countsByType,
-      comingUp: openReminders,
-      pinned: pinnedItems,
-      recent: recentItems,
-    };
-  }, [items]);
+  const { counts, comingUp, pinned, recent } = useMemo(
+    () => buildHomeOverview(items),
+    [items],
+  );
 
   const openTab = (type: ItemType) =>
     navigation.navigate('Tabs', { screen: tabForType[type] });

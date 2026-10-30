@@ -270,7 +270,7 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
             label={
               doc.kind === 'receipt' || doc.kind === 'warranty'
                 ? 'Purchase date'
-                : 'Date'
+                : 'Issue date'
             }
             value={formatFullDate(date)}
           />
@@ -278,7 +278,15 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
         {expires && (
           <ValueRow
             icon={CalendarClock}
-            label={expired ? 'Warranty ended' : 'Warranty until'}
+            label={
+              doc.kind === 'warranty'
+                ? expired
+                  ? 'Warranty ended'
+                  : 'Warranty until'
+                : expired
+                ? 'Expired'
+                : 'Expires on'
+            }
             value={formatFullDate(expires)}
             valueColor={expired ? 'danger' : 'text'}
           />

@@ -9,7 +9,7 @@ import type {
   ReminderRepeat,
 } from '../data/types';
 import { StorageError } from './errors';
-import { ItemRepository } from './ItemRepository';
+import { filterBySearch, ItemRepository } from './ItemRepository';
 import { SqlDatabase, SqlExecutor, SqlRow } from './sql';
 
 // Timestamps are stored as integer milliseconds (UTC); the UI model keeps ISO strings.
@@ -108,6 +108,16 @@ export class SqliteItemRepository implements ItemRepository {
       ),
     ];
     return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  /**
+   * Reads every item from the encrypted database, then matches in JS.
+   * SQLite's LIKE and lower() only fold ASCII case, so "Š" would not match
+   * "š"; matching in JS keeps search Unicode-aware. Fine at personal-organizer
+   * scale; revisit (e.g. a normalized search column) if data grows large.
+   */
+  async search(term: string): Promise<Item[]> {
+    return filterBySearch(await this.listAll(), term);
   }
 
   async save(item: Item): Promise<void> {

@@ -10,51 +10,29 @@ import {
   SearchField,
   Text,
 } from '../components';
-import { categories, Item, itemTypes, useItems } from '../data';
+import { categories, itemTypes, useItemSearch } from '../data';
 import { RootStackParamList } from '../navigation/types';
 import { gutter, spacing, useTheme } from '../theme';
 import { ItemRow } from './shared/ItemRow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Search'>;
 
-/** Text an item can be found by, beyond its title. */
-function searchableText(item: Item): string {
-  switch (item.type) {
-    case 'note':
-      return item.body;
-    case 'reminder':
-      return item.notes;
-    case 'card':
-      return `${item.cardNumber} ${item.holderName} ${item.notes}`;
-    case 'document':
-      return `${item.merchant} ${item.notes} ${
-        item.attachment?.fileName ?? ''
-      }`;
-  }
-}
-
 export function SearchScreen({ navigation }: Props) {
   const { colors } = useTheme();
-  const { items } = useItems();
   const [query, setQuery] = useState('');
-  const term = query.trim().toLowerCase();
+  const search = useItemSearch(query);
 
   const sections = useMemo(() => {
-    if (!term) {
+    if (search.status !== 'done' && search.status !== 'searching') {
       return [];
     }
-    const matches = items.filter(
-      i =>
-        i.title.toLowerCase().includes(term) ||
-        searchableText(i).toLowerCase().includes(term),
-    );
     return itemTypes
       .map(type => ({
         title: categories[type].plural,
-        data: matches.filter(i => i.type === type),
+        data: search.results.filter(i => i.type === type),
       }))
       .filter(section => section.data.length > 0);
-  }, [items, term]);
+  }, [search]);
 
   return (
     <Screen
@@ -77,11 +55,17 @@ export function SearchScreen({ navigation }: Props) {
         </View>
       }
     >
-      {!term ? (
+      {search.status === 'idle' ? (
         <EmptyState
           icon={Search}
           title="Search everything"
           message="Find notes, reminders, cards and documents by title or content."
+        />
+      ) : search.status === 'error' ? (
+        <EmptyState
+          icon={SearchX}
+          title="Search isn’t available"
+          message="Your items couldn’t be searched right now. Please try again."
         />
       ) : (
         <SectionList
@@ -105,11 +89,13 @@ export function SearchScreen({ navigation }: Props) {
           )}
           ItemSeparatorComponent={Separator}
           ListEmptyComponent={
-            <EmptyState
-              icon={SearchX}
-              title="No results"
-              message={`Nothing matches “${query.trim()}”.`}
-            />
+            search.status === 'done' ? (
+              <EmptyState
+                icon={SearchX}
+                title="No results"
+                message={`Nothing matches “${query.trim()}”.`}
+              />
+            ) : undefined
           }
           contentContainerStyle={styles.list}
         />

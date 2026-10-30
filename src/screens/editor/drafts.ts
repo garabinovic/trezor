@@ -68,13 +68,11 @@ export function validate(item: Item): FieldErrors {
     if (item.amount != null && Number.isNaN(item.amount)) {
       errors.amount = 'Enter a valid amount, e.g. 24.90';
     }
-    if (
-      item.kind === 'warranty' &&
-      item.date &&
-      item.expiresOn &&
-      item.expiresOn < item.date
-    ) {
-      errors.expiresOn = 'Warranty end must be after the purchase date.';
+    if (item.date && item.expiresOn && item.expiresOn < item.date) {
+      errors.expiresOn =
+        item.kind === 'warranty'
+          ? 'Warranty end must be after the purchase date.'
+          : 'Expiry date must be after the issue date.';
     }
   }
   return errors;
@@ -102,7 +100,6 @@ export function normalize(item: Item): Item {
         merchant: trimmed.merchant.trim(),
         currency: trimmed.currency.trim().toUpperCase() || 'EUR',
         notes: trimmed.notes.trim(),
-        expiresOn: trimmed.kind === 'warranty' ? trimmed.expiresOn : null,
       };
   }
 }

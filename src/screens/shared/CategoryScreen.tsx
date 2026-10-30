@@ -3,7 +3,6 @@ import { FlatList, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   ChipGroup,
-  ChipOption,
   Divider,
   EmptyState,
   Fab,
@@ -11,15 +10,12 @@ import {
   Screen,
 } from '../../components';
 import { categories, ItemOfType, ItemType, useItemsOfType } from '../../data';
+import { ItemFilter } from '../../data/organizer';
 import { spacing } from '../../theme';
 import { HeaderActions } from './HeaderActions';
 import { ItemRow } from './ItemRow';
 
-export interface CategoryFilter<T extends ItemType> extends ChipOption<string> {
-  predicate: (item: ItemOfType<T>) => boolean;
-  /** Shown when this filter has no matches but the category isn't empty. */
-  emptyMessage: string;
-}
+export type CategoryFilter<T extends ItemType> = ItemFilter<T>;
 
 interface CategoryScreenProps<T extends ItemType> {
   type: T;

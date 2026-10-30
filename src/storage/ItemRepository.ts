@@ -1,3 +1,4 @@
+import { matchesSearch, normalizeSearchTerm } from '../data/search';
 import type { Item } from '../data/types';
 
 /**
@@ -10,6 +11,17 @@ export interface ItemRepository {
   /** Inserts or replaces an item. An item's type can never change. */
   save(item: Item): Promise<void>;
   delete(id: string): Promise<void>;
+  /**
+   * Items whose text fields contain `term` (case-insensitive, Unicode-aware),
+   * most recently updated first. An empty term returns nothing.
+   */
+  search(term: string): Promise<Item[]>;
+}
+
+/** Shared by implementations: filter already-loaded items by a search term. */
+export function filterBySearch(items: Item[], term: string): Item[] {
+  const normalized = normalizeSearchTerm(term);
+  return normalized ? items.filter(i => matchesSearch(i, normalized)) : [];
 }
 
 /** Holds items in memory only. Used for development sample data and tests. */
@@ -40,5 +52,9 @@ export class InMemoryItemRepository implements ItemRepository {
 
   async delete(id: string): Promise<void> {
     this.items = this.items.filter(i => i.id !== id);
+  }
+
+  async search(term: string): Promise<Item[]> {
+    return filterBySearch(await this.listAll(), term);
   }
 }

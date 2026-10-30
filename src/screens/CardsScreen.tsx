@@ -1,10 +1,7 @@
 import React from 'react';
-import { LoyaltyCard } from '../data';
+import { sortCards } from '../data/organizer';
 import { CategoryScreen } from './shared/CategoryScreen';
 
-const byPinnedThenName = (a: LoyaltyCard, b: LoyaltyCard) =>
-  Number(b.pinned) - Number(a.pinned) || a.title.localeCompare(b.title);
-
 export function CardsScreen() {
-  return <CategoryScreen type="card" sort={byPinnedThenName} />;
+  return <CategoryScreen type="card" sort={sortCards} />;
 }

@@ -1,7 +1,7 @@
 # Trezor — Technical Architecture
 
-Status: **Phase 1 implemented, plus Phase 1.1 corrections** (encrypted local
-storage). This document describes what is built, why, and how it differs from
+Status: **Phase 2 implemented** (core organizer on encrypted local storage),
+on top of Phase 1 and the Phase 1.1 corrections. This document describes what is built, why, and how it differs from
 the Phase 1 proposal (git history: `docs: add Phase 1 technical architecture
 proposal`). Phase 1.1 fixed the findings of the Phase 1 security audit; see
 §10.1.
@@ -61,6 +61,9 @@ Rules:
 | `src/storage/SettingsRepository.ts` | Typed settings (`theme.preference`) |
 | `src/storage/StorageProvider.tsx`, `openStorage.ts` | Startup state for the app shell |
 | `src/storage/ids.ts` | UUIDv7 |
+| `src/data/search.ts` | Searchable fields per type; Unicode-aware matching (Phase 2) |
+| `src/data/organizer.ts` | Category filters, sort orders, Home overview (Phase 2; moved out of screens) |
+| `test-utils/appHarness.tsx` | Drives the whole app in Jest (only visible screens are queried) |
 | `src/storage/selfTest.ts` | Debug-only on-device SQLCipher checks (dev menu) |
 
 ---
@@ -441,6 +444,27 @@ Follows SQLite's documented procedure for schema changes:
   - If a write fails, state is reloaded from storage and a dialog explains
     the change wasn't saved.
   - Covered by Jest **[verified]**.
+- **Search (Phase 2):** `useItemSearch` (debounced 150 ms) calls
+  `ItemRepository.search()` on the active repository: the encrypted database
+  in normal use.
+  - Each search reads the items from the database through the serialized
+    connection.
+  - Matching happens in JS (`src/data/search.ts`), because SQLite's
+    `LIKE`/`lower()` only fold ASCII case and "Š" wouldn't match "š".
+  - Fields searched: notes (title, body); reminders (title, description);
+    cards (name, number, holder, notes); documents (title, issuer, notes, type
+    label, file name).
+  - Results are grouped by type on screen and re-run when stored items change.
+  - A failed search shows an error state, not an empty result.
+- **Categories:** in the approved design the categories *are* the four item
+  types (tabs, Home counts), refined by filter chips (Reminders: Upcoming/Done;
+  Documents: All/Receipts/Warranties/Other). There is no user-defined category
+  field. The rules live in `src/data/organizer.ts`.
+- **Documents (Phase 2):**
+  - every kind can store an expiry date ("Warranty until" for warranties,
+    "Expires on" otherwise), validated to be after the purchase/issue date;
+  - non-purchase kinds label their date "Issue date";
+  - this uses the existing `expires_on` column (no schema change).
 - **Sample data (debug builds):** sample data lives in a separate
   `InMemoryItemRepository`. Switching it on never writes to the database, and
   switching it off reloads stored items **[verified: Jest]**.
@@ -476,7 +500,7 @@ The design keeps backup independent of this device's Keystore:
 
 | Kind | What | Result |
 | --- | --- | --- |
-| Jest (automated) | 66 tests: UUIDv7 (5); migrations incl. foreign-key procedure (14); repository contract + storage details + settings (18); serialized writes (5); database opening, key format, file state, key-lifetime, snapshots incl. failure injection and regressions (20); ItemsProvider (4); App smoke test (1). SQLCipher is emulated by `test-utils/fakeSqlCipher.ts` (real SQLite files; key mismatch → code 26; no-create connections can't `ATTACH` new files, like SQLite) | **66/66 pass** |
+| Jest (automated) | 136 tests in 11 suites. Phase 1/1.1 suites (66) unchanged. Phase 2 adds: repository CRUD of every field for each type, type separation, pinning, ordering, search coverage and order, deletes, database errors and invalid input, on both repository implementations (23 more in `itemRepository.test.ts`, now 40); search matching incl. non-ASCII case (7); organizer filters, sorts, Home overview, document summaries (13); editor validation and normalization (13); **app-level flows** (14) driving the real screens and navigation on the real SQLite repositories via `serializeDatabase` (Home with stored data, all tabs and filter chips, create/edit/delete/pin/complete, validation, failed write, search opens the right item, theme and data persist across a remount) | **136/136 pass** |
 | Android instrumentation (automated, emulator) | `KeyVaultTest` (12) against the real Keystore; `DatabaseFilesTest` (9): present/absent, unreadable location is an error not "absent", no-replace rename, temp-only delete, path rejection | **21/21 pass** |
 | On-device self-test (debug, dev menu → "Run storage self-test") | 21 checks on real SQLCipher: active cipher; correct/wrong/missing key; native file guards; startup; foreign keys ON; failed migration leaves v1 with a verified snapshot; retry reuses it; migration keeps data; snapshot unreadable without key; invalid snapshot kept and a new one used; table rebuild keeps rows; violation rolls back; newer schema refused | **21/21 pass** |
 | Manual upgrade test (emulator) | Data created with the Phase 1 release build (`06b022c`), then the Phase 1.1 debug build installed over it: data, theme and envelope intact; no migration, no snapshot, `trezor.db` unchanged on open; new writes and theme change persisted across restart | As expected |
@@ -547,6 +571,8 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | **Key loss = data loss.** Uninstall, "Clear storage" or Keystore loss make data unrecoverable | By design until encrypted backup exists. The error screen warns against uninstalling |
 | Database key passes through JS (§4.4) | No longer retained by op-sqlite after `open()`; still present until GC in immutable JS/Java/C++ strings that can't be zeroed; never logged |
 | No automatic restore from snapshots; snapshots and crashed-attempt temp files are never cleaned up (audit L7) | Manual-recovery artifacts only. Retention, cleanup and restore belong to the backup phase |
+| Search reads all items per query (debounced), then matches in JS | Fine at personal-organizer scale; a normalized search column or FTS would need a schema change if data grows large |
+| Reminders keep the Phase 0 "Repeat" field as a stored label only | No scheduling or notifications until Phase 3 |
 | Shared connection is serialized; calling the outer database from inside a `transaction()` callback would deadlock | Repositories use only `tx`; documented in `serialDatabase.ts` |
 | StrongBox fallback only on `StrongBoxUnavailableException`; other StrongBox failures make the first launch fail, and software-backed keys are accepted silently (audit L4) | Untested on hardware; review with real devices |
 | op-sqlite enables `load_extension` on every Android connection (audit L6) | Not exploitable with static or parameterized SQL; needs an op-sqlite option or patch |

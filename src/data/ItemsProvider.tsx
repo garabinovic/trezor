@@ -3,6 +3,7 @@ import React, {
   ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,8 @@ interface ItemsContextValue {
   setReminderCompleted: (id: string, completed: boolean) => void;
   writeError: boolean;
   dismissWriteError: () => void;
+  /** Searches the active repository (the encrypted database in normal use). */
+  searchItems: (term: string) => Promise<Item[]>;
 }
 
 const ItemsContext = createContext<ItemsContextValue | null>(null);
@@ -167,6 +170,11 @@ export function ItemsProvider({
 
   const dismissWriteError = useCallback(() => setWriteError(false), []);
 
+  const searchItems = useCallback(
+    (term: string) => activeRepo.current.search(term),
+    [],
+  );
+
   const value = useMemo(
     () => ({
       items,
@@ -178,6 +186,7 @@ export function ItemsProvider({
       setReminderCompleted,
       writeError,
       dismissWriteError,
+      searchItems,
     }),
     [
       items,
@@ -189,6 +198,7 @@ export function ItemsProvider({
       setReminderCompleted,
       writeError,
       dismissWriteError,
+      searchItems,
     ],
   );
 
@@ -221,4 +231,50 @@ export function useItem(id: string | undefined): Item | undefined {
 /** New item id: UUIDv7 with randomness from the platform's secure generator. */
 export function createId(): string {
   return uuidv7(Date.now(), vault.randomBytes(10));
+}
+
+export type SearchState =
+  | { status: 'idle' }
+  | { status: 'searching'; results: Item[] }
+  | { status: 'done'; results: Item[] }
+  | { status: 'error' };
+
+const SEARCH_DELAY_MS = 150;
+
+/**
+ * Debounced search through the repository. Re-runs when stored items change
+ * (e.g. after editing a result), ignores out-of-date responses, and reports
+ * failures instead of showing an empty result.
+ */
+export function useItemSearch(query: string): SearchState {
+  const { searchItems, items } = useItems();
+  const [state, setState] = useState<SearchState>({ status: 'idle' });
+  const term = query.trim();
+
+  useEffect(() => {
+    if (!term) {
+      setState({ status: 'idle' });
+      return;
+    }
+    let current = true;
+    setState(prev => ({
+      status: 'searching',
+      results:
+        prev.status === 'done' || prev.status === 'searching'
+          ? prev.results
+          : [],
+    }));
+    const timer = setTimeout(() => {
+      searchItems(term).then(
+        results => current && setState({ status: 'done', results }),
+        () => current && setState({ status: 'error' }),
+      );
+    }, SEARCH_DELAY_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [term, items, searchItems]);
+
+  return state;
 }

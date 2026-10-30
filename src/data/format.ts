@@ -191,13 +191,11 @@ export function toIsoDate(date: Date): string {
 
 function documentSummary(doc: DocumentItem, now: Date): string {
   const parts = [documentKinds[doc.kind].label];
-  if (doc.kind === 'warranty' && doc.expiresOn) {
-    const expires = parseIsoDate(doc.expiresOn);
-    if (expires) {
-      parts.push(
-        `${expires < now ? 'Expired' : 'Until'} ${formatFullDate(expires)}`,
-      );
-    }
+  const expires = doc.expiresOn ? parseIsoDate(doc.expiresOn) : null;
+  if (expires) {
+    const label =
+      expires < now ? 'Expired' : doc.kind === 'warranty' ? 'Until' : 'Expires';
+    parts.push(`${label} ${formatFullDate(expires)}`);
   } else if (doc.date) {
     const date = parseIsoDate(doc.date);
     if (date) {

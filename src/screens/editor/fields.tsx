@@ -224,20 +224,18 @@ export function DocumentFields({
         placeholder="Optional"
       />
       <DateField
-        label={purchase ? 'Purchase date' : 'Date'}
+        label={purchase ? 'Purchase date' : 'Issue date'}
         value={isoToDate(draft.date)}
         onChange={d => onChange({ date: d ? toIsoDate(d) : null })}
         clearable
       />
-      {draft.kind === 'warranty' && (
-        <DateField
-          label="Warranty until"
-          value={isoToDate(draft.expiresOn)}
-          onChange={d => onChange({ expiresOn: d ? toIsoDate(d) : null })}
-          error={errors.expiresOn}
-          clearable
-        />
-      )}
+      <DateField
+        label={draft.kind === 'warranty' ? 'Warranty until' : 'Expires on'}
+        value={isoToDate(draft.expiresOn)}
+        onChange={d => onChange({ expiresOn: d ? toIsoDate(d) : null })}
+        error={errors.expiresOn}
+        clearable
+      />
       {purchase && (
         <View style={styles.row}>
           <View style={styles.amount}>
