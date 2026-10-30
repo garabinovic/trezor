@@ -1,3 +1,5 @@
+/* eslint-disable no-bitwise -- byte-level UUID layout */
+
 /**
  * UUIDv7 (RFC 9562): 48-bit Unix millisecond timestamp, then 74 random bits.
  * Time-ordered, so ids sort by creation time. `random` must be at least
