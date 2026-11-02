@@ -1,5 +1,6 @@
 // Pure organizer rules shared by screens: per-category filters and sort
 // orders, and the Home overview. Kept out of components so they can be tested.
+import { nextDue } from '../reminders/reminderSchedule';
 import { itemTypes } from './categories';
 import {
   DocumentItem,
@@ -67,11 +68,17 @@ const pinnedFirst = (a: Item, b: Item) => Number(b.pinned) - Number(a.pinned);
 export const sortNotes = (a: Note, b: Note) =>
   pinnedFirst(a, b) || b.updatedAt.localeCompare(a.updatedAt);
 
-/** Open reminders soonest first; completed ones most recently updated first. */
-export const sortReminders = (a: Reminder, b: Reminder) =>
+const dueKey = (r: Reminder, now: number) =>
+  nextDue(r, now) ?? Number.MAX_SAFE_INTEGER;
+
+/**
+ * Open reminders by when they're next due (repeating ones by their next
+ * occurrence); completed ones most recently updated first.
+ */
+export const sortReminders = (a: Reminder, b: Reminder, now = Date.now()) =>
   a.completed && b.completed
     ? b.updatedAt.localeCompare(a.updatedAt)
-    : a.dueAt.localeCompare(b.dueAt);
+    : dueKey(a, now) - dueKey(b, now);
 
 /** Pinned first, then alphabetical. */
 export const sortCards = (a: LoyaltyCard, b: LoyaltyCard) =>
@@ -99,13 +106,16 @@ export interface HomeOverview {
   recent: Item[];
 }
 
-export function buildHomeOverview(items: Item[]): HomeOverview {
+export function buildHomeOverview(
+  items: Item[],
+  now: number = Date.now(),
+): HomeOverview {
   const counts = Object.fromEntries(
     itemTypes.map(t => [t, items.filter(i => i.type === t).length]),
   ) as Record<ItemType, number>;
   const comingUp = items
     .filter((i): i is Reminder => i.type === 'reminder' && !i.completed)
-    .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+    .sort((a, b) => dueKey(a, now) - dueKey(b, now));
   const pinned = items.filter(i => i.pinned);
   const shown = new Set<string>([
     ...comingUp.slice(0, COMING_UP_LIMIT).map(i => i.id),

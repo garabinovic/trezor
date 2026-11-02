@@ -1,3 +1,9 @@
+import {
+  formatLocalDateTime,
+  localDateTimeOf,
+  MAX_INTERVAL_MINUTES,
+  MIN_INTERVAL_MINUTES,
+} from '../reminders/recurrence';
 import { StorageError } from './errors';
 import { SqlDatabase, SqlExecutor } from './sql';
 
@@ -70,6 +76,50 @@ export const migrations: Migration[] = [
       for (const sql of statements) {
         await tx.execute(sql);
       }
+    },
+  },
+  {
+    version: 2,
+    description:
+      'Reminder scheduling: once/daily/weekly/monthly/yearly/interval, local start, interval',
+    async up(tx) {
+      // The repeat CHECK can only change by rebuilding the table (SQLite's
+      // documented procedure; runMigrations turns foreign keys off first).
+      await tx.execute(`CREATE TABLE reminders_v2 (
+        item_id           TEXT PRIMARY KEY NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        due_at            INTEGER NOT NULL,
+        local_start       TEXT NOT NULL CHECK (local_start GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]'),
+        repeat            TEXT NOT NULL CHECK (repeat IN ('once','daily','weekly','monthly','yearly','interval')),
+        interval_minutes  INTEGER CHECK (interval_minutes IS NULL OR interval_minutes BETWEEN ${MIN_INTERVAL_MINUTES} AND ${MAX_INTERVAL_MINUTES}),
+        notes             TEXT NOT NULL DEFAULT '',
+        completed         INTEGER NOT NULL DEFAULT 0 CHECK (completed IN (0,1)),
+        CHECK ((repeat = 'interval') = (interval_minutes IS NOT NULL))
+      ) STRICT`);
+      const rows = await tx.execute(
+        'SELECT item_id, due_at, repeat, notes, completed FROM reminders',
+      );
+      for (const row of rows) {
+        const dueAt = Number(row.due_at);
+        await tx.execute(
+          'INSERT INTO reminders_v2 (item_id, due_at, local_start, repeat, interval_minutes, notes, completed) VALUES (?, ?, ?, ?, NULL, ?, ?)',
+          [
+            String(row.item_id),
+            dueAt,
+            // Existing reminders keep their wall-clock time as seen in the
+            // device's zone at the time of the upgrade.
+            formatLocalDateTime(localDateTimeOf(dueAt)),
+            // 'none' is now called 'once'; every other value is unchanged.
+            row.repeat === 'none' ? 'once' : String(row.repeat),
+            row.notes,
+            row.completed,
+          ],
+        );
+      }
+      await tx.execute('DROP TABLE reminders');
+      await tx.execute('ALTER TABLE reminders_v2 RENAME TO reminders');
+      await tx.execute(
+        'CREATE INDEX reminders_open_due ON reminders (due_at) WHERE completed = 0',
+      );
     },
   },
 ];

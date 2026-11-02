@@ -1,0 +1,64 @@
+# Shared recurrence fixtures: run by Jest (src/reminders/recurrence.ts) and by
+# the Kotlin JVM unit tests (com.trezor.app.reminders.Recurrence). Expected
+# values are hand-computed. Each line:
+#
+#   timeZone | mode | localStart | startAt | intervalMinutes | after | expectedNext
+#
+# localStart: floating local "YYYY-MM-DDTHH:MM" (daily/weekly/monthly/yearly)
+# startAt / after / expectedNext: UTC instants; "-" = not used / no occurrence.
+# Europe/Belgrade 2026: CET (+1) → CEST (+2) on 29 Mar 02:00, back on 25 Oct 03:00.
+# America/New_York 2026: EST (-5) → EDT (-4) on 8 Mar 02:00, back on 1 Nov 02:00.
+
+# DAILY keeps local wall-clock time across DST
+Europe/Belgrade | daily | 2026-01-10T08:30 | - | - | 2026-03-28T12:00:00Z | 2026-03-29T06:30:00Z
+# DAILY: 02:30 does not exist on 29 Mar → next valid time 03:30 CEST
+Europe/Belgrade | daily | 2026-01-10T02:30 | - | - | 2026-03-28T23:00:00Z | 2026-03-29T01:30:00Z
+# DAILY: 02:30 occurs twice on 25 Oct → fires once, at the first (CEST)
+Europe/Belgrade | daily | 2026-01-10T02:30 | - | - | 2026-10-24T23:00:00Z | 2026-10-25T00:30:00Z
+Europe/Belgrade | daily | 2026-01-10T02:30 | - | - | 2026-10-25T00:30:00Z | 2026-10-26T01:30:00Z
+# DAILY crossing the year end
+Europe/Belgrade | daily | 2026-12-01T00:15 | - | - | 2026-12-31T23:20:00Z | 2027-01-01T23:15:00Z
+# DAILY in New York across its DST start, incl. a non-existent time
+America/New_York | daily | 2026-03-01T08:30 | - | - | 2026-03-07T14:00:00Z | 2026-03-08T12:30:00Z
+America/New_York | daily | 2026-03-01T02:15 | - | - | 2026-03-08T05:00:00Z | 2026-03-08T07:15:00Z
+# Time-zone change: the same 08:30 follows the device's current zone
+Europe/London | daily | 2026-10-01T08:30 | - | - | 2026-11-02T00:00:00Z | 2026-11-02T08:30:00Z
+Europe/Belgrade | daily | 2026-10-01T08:30 | - | - | 2026-11-02T00:00:00Z | 2026-11-02T07:30:00Z
+# A start in the future is the first occurrence
+Europe/Belgrade | daily | 2026-11-20T08:30 | - | - | 2026-11-02T00:00:00Z | 2026-11-20T07:30:00Z
+# Missed days: no burst, only the next future occurrence
+Europe/Belgrade | daily | 2026-01-10T08:30 | - | - | 2026-11-02T10:00:00Z | 2026-11-03T07:30:00Z
+
+# WEEKLY keeps the weekday (2 Nov 2026 is a Monday)
+Europe/Belgrade | weekly | 2026-11-02T09:00 | - | - | 2026-11-04T10:00:00Z | 2026-11-09T08:00:00Z
+Europe/Belgrade | weekly | 2026-11-09T09:00 | - | - | 2026-11-02T00:00:00Z | 2026-11-09T08:00:00Z
+# WEEKLY across DST end: 09:00 CEST one week, 09:00 CET the next
+Europe/Belgrade | weekly | 2026-10-19T09:00 | - | - | 2026-10-20T00:00:00Z | 2026-10-26T08:00:00Z
+
+# MONTHLY on the 31st → last valid day of shorter months
+Europe/Belgrade | monthly | 2026-01-31T10:00 | - | - | 2026-02-01T00:00:00Z | 2026-02-28T09:00:00Z
+Europe/Belgrade | monthly | 2026-01-31T10:00 | - | - | 2026-02-28T09:00:00Z | 2026-03-31T08:00:00Z
+Europe/Belgrade | monthly | 2026-01-31T10:00 | - | - | 2026-04-01T00:00:00Z | 2026-04-30T08:00:00Z
+# MONTHLY across the year end
+Europe/Belgrade | monthly | 2026-12-15T09:00 | - | - | 2026-12-20T00:00:00Z | 2027-01-15T08:00:00Z
+
+# YEARLY on 29 Feb → 28 Feb in non-leap years, 29 Feb in leap years
+Europe/Belgrade | yearly | 2024-02-29T12:00 | - | - | 2026-01-01T00:00:00Z | 2026-02-28T11:00:00Z
+Europe/Belgrade | yearly | 2024-02-29T12:00 | - | - | 2027-12-31T00:00:00Z | 2028-02-29T11:00:00Z
+# YEARLY at the year end
+Europe/Belgrade | yearly | 2025-12-31T23:30 | - | - | 2026-12-31T22:00:00Z | 2026-12-31T22:30:00Z
+Europe/Belgrade | yearly | 2025-12-31T23:30 | - | - | 2026-12-31T22:30:00Z | 2027-12-31T22:30:00Z
+
+# ONCE: the instant itself, only if still in the future
+Europe/Belgrade | once | - | 2026-11-03T10:00:00Z | - | 2026-11-02T00:00:00Z | 2026-11-03T10:00:00Z
+Europe/Belgrade | once | - | 2026-11-03T10:00:00Z | - | 2026-11-04T00:00:00Z | -
+Europe/Belgrade | once | - | 2026-11-03T10:00:00Z | - | 2026-11-03T10:00:00Z | -
+
+# INTERVAL: elapsed time from the anchor; missed slots keep the rhythm
+Europe/Belgrade | interval | - | 2026-11-02T08:00:00Z | 240 | 2026-11-02T09:00:00Z | 2026-11-02T12:00:00Z
+Europe/Belgrade | interval | - | 2026-11-02T08:00:00Z | 240 | 2026-11-02T12:00:00Z | 2026-11-02T16:00:00Z
+Europe/Belgrade | interval | - | 2026-11-02T08:00:00Z | 240 | 2026-11-05T13:59:00Z | 2026-11-05T16:00:00Z
+Europe/Belgrade | interval | - | 2026-11-02T08:00:00Z | 240 | 2026-11-01T00:00:00Z | 2026-11-02T08:00:00Z
+# INTERVAL ignores DST and zone: hourly stays hourly through the 25 Oct overlap
+Europe/Belgrade | interval | - | 2026-10-24T22:00:00Z | 60 | 2026-10-25T00:30:00Z | 2026-10-25T01:00:00Z
+America/New_York | interval | - | 2026-10-24T22:00:00Z | 60 | 2026-10-25T00:30:00Z | 2026-10-25T01:00:00Z

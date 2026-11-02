@@ -53,7 +53,8 @@ export class SqliteItemRepository implements ItemRepository {
          FROM items i JOIN notes d ON d.item_id = i.id`,
       ),
       this.db.execute(
-        `SELECT ${ITEM_COLUMNS}, d.due_at, d.repeat, d.notes, d.completed
+        `SELECT ${ITEM_COLUMNS}, d.due_at, d.local_start, d.repeat,
+                d.interval_minutes, d.notes, d.completed
          FROM items i JOIN reminders d ON d.item_id = i.id`,
       ),
       this.db.execute(
@@ -76,7 +77,10 @@ export class SqliteItemRepository implements ItemRepository {
           ...base(r),
           type: 'reminder',
           dueAt: toIso(r.due_at),
+          localStart: str(r.local_start),
           repeat: str(r.repeat) as ReminderRepeat,
+          intervalMinutes:
+            r.interval_minutes == null ? null : Number(r.interval_minutes),
           notes: str(r.notes),
           completed: bool(r.completed),
         }),
@@ -172,15 +176,19 @@ function saveDetail(tx: SqlExecutor, item: Item) {
       );
     case 'reminder':
       return tx.execute(
-        `INSERT INTO reminders (item_id, due_at, repeat, notes, completed)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO reminders
+           (item_id, due_at, local_start, repeat, interval_minutes, notes, completed)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (item_id) DO UPDATE SET
-           due_at = excluded.due_at, repeat = excluded.repeat,
+           due_at = excluded.due_at, local_start = excluded.local_start,
+           repeat = excluded.repeat, interval_minutes = excluded.interval_minutes,
            notes = excluded.notes, completed = excluded.completed`,
         [
           item.id,
           toMs(item.dueAt),
+          item.localStart,
           item.repeat,
+          item.repeat === 'interval' ? item.intervalMinutes : null,
           item.notes,
           item.completed ? 1 : 0,
         ],

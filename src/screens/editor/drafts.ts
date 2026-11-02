@@ -1,4 +1,5 @@
 import { createId, Item, ItemType } from '../../data';
+import { INTERVAL_PRESETS, withStart } from '../../reminders/reminderSchedule';
 
 export type FieldErrors = Partial<Record<string, string>>;
 
@@ -22,14 +23,19 @@ export function createBlankItem(type: ItemType): Item {
     case 'note':
       return { ...base, type, body: '' };
     case 'reminder':
-      return {
-        ...base,
-        type,
-        dueAt: tomorrowAtNine(),
-        repeat: 'none',
-        notes: '',
-        completed: false,
-      };
+      return withStart(
+        {
+          ...base,
+          type,
+          dueAt: '',
+          localStart: '',
+          repeat: 'once',
+          intervalMinutes: null,
+          notes: '',
+          completed: false,
+        },
+        Date.parse(tomorrowAtNine()),
+      );
     case 'card':
       return {
         ...base,
@@ -55,11 +61,39 @@ export function createBlankItem(type: ItemType): Item {
   }
 }
 
-export function validate(item: Item): FieldErrors {
+/**
+ * `original` is the stored version when editing. An active one-time reminder
+ * needs a future time when it is created, retimed, switched to "once" or
+ * reactivated; editing only the text of an overdue one is still allowed.
+ */
+export function validate(
+  item: Item,
+  original?: Item,
+  now: number = Date.now(),
+): FieldErrors {
   const errors: FieldErrors = {};
   if (!item.title.trim()) {
     errors.title =
       item.type === 'card' ? 'Enter the store or card name.' : 'Enter a title.';
+  }
+  if (item.type === 'reminder' && !item.completed) {
+    const retimed =
+      !original ||
+      original.type !== 'reminder' ||
+      original.dueAt !== item.dueAt ||
+      original.repeat !== item.repeat ||
+      original.completed;
+    if (item.repeat === 'once' && retimed && Date.parse(item.dueAt) <= now) {
+      errors.dueAt = 'Choose a time in the future.';
+    }
+    if (
+      item.repeat === 'interval' &&
+      !INTERVAL_PRESETS.includes(
+        item.intervalMinutes as (typeof INTERVAL_PRESETS)[number],
+      )
+    ) {
+      errors.intervalMinutes = 'Choose how often to repeat.';
+    }
   }
   if (item.type === 'card' && !item.cardNumber.trim()) {
     errors.cardNumber = 'Enter the card number.';
@@ -86,7 +120,12 @@ export function normalize(item: Item): Item {
     case 'note':
       return { ...trimmed, body: trimmed.body.trim() };
     case 'reminder':
-      return { ...trimmed, notes: trimmed.notes.trim() };
+      return {
+        ...trimmed,
+        notes: trimmed.notes.trim(),
+        intervalMinutes:
+          trimmed.repeat === 'interval' ? trimmed.intervalMinutes : null,
+      };
     case 'card':
       return {
         ...trimmed,

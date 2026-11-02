@@ -160,8 +160,9 @@ class FakeDb {
     let copied = 0;
     for (const o of objects) {
       const ddl = String(o.sql).replace(
-        new RegExp(`^CREATE (TABLE|INDEX) ${o.name}`),
-        `CREATE $1 ${alias}.${o.name}`,
+        // Renamed tables are stored with a quoted name: CREATE TABLE "x" (…)
+        new RegExp(`^CREATE (TABLE|INDEX) ("?)${o.name}\\2`),
+        `CREATE $1 ${alias}.$2${o.name}$2`,
       );
       this.handle.exec(ddl);
       if (o.type === 'table') {

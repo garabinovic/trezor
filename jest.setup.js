@@ -11,3 +11,9 @@ jest.mock('./src/native/NativeTrezorVault', () => ({
     getMasterKeySecurityLevel: jest.fn(),
   },
 }));
+
+// The reminder scheduler is native-only; tests inspect a recording fake.
+jest.mock('./src/native/NativeTrezorReminders', () => ({
+  __esModule: true,
+  default: require('./test-utils/fakeReminders').fakeReminders.module,
+}));

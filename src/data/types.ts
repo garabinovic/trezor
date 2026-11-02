@@ -1,3 +1,5 @@
+import type { RecurrenceMode } from '../reminders/recurrence';
+
 export type ItemType = 'note' | 'reminder' | 'card' | 'document';
 
 interface BaseItem {
@@ -15,13 +17,24 @@ export interface Note extends BaseItem {
   body: string;
 }
 
-export type ReminderRepeat = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type ReminderRepeat = RecurrenceMode;
 
 export interface Reminder extends BaseItem {
   type: 'reminder';
-  /** ISO 8601 */
+  /**
+   * ISO 8601 instant. ONCE: when it fires. INTERVAL: the first occurrence
+   * (anchor). Calendar modes: the start, as an instant at the time of saving.
+   */
   dueAt: string;
+  /**
+   * Floating local start "YYYY-MM-DDTHH:MM". Calendar modes take their time,
+   * weekday and day from it, in the device's current zone.
+   */
+  localStart: string;
   repeat: ReminderRepeat;
+  /** INTERVAL only (minutes); null otherwise. */
+  intervalMinutes: number | null;
+  /** Description. */
   notes: string;
   completed: boolean;
 }

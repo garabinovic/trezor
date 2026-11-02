@@ -111,3 +111,75 @@ describe('normalize', () => {
     );
   });
 });
+
+describe('reminder validation', () => {
+  const NOW = Date.parse('2026-11-02T10:00:00.000Z');
+  const base = {
+    ...createBlankItem('reminder'),
+    title: 'R',
+  } as Item & { type: 'reminder' };
+  const at = (iso: string) => ({ dueAt: iso });
+
+  test('a new one-time reminder needs a future time', () => {
+    expect(
+      validate({ ...base, ...at('2026-11-02T09:00:00.000Z') }, undefined, NOW)
+        .dueAt,
+    ).toBe('Choose a time in the future.');
+    expect(
+      validate({ ...base, ...at('2026-11-02T11:00:00.000Z') }, undefined, NOW),
+    ).toEqual({});
+  });
+
+  test('editing only the text of an overdue reminder is allowed', () => {
+    const overdue = { ...base, ...at('2026-11-01T09:00:00.000Z') };
+    expect(validate({ ...overdue, notes: 'x' }, overdue, NOW)).toEqual({});
+    // Retiming, switching to once or reactivating requires a future time.
+    expect(
+      validate({ ...overdue, dueAt: '2026-11-01T08:00:00.000Z' }, overdue, NOW)
+        .dueAt,
+    ).toBeDefined();
+    expect(
+      validate(overdue, { ...overdue, repeat: 'daily' }, NOW).dueAt,
+    ).toBeDefined();
+    expect(
+      validate(overdue, { ...overdue, completed: true }, NOW).dueAt,
+    ).toBeDefined();
+  });
+
+  test('repeating reminders may start in the past; completed ones are not checked', () => {
+    const past = at('2026-10-01T09:00:00.000Z');
+    expect(
+      validate({ ...base, ...past, repeat: 'daily' }, undefined, NOW),
+    ).toEqual({});
+    expect(
+      validate({ ...base, ...past, completed: true }, undefined, NOW),
+    ).toEqual({});
+  });
+
+  test('interval must be one of the offered choices', () => {
+    const future = at('2026-11-03T09:00:00.000Z');
+    for (const minutes of [60, 120, 240, 480, 720]) {
+      expect(
+        validate(
+          { ...base, ...future, repeat: 'interval', intervalMinutes: minutes },
+          undefined,
+          NOW,
+        ),
+      ).toEqual({});
+    }
+    for (const minutes of [null, 15, 90, 1440]) {
+      expect(
+        validate(
+          { ...base, ...future, repeat: 'interval', intervalMinutes: minutes },
+          undefined,
+          NOW,
+        ).intervalMinutes,
+      ).toBe('Choose how often to repeat.');
+    }
+  });
+
+  test('normalize clears the interval for non-interval reminders', () => {
+    const out = normalize({ ...base, repeat: 'daily', intervalMinutes: 240 });
+    expect((out as typeof base).intervalMinutes).toBeNull();
+  });
+});

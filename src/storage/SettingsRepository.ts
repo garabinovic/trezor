@@ -4,6 +4,10 @@ import { SqlDatabase } from './sql';
 /** Persistent settings and their value types. Add keys here as settings grow. */
 export interface SettingValues {
   'theme.preference': 'system' | 'light' | 'dark';
+  /** Show reminder titles and descriptions in notifications. Default: false. */
+  'notifications.showDetails': boolean;
+  /** The notification permission prompt was already shown once. */
+  'notifications.permissionRequested': boolean;
 }
 
 export type SettingKey = keyof SettingValues;

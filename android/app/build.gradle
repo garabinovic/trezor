@@ -118,6 +118,9 @@ dependencies {
         implementation jscFlavor
     }
 
+    // JVM unit tests (recurrence rules); not in the app.
+    testImplementation("junit:junit:4.13.2")
+
     // On-device tests for the Keystore vault (androidTest only; not in the app).
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

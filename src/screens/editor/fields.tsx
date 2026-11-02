@@ -15,12 +15,20 @@ import {
   documentKinds,
   ItemOfType,
   ItemType,
+  formatDate,
+  formatTime,
   parseIsoDate,
+  Reminder,
   ReminderRepeat,
   toIsoDate,
 } from '../../data';
 import { spacing } from '../../theme';
 import { FieldErrors } from './drafts';
+import {
+  INTERVAL_PRESETS,
+  intervalLabel,
+  withStart,
+} from '../../reminders/reminderSchedule';
 
 export interface FieldsProps<T extends ItemType> {
   draft: ItemOfType<T>;
@@ -52,12 +60,62 @@ export function NoteFields({ draft, onChange, errors }: FieldsProps<'note'>) {
 }
 
 const repeatOptions: ChipOption<ReminderRepeat>[] = [
-  { value: 'none', label: 'Never' },
+  { value: 'once', label: 'Once' },
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
+  { value: 'interval', label: 'Interval' },
 ];
+
+const intervalOptions: ChipOption<string>[] = INTERVAL_PRESETS.map(m => ({
+  value: String(m),
+  label: m === 60 ? '1 hour' : `${m / 60} hours`,
+}));
+
+const DEFAULT_INTERVAL = 240;
+
+const WEEKDAYS = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+
+/** One plain sentence describing when notifications will come. */
+export function scheduleHint(reminder: Reminder): string {
+  const due = new Date(reminder.dueAt);
+  const time = formatTime(due);
+  const day = due.getDate();
+  switch (reminder.repeat) {
+    case 'once':
+      return 'Notifies once at this time.';
+    case 'daily':
+      return `Notifies every day at ${time}.`;
+    case 'weekly':
+      return `Notifies every ${WEEKDAYS[due.getDay()]} at ${time}.`;
+    case 'monthly':
+      return `Notifies on day ${day} of every month at ${time}.${
+        day > 28 ? ' In shorter months, on the last day.' : ''
+      }`;
+    case 'yearly':
+      return `Notifies every year on ${formatDate(due, new Date(0)).replace(
+        / \d{4}$/,
+        '',
+      )} at ${time}.${
+        due.getMonth() === 1 && day === 29
+          ? ' In other years, on 28 February.'
+          : ''
+      }`;
+    case 'interval':
+      return `Notifies ${intervalLabel(
+        reminder.intervalMinutes ?? DEFAULT_INTERVAL,
+      ).toLowerCase()}, starting at the date and time above.`;
+  }
+}
 
 export function ReminderFields({
   draft,
@@ -66,22 +124,33 @@ export function ReminderFields({
 }: FieldsProps<'reminder'>) {
   const due = new Date(draft.dueAt);
 
+  // Date and time update the instant and the floating local start together.
+  const setStart = (next: Date) => {
+    const { dueAt, localStart } = withStart(draft, next.getTime());
+    onChange({ dueAt, localStart });
+  };
   const setDate = (date: Date | null) => {
-    if (!date) {
-      return;
+    if (date) {
+      const next = new Date(due);
+      next.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+      setStart(next);
     }
-    const next = new Date(due);
-    next.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
-    onChange({ dueAt: next.toISOString() });
   };
   const setTime = (time: Date | null) => {
-    if (!time) {
-      return;
+    if (time) {
+      const next = new Date(due);
+      next.setHours(time.getHours(), time.getMinutes(), 0, 0);
+      setStart(next);
     }
-    const next = new Date(due);
-    next.setHours(time.getHours(), time.getMinutes(), 0, 0);
-    onChange({ dueAt: next.toISOString() });
   };
+  const setRepeat = (repeat: ReminderRepeat) =>
+    onChange({
+      repeat,
+      intervalMinutes:
+        repeat === 'interval'
+          ? draft.intervalMinutes ?? DEFAULT_INTERVAL
+          : null,
+    });
 
   return (
     <>
@@ -94,7 +163,12 @@ export function ReminderFields({
         autoFocus={!draft.title}
       />
       <View style={styles.row}>
-        <DateField label="Date" value={due} onChange={setDate} />
+        <DateField
+          label="Date"
+          value={due}
+          onChange={setDate}
+          error={errors.dueAt}
+        />
         <DateField label="Time" mode="time" value={due} onChange={setTime} />
       </View>
       <FieldGroup label="Repeat">
@@ -102,10 +176,24 @@ export function ReminderFields({
           label="Repeat"
           options={repeatOptions}
           value={draft.repeat}
-          onChange={repeat => onChange({ repeat })}
+          onChange={setRepeat}
           inset={false}
         />
       </FieldGroup>
+      {draft.repeat === 'interval' && (
+        <FieldGroup label="Every">
+          <ChipGroup
+            label="Interval"
+            options={intervalOptions}
+            value={String(draft.intervalMinutes ?? DEFAULT_INTERVAL)}
+            onChange={value => onChange({ intervalMinutes: Number(value) })}
+            inset={false}
+          />
+        </FieldGroup>
+      )}
+      <Text variant="caption" color="textSecondary">
+        {scheduleHint(draft)}
+      </Text>
       <TextField
         label="Notes"
         value={draft.notes}
@@ -114,8 +202,8 @@ export function ReminderFields({
         multiline
       />
       <Text variant="caption" color="textTertiary">
-        Notifications are not available yet. Reminders are shown in the app
-        only.
+        Notifications may arrive up to 10 minutes late, or up to an hour when
+        the phone is idle, as Android saves battery.
       </Text>
     </>
   );

@@ -34,6 +34,13 @@ interface ItemsContextValue {
   dismissWriteError: () => void;
   /** Searches the active repository (the encrypted database in normal use). */
   searchItems: (term: string) => Promise<Item[]>;
+  /**
+   * Reads the user's stored items from the database after pending writes.
+   * Always the real repository, never development sample data.
+   */
+  readStored: () => Promise<Item[]>;
+  /** Marks stored reminders completed (fired ONCE reminders). */
+  completeStoredReminders: (ids: string[]) => Promise<void>;
 }
 
 const ItemsContext = createContext<ItemsContextValue | null>(null);
@@ -175,6 +182,46 @@ export function ItemsProvider({
     [],
   );
 
+  /** Runs after every queued write, on the real repository. */
+  const onStored = useCallback(
+    <R,>(op: (repo: ItemRepository) => Promise<R>): Promise<R> => {
+      const result = writeQueue.current.then(() => op(repository));
+      writeQueue.current = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+    [repository],
+  );
+
+  const readStored = useCallback(
+    () => onStored(repo => repo.listAll()),
+    [onStored],
+  );
+
+  const completeStoredReminders = useCallback(
+    async (ids: string[]) => {
+      const wanted = new Set(ids);
+      const updatedAt = new Date().toISOString();
+      await onStored(async repo => {
+        for (const item of await repo.listAll()) {
+          if (
+            item.type === 'reminder' &&
+            wanted.has(item.id) &&
+            !item.completed
+          ) {
+            await repo.save({ ...item, completed: true, updatedAt });
+          }
+        }
+      });
+      if (activeRepo.current === repository) {
+        setItems(await readStored());
+      }
+    },
+    [onStored, readStored, repository, setItems],
+  );
+
   const value = useMemo(
     () => ({
       items,
@@ -187,6 +234,8 @@ export function ItemsProvider({
       writeError,
       dismissWriteError,
       searchItems,
+      readStored,
+      completeStoredReminders,
     }),
     [
       items,
@@ -199,6 +248,8 @@ export function ItemsProvider({
       writeError,
       dismissWriteError,
       searchItems,
+      readStored,
+      completeStoredReminders,
     ],
   );
 

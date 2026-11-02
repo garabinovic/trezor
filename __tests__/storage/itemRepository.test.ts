@@ -123,6 +123,8 @@ describe('SqliteItemRepository storage details', () => {
     const bad = {
       ...createSampleItems(NOW).find(i => i.type === 'reminder')!,
       dueAt: 'not a date',
+      localStart: '2026-11-02T10:00',
+      intervalMinutes: null,
     };
     await expect(repo.save(bad)).rejects.toMatchObject({
       code: 'WRITE_FAILED',
@@ -180,7 +182,9 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
       type: 'reminder',
       title: 'Reminder',
       dueAt: '2026-11-02T09:30:00.000Z',
-      repeat: 'none',
+      localStart: '2026-11-02T10:30',
+      intervalMinutes: null,
+      repeat: 'once',
       notes: 'desc',
       completed: false,
       pinned: false,
@@ -192,6 +196,8 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
       type: 'reminder',
       title: 'Reminder edited',
       dueAt: '2026-12-24T18:45:00.000Z',
+      localStart: '2026-12-24T19:45',
+      intervalMinutes: null,
       repeat: 'yearly',
       notes: 'new desc',
       completed: true,
@@ -396,5 +402,55 @@ describe('SqliteItemRepository persistence and errors', () => {
     });
     expect(await db.execute('SELECT * FROM items')).toEqual([]);
     expect(await db.execute('SELECT * FROM cards')).toEqual([]);
+  });
+});
+
+describe.each(implementations)(
+  '%s reminder scheduling fields',
+  (_name, create) => {
+    test.each([
+      'once',
+      'daily',
+      'weekly',
+      'monthly',
+      'yearly',
+      'interval',
+    ] as const)(
+      '%s round-trips with its local start, interval and completion',
+      async repeat => {
+        const repo = await create();
+        const r: Item = {
+          id: `r-${repeat}`,
+          type: 'reminder',
+          title: 'R',
+          dueAt: '2026-11-02T07:30:00.000Z',
+          localStart: '2026-11-02T08:30',
+          repeat,
+          intervalMinutes: repeat === 'interval' ? 120 : null,
+          notes: 'd',
+          completed: false,
+          pinned: false,
+          createdAt: T0,
+          updatedAt: T0,
+        };
+        await repo.save(r);
+        expect(await repo.listAll()).toEqual([r]);
+        await repo.save({ ...r, completed: true, updatedAt: T1 });
+        expect((await repo.listAll())[0]).toMatchObject({ completed: true });
+      },
+    );
+  },
+);
+
+describe('settings for notifications', () => {
+  test('privacy and permission flags persist in SQLite', async () => {
+    const { db } = await sqliteRepo();
+    const settings = new SqliteSettingsRepository(db);
+    expect(await settings.get('notifications.showDetails')).toBeNull();
+    await settings.set('notifications.showDetails', true);
+    await settings.set('notifications.permissionRequested', true);
+    const reopened = new SqliteSettingsRepository(db);
+    expect(await reopened.get('notifications.showDetails')).toBe(true);
+    expect(await reopened.get('notifications.permissionRequested')).toBe(true);
   });
 });

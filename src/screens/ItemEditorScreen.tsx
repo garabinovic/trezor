@@ -6,6 +6,7 @@ import { X } from 'lucide-react-native';
 import { BarHeader, Button, Dialog, Screen } from '../components';
 import { categories, Item, useItem, useItems } from '../data';
 import { RootStackParamList } from '../navigation/types';
+import { useReminders } from '../reminders/RemindersProvider';
 import { gutter, spacing } from '../theme';
 import {
   createBlankItem,
@@ -26,6 +27,7 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   const { type, id } = route.params;
   const existing = useItem(id);
   const { saveItem } = useItems();
+  const { requestPermissionIfNeeded } = useReminders();
 
   const initial = useMemo(
     () => existing ?? createBlankItem(type),
@@ -59,12 +61,16 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   };
 
   const save = () => {
-    const nextErrors = validate(draft);
+    const nextErrors = validate(draft, existing);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
     saveItem(normalize(draft));
+    if (draft.type === 'reminder' && !draft.completed) {
+      // Explains and asks for notification permission the first time only.
+      requestPermissionIfNeeded();
+    }
     setSaved(true);
   };
 

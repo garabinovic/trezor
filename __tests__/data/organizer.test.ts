@@ -12,6 +12,7 @@ import {
   sortReminders,
 } from '../../src/data/organizer';
 import { createSampleItems } from '../../src/data/sampleData';
+import { nextDue } from '../../src/reminders/reminderSchedule';
 import type {
   DocumentItem,
   Item,
@@ -66,10 +67,18 @@ describe('sorting', () => {
     expect(rest).toEqual([...rest].sort().reverse());
   });
 
-  test('reminders: open by due date; completed after, newest first', () => {
-    const sorted = [...ofType('reminder')].sort(sortReminders) as Reminder[];
-    const open = sorted.filter(r => !r.completed).map(r => r.dueAt);
-    expect(open).toEqual([...open].sort());
+  test('reminders: open by next due (repeating ones by next occurrence)', () => {
+    const now = NOW.getTime();
+    const sorted = [...ofType('reminder')].sort((a, b) =>
+      sortReminders(a as Reminder, b as Reminder, now),
+    ) as Reminder[];
+    const open = sorted
+      .filter(r => !r.completed)
+      .map(r => nextDue(r, now) as number);
+    expect(open).toEqual([...open].sort((a, b) => a - b));
+    // The monthly bill was due yesterday; it now sorts by next month.
+    const bill = sorted.find(r => r.id === 'r1')!;
+    expect(nextDue(bill, now)! > now).toBe(true);
   });
 
   test('cards: pinned first, then alphabetical', () => {
@@ -102,12 +111,12 @@ describe('Home overview', () => {
     });
   });
 
-  test('coming up lists open reminders soonest first', () => {
-    const { comingUp } = buildHomeOverview(all);
+  test('coming up lists open reminders by next due, soonest first', () => {
+    const now = NOW.getTime();
+    const { comingUp } = buildHomeOverview(all, now);
     expect(comingUp.every(r => !r.completed)).toBe(true);
-    expect(comingUp.map(r => r.dueAt)).toEqual(
-      comingUp.map(r => r.dueAt).sort(),
-    );
+    const due = comingUp.map(r => nextDue(r, now) as number);
+    expect(due).toEqual([...due].sort((a, b) => a - b));
   });
 
   test('pinned and recent sections do not repeat items', () => {

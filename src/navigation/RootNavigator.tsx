@@ -1,12 +1,14 @@
-import React, { useMemo } from 'react';
-import { StatusBar } from 'react-native';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { AppState, StatusBar } from 'react-native';
 import {
   DarkTheme,
   DefaultTheme,
   NavigationContainer,
+  useNavigationContainerRef,
   Theme as NavigationTheme,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useReminders } from '../reminders/RemindersProvider';
 import { useTheme } from '../theme';
 import { ItemDetailScreen } from '../screens/ItemDetailScreen';
 import { ItemEditorScreen } from '../screens/ItemEditorScreen';
@@ -20,6 +22,35 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export function RootNavigator() {
   const theme = useTheme();
   const { colors } = theme;
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const { platform } = useReminders();
+
+  // A tapped reminder notification opens that reminder's detail screen, whether
+  // the app was closed (pending tap read on ready), in the background
+  // (foreground event) or already open (tap event). Unknown ids show the
+  // existing "Item not found" state; nothing is recreated.
+  const openTappedReminder = useCallback(() => {
+    if (!navigationRef.isReady()) {
+      return;
+    }
+    const id = platform.consumePendingTap();
+    if (id) {
+      navigationRef.navigate('ItemDetail', { id });
+    }
+  }, [navigationRef, platform]);
+
+  useEffect(() => {
+    const unsubscribe = platform.onTap(openTappedReminder);
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        openTappedReminder();
+      }
+    });
+    return () => {
+      unsubscribe();
+      subscription.remove();
+    };
+  }, [platform, openTappedReminder]);
 
   const navigationTheme = useMemo<NavigationTheme>(() => {
     const base = theme.scheme === 'dark' ? DarkTheme : DefaultTheme;
@@ -38,7 +69,11 @@ export function RootNavigator() {
   }, [theme.scheme, colors]);
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navigationTheme}
+      onReady={openTappedReminder}
+    >
       <StatusBar
         barStyle={theme.scheme === 'dark' ? 'light-content' : 'dark-content'}
       />

@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet, Switch, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  Bell,
+  BellOff,
   Download,
   Fingerprint,
   FlaskConical,
@@ -21,6 +23,7 @@ import {
 } from '../components';
 import { useItems } from '../data';
 import { RootStackParamList } from '../navigation/types';
+import { useReminders } from '../reminders/RemindersProvider';
 import {
   spacing,
   ThemePreference,
@@ -40,6 +43,13 @@ const NOT_AVAILABLE = 'Not available yet';
 
 export function SettingsScreen({ navigation }: Props) {
   const { colors, scheme } = useTheme();
+  const {
+    showDetails,
+    setShowDetails,
+    notificationsEnabled,
+    openSystemSettings,
+    scheduleFailed,
+  } = useReminders();
   const { preference, setPreference } = useThemePreference();
   const { sampleDataEnabled, setSampleDataEnabled } = useItems();
 
@@ -53,6 +63,45 @@ export function SettingsScreen({ navigation }: Props) {
             value={preference}
             onChange={setPreference}
           />
+        </Section>
+
+        <Section
+          title="Notification privacy"
+          grouped
+          footer={
+            scheduleFailed
+              ? 'Reminders couldn’t be scheduled just now. Trezor will try again automatically.'
+              : 'Android’s own notification and lock-screen settings always apply.'
+          }
+        >
+          <ListItem
+            icon={Bell}
+            title="Show reminder details"
+            subtitle="Allow reminder titles and descriptions to appear in notifications."
+            subtitleLines={3}
+            trailing={
+              <Switch
+                accessibilityLabel="Show reminder details"
+                value={showDetails}
+                onValueChange={setShowDetails}
+                trackColor={{
+                  false: colors.borderStrong,
+                  true: colors.accent,
+                }}
+                thumbColor={scheme === 'dark' ? colors.text : colors.surface}
+              />
+            }
+          />
+          {notificationsEnabled === false && (
+            <ListItem
+              icon={BellOff}
+              title="Notifications are off"
+              subtitle="Turn them on in Android settings to receive reminders."
+              subtitleLines={2}
+              chevron
+              onPress={openSystemSettings}
+            />
+          )}
         </Section>
 
         <Section

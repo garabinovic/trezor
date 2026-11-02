@@ -3,6 +3,7 @@ import { DevSettings, StyleSheet, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ItemsProvider } from './data';
 import { RootNavigator } from './navigation/RootNavigator';
+import { RemindersProvider } from './reminders/RemindersProvider';
 import { StorageErrorScreen } from './screens/StorageErrorScreen';
 import { WriteErrorDialog } from './screens/shared/WriteErrorDialog';
 import type { OpenedStorage } from './storage/openStorage';
@@ -63,8 +64,14 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
         repository={storage.items}
         initialItems={storage.initialItems}
       >
-        <RootNavigator />
-        <WriteErrorDialog />
+        <RemindersProvider
+          settings={storage.settings}
+          initialShowDetails={storage.initialShowReminderDetails}
+          initialPermissionRequested={storage.initialPermissionRequested}
+        >
+          <RootNavigator />
+          <WriteErrorDialog />
+        </RemindersProvider>
       </ItemsProvider>
     </ThemeProvider>
   );

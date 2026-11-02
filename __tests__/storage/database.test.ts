@@ -74,10 +74,20 @@ jest.mock('../../src/native/NativeTrezorDatabaseFiles', () => {
 // Imported after the mocks.
 import NativeTrezorVault from '../../src/native/NativeTrezorVault';
 import { openTrezorDatabase } from '../../src/storage/database';
-import { Migration, migrations } from '../../src/storage/migrations';
+import {
+  LATEST_SCHEMA_VERSION,
+  Migration,
+  migrations,
+} from '../../src/storage/migrations';
+
+// Tests add one migration on top of the real ones, whatever the latest is.
+const CURRENT = LATEST_SCHEMA_VERSION;
+const NEXT = LATEST_SCHEMA_VERSION + 1;
+const SNAP = `trezor.pre-migration-v${LATEST_SCHEMA_VERSION}.db`;
+const SNAP2 = `trezor.pre-migration-v${LATEST_SCHEMA_VERSION}.2.db`;
 
 const v2: Migration = {
-  version: 2,
+  version: NEXT,
   description: 'test: add a column',
   async up(tx) {
     await tx.execute(
@@ -86,7 +96,7 @@ const v2: Migration = {
   },
 };
 const failingV2: Migration = {
-  version: 2,
+  version: NEXT,
   description: 'test: fails',
   async up(tx) {
     await tx.execute('ALTER TABLE notes ADD COLUMN format TEXT');
@@ -94,7 +104,7 @@ const failingV2: Migration = {
   },
 };
 
-async function seedV1() {
+async function seedCurrent() {
   const { db } = await openTrezorDatabase();
   await db.execute(
     "INSERT INTO items VALUES ('n1', 'note', 'Kept', 0, 1, 1), ('c1', 'card', 'Card', 1, 2, 2)",
@@ -123,7 +133,7 @@ describe('opening', () => {
   test('first launch creates the key and the database; foreign keys end up ON', async () => {
     const { db, created, schemaVersion, snapshot } = await openTrezorDatabase();
     expect(created).toBe(true);
-    expect(schemaVersion).toBe(1);
+    expect(schemaVersion).toBe(CURRENT);
     expect(snapshot).toBeNull();
     expect(mockKeys.has('database')).toBe(true);
     expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
@@ -131,7 +141,7 @@ describe('opening', () => {
   });
 
   test('M1: the key is removed from every options object op-sqlite retains', async () => {
-    await seedV1();
+    await seedCurrent();
     const { db } = await openTrezorDatabase({
       migrationList: [...migrations, v2],
     });
@@ -181,7 +191,7 @@ describe('opening', () => {
   });
 
   test('a wrong key is reported and the file is left untouched', async () => {
-    await seedV1();
+    await seedCurrent();
     const before = fs.readFileSync(mockFake.pathOf('trezor.db'));
     mockKeyOverride = 'b'.repeat(64);
     await expect(openTrezorDatabase()).rejects.toMatchObject({
@@ -191,7 +201,7 @@ describe('opening', () => {
   });
 
   test('a newer schema is refused without a snapshot or writes', async () => {
-    await seedV1();
+    await seedCurrent();
     const { db } = await openTrezorDatabase();
     await db.execute('PRAGMA user_version = 9');
     db.close();
@@ -204,23 +214,23 @@ describe('opening', () => {
 
 describe('M2: snapshots before migrating', () => {
   test('writes a verified snapshot, renames it into place, then migrates', async () => {
-    await seedV1();
+    await seedCurrent();
     const result = await openTrezorDatabase({
       migrationList: [...migrations, v2],
     });
-    expect(result.snapshot).toBe('trezor.pre-migration-v1.db');
-    expect(result.schemaVersion).toBe(2);
+    expect(result.snapshot).toBe(SNAP);
+    expect(result.schemaVersion).toBe(NEXT);
     result.db.close();
-    expect(snapshotsAndTemps()).toEqual(['trezor.pre-migration-v1.db']);
+    expect(snapshotsAndTemps()).toEqual([SNAP]);
 
     // The snapshot is the pre-migration state and needs the same key.
     const snap = mockFake.open({
-      name: 'trezor.pre-migration-v1.db',
+      name: SNAP,
       encryptionKey: `x'${mockKeys.get('database')}'`,
     });
     expect(
       (await snap.execute('PRAGMA user_version')).rows[0].user_version,
-    ).toBe(1);
+    ).toBe(CURRENT);
     expect((await snap.execute('SELECT * FROM notes')).rows).toEqual([
       { item_id: 'n1', body: 'body' },
     ]);
@@ -228,7 +238,7 @@ describe('M2: snapshots before migrating', () => {
   });
 
   test('an interrupted export removes only its temporary file and blocks the migration', async () => {
-    await seedV1();
+    await seedCurrent();
     mockFake.exportFault = 'midway';
     await expect(
       openTrezorDatabase({ migrationList: [...migrations, v2] }),
@@ -238,7 +248,7 @@ describe('M2: snapshots before migrating', () => {
     // Still v1 and intact.
     mockFake.exportFault = 'none';
     const { db, schemaVersion } = await openTrezorDatabase();
-    expect(schemaVersion).toBe(1);
+    expect(schemaVersion).toBe(CURRENT);
     expect(await db.execute('SELECT id FROM items ORDER BY id')).toEqual([
       { id: 'c1' },
       { id: 'n1' },
@@ -247,7 +257,7 @@ describe('M2: snapshots before migrating', () => {
   });
 
   test('a copy that fails verification is discarded and blocks the migration', async () => {
-    await seedV1();
+    await seedCurrent();
     mockFake.exportFault = 'corrupt-copy';
     await expect(
       openTrezorDatabase({ migrationList: [...migrations, v2] }),
@@ -256,49 +266,37 @@ describe('M2: snapshots before migrating', () => {
   });
 
   test('retry after a failed migration reuses the verified snapshot', async () => {
-    await seedV1();
+    await seedCurrent();
     await expect(
       openTrezorDatabase({ migrationList: [...migrations, failingV2] }),
     ).rejects.toMatchObject({ code: 'MIGRATION_FAILED' });
-    expect(snapshotsAndTemps()).toEqual(['trezor.pre-migration-v1.db']);
-    const firstSnapshot = fs.readFileSync(
-      mockFake.pathOf('trezor.pre-migration-v1.db'),
-    );
+    expect(snapshotsAndTemps()).toEqual([SNAP]);
+    const firstSnapshot = fs.readFileSync(mockFake.pathOf(SNAP));
 
     const retry = await openTrezorDatabase({
       migrationList: [...migrations, v2],
     });
-    expect(retry.snapshot).toBe('trezor.pre-migration-v1.db');
-    expect(retry.schemaVersion).toBe(2);
+    expect(retry.snapshot).toBe(SNAP);
+    expect(retry.schemaVersion).toBe(NEXT);
     retry.db.close();
-    expect(snapshotsAndTemps()).toEqual(['trezor.pre-migration-v1.db']);
-    expect(
-      fs.readFileSync(mockFake.pathOf('trezor.pre-migration-v1.db')),
-    ).toEqual(firstSnapshot);
+    expect(snapshotsAndTemps()).toEqual([SNAP]);
+    expect(fs.readFileSync(mockFake.pathOf(SNAP))).toEqual(firstSnapshot);
   });
 
   test('an invalid existing snapshot is never trusted, overwritten or deleted', async () => {
-    await seedV1();
-    fs.writeFileSync(
-      mockFake.pathOf('trezor.pre-migration-v1.db'),
-      'partial junk',
-    );
+    await seedCurrent();
+    fs.writeFileSync(mockFake.pathOf(SNAP), 'partial junk');
     const result = await openTrezorDatabase({
       migrationList: [...migrations, v2],
     });
     result.db.close();
-    expect(result.snapshot).toBe('trezor.pre-migration-v1.2.db');
-    expect(
-      fs.readFileSync(mockFake.pathOf('trezor.pre-migration-v1.db'), 'utf8'),
-    ).toBe('partial junk');
-    expect(snapshotsAndTemps()).toEqual([
-      'trezor.pre-migration-v1.2.db',
-      'trezor.pre-migration-v1.db',
-    ]);
+    expect(result.snapshot).toBe(SNAP2);
+    expect(fs.readFileSync(mockFake.pathOf(SNAP), 'utf8')).toBe('partial junk');
+    expect(snapshotsAndTemps()).toEqual([SNAP2, SNAP]);
   });
 
   test('a valid but stale snapshot is kept and a fresh one is written', async () => {
-    await seedV1();
+    await seedCurrent();
     // First attempt leaves a verified snapshot, then the migration fails.
     await expect(
       openTrezorDatabase({ migrationList: [...migrations, failingV2] }),
@@ -312,11 +310,8 @@ describe('M2: snapshots before migrating', () => {
       migrationList: [...migrations, v2],
     });
     result.db.close();
-    expect(result.snapshot).toBe('trezor.pre-migration-v1.2.db');
-    expect(snapshotsAndTemps()).toEqual([
-      'trezor.pre-migration-v1.2.db',
-      'trezor.pre-migration-v1.db',
-    ]);
+    expect(result.snapshot).toBe(SNAP2);
+    expect(snapshotsAndTemps()).toEqual([SNAP2, SNAP]);
   });
 });
 
@@ -342,12 +337,12 @@ describe('regression: snapshot ATTACH on device', () => {
   });
 
   test('the main connection is opened so that the snapshot can be attached', async () => {
-    await seedV1();
+    await seedCurrent();
     const result = await openTrezorDatabase({
       migrationList: [...migrations, v2],
     });
     result.db.close();
-    expect(result.snapshot).toBe('trezor.pre-migration-v1.db');
+    expect(result.snapshot).toBe(SNAP);
     const mainOpens = mockFake.openedParams.filter(p => p.name === 'trezor.db');
     for (const p of mainOpens) {
       expect(p.failOnCreate).toBeUndefined();

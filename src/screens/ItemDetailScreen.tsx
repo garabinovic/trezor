@@ -44,11 +44,12 @@ import {
   Note,
   parseIsoDate,
   Reminder,
-  repeatLabels,
+  repeatLabel,
   useItem,
   useItems,
 } from '../data';
 import { RootStackParamList } from '../navigation/types';
+import { nextDue } from '../reminders/reminderSchedule';
 import { gutter, Theme, useStyles } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ItemDetail'>;
@@ -172,21 +173,18 @@ function ReminderBody({ reminder }: { reminder: Reminder }) {
   const styles = useStyles(createStyles);
   const { setReminderCompleted } = useItems();
   const overdue = isOverdue(reminder);
+  const due = nextDue(reminder);
 
   return (
     <View style={styles.body}>
       <Section grouped>
         <ValueRow
           icon={Calendar}
-          label="Due"
-          value={formatDue(reminder.dueAt)}
+          label={reminder.repeat === 'once' ? 'Due' : 'Next'}
+          value={due === null ? '—' : formatDue(new Date(due).toISOString())}
           valueColor={overdue ? 'danger' : 'text'}
         />
-        <ValueRow
-          icon={Repeat}
-          label="Repeat"
-          value={repeatLabels[reminder.repeat]}
-        />
+        <ValueRow icon={Repeat} label="Repeat" value={repeatLabel(reminder)} />
       </Section>
       <NotesBlock text={reminder.notes} />
       <View style={styles.actions}>

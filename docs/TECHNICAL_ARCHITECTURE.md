@@ -1,13 +1,14 @@
 # Trezor — Technical Architecture
 
-Status: **Phase 2 implemented** (core organizer on encrypted local storage),
-on top of Phase 1 and the Phase 1.1 corrections. This document describes what is built, why, and how it differs from
+Status: **Phase 3 implemented** (reminders and local notifications, §13), on
+top of Phase 2 (core organizer), Phase 1 and the Phase 1.1 corrections. This document describes what is built, why, and how it differs from
 the Phase 1 proposal (git history: `docs: add Phase 1 technical architecture
 proposal`). Phase 1.1 fixed the findings of the Phase 1 security audit; see
 §10.1.
 
 Claims marked **[verified]** were checked by an automated test or on the
-Android emulator (API 37, arm64) on 2026-10-30. Everything else is design
+Android emulator (API 37, arm64) on 2026-10-30 (Phase 1–2) or 2026-11-02
+(Phase 3). Nothing has been verified on a physical device yet. Everything else is design
 intent or a recommendation.
 
 ---
@@ -65,6 +66,9 @@ Rules:
 | `src/data/organizer.ts` | Category filters, sort orders, Home overview (Phase 2; moved out of screens) |
 | `test-utils/appHarness.tsx` | Drives the whole app in Jest (only visible screens are queried) |
 | `src/storage/selfTest.ts` | Debug-only on-device SQLCipher checks (dev menu) |
+| `src/reminders/` | Recurrence rules, reminder schedule helpers, reconciliation, `RemindersProvider` (Phase 3, §13) |
+| `android/app/src/main/java/com/trezor/app/reminders/` | Recurrence (Kotlin mirror), encrypted schedule record, alarms, notifications, receivers, `TrezorReminders` TurboModule (Phase 3) |
+| `test-fixtures/recurrence.txt` | Hand-computed recurrence cases shared by the Jest and JVM tests |
 
 ---
 
@@ -295,6 +299,30 @@ documents (item_id PK → items, kind CHECK(...), merchant, date TEXT, expires_o
 settings  (key TEXT PK, value TEXT /* JSON */)
 ```
 
+### Schema v2 (`user_version = 2`, Phase 3)
+
+Only `reminders` changes (rebuilt, because a `CHECK` cannot be altered):
+
+```sql
+reminders (item_id PK → items ON DELETE CASCADE,
+           due_at INTEGER,                 -- first occurrence, UTC ms
+           local_start TEXT CHECK (GLOB 'YYYY-MM-DDTHH:MM'),  -- wall-clock start
+           repeat TEXT CHECK (once|daily|weekly|monthly|yearly|interval),
+           interval_minutes INTEGER NULL CHECK (15..43200),
+           notes TEXT, completed INTEGER CHECK (0|1),
+           CHECK ((repeat = 'interval') = (interval_minutes IS NOT NULL)))
+           partial INDEX reminders_open_due (due_at) WHERE completed = 0
+```
+
+Migration 1 → 2 copies every row: `repeat` `'none'` becomes `'once'`, every
+other value is kept as is; `local_start` is the stored `due_at` seen in the
+device's zone at upgrade time; `interval_minutes` is `NULL`. A value outside the
+known set would violate the new `CHECK` and roll the whole migration back (it
+is never silently converted or dropped). It runs through the normal procedure
+(§6): verified encrypted snapshot `trezor.pre-migration-v1.db` first, foreign
+keys off, `foreign_key_check` before commit **[verified: Jest; emulator upgrade
+from the Phase 2 release build]**.
+
 The full DDL is in `src/storage/migrations.ts`. Relationships:
 `items 1—1 {notes|reminders|cards|documents}`, chosen by `type`. A save that
 tries to change an item's type is rejected **[verified]**.
@@ -310,6 +338,8 @@ tries to change an item's type is rejected **[verified]**.
 | Key | Persistent | Notes |
 | --- | --- | --- |
 | `theme.preference` | Yes (settings table) **[verified across restart]** | `'system' \| 'light' \| 'dark'`; read before first render |
+| `notifications.showDetails` | Yes **[verified across restart]** | Boolean, default `false` (generic notification text) |
+| `notifications.permissionRequested` | Yes | Boolean; the Android 13+ permission is asked at most once |
 | Show sample data | **No** — debug builds only, in memory | Not visible in release **[verified]** |
 | App lock, backup, restore, delete all | — | Shown as "Not available yet" (Phase 0 UI) |
 
@@ -501,6 +531,9 @@ The design keeps backup independent of this device's Keystore:
 | Kind | What | Result |
 | --- | --- | --- |
 | Jest (automated) | 136 tests in 11 suites. Phase 1/1.1 suites (66) unchanged. Phase 2 adds: repository CRUD of every field for each type, type separation, pinning, ordering, search coverage and order, deletes, database errors and invalid input, on both repository implementations (23 more in `itemRepository.test.ts`, now 40); search matching incl. non-ASCII case (7); organizer filters, sorts, Home overview, document summaries (13); editor validation and normalization (13); **app-level flows** (14) driving the real screens and navigation on the real SQLite repositories via `serializeDatabase` (Home with stored data, all tabs and filter chips, create/edit/delete/pin/complete, validation, failed write, search opens the right item, theme and data persist across a remount) | **136/136 pass** |
+| Jest after Phase 3 (automated) | 228 tests in 14 suites; Phase 1–2 tests kept (fixtures updated to the v2 reminder shape; organizer sort tests updated to next-occurrence order, an intended change) plus the Phase 3 tests in §13.9 | **228/228 pass** |
+| JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
+| Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
 | Android instrumentation (automated, emulator) | `KeyVaultTest` (12) against the real Keystore; `DatabaseFilesTest` (9): present/absent, unreadable location is an error not "absent", no-replace rename, temp-only delete, path rejection | **21/21 pass** |
 | On-device self-test (debug, dev menu → "Run storage self-test") | 21 checks on real SQLCipher: active cipher; correct/wrong/missing key; native file guards; startup; foreign keys ON; failed migration leaves v1 with a verified snapshot; retry reuses it; migration keeps data; snapshot unreadable without key; invalid snapshot kept and a new one used; table rebuild keeps rows; violation rolls back; newer schema refused | **21/21 pass** |
 | Manual upgrade test (emulator) | Data created with the Phase 1 release build (`06b022c`), then the Phase 1.1 debug build installed over it: data, theme and envelope intact; no migration, no snapshot, `trezor.db` unchanged on open; new writes and theme change persisted across restart | As expected |
@@ -558,8 +591,10 @@ UI.
 | `@op-engineering/op-sqlite` | **19.0.3** (exact) | app | SQLite + SQLCipher 4.19.0, OpenSSL 3.3.2 (`io.github.ronickg:openssl:3.3.2-1`, pulled by op-sqlite) |
 | `androidx.test.ext:junit` | 1.2.1 | androidTest only | Instrumentation test runner support |
 | `androidx.test:runner` | 1.6.2 | androidTest only | Instrumentation test runner |
+| `junit:junit` | 4.13.2 | JVM unit tests only (Phase 3) | Runs `RecurrenceTest` on the JVM; not packaged in the app |
 
-No new JS runtime dependencies besides op-sqlite. The vault uses only
+No new JS runtime dependencies besides op-sqlite. Phase 3 adds no runtime
+dependency (reminders use only Android framework APIs). The vault uses only
 platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 
 ---
@@ -572,7 +607,10 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Database key passes through JS (§4.4) | No longer retained by op-sqlite after `open()`; still present until GC in immutable JS/Java/C++ strings that can't be zeroed; never logged |
 | No automatic restore from snapshots; snapshots and crashed-attempt temp files are never cleaned up (audit L7) | Manual-recovery artifacts only. Retention, cleanup and restore belong to the backup phase |
 | Search reads all items per query (debounced), then matches in JS | Fine at personal-organizer scale; a normalized search column or FTS would need a schema change if data grows large |
-| Reminders keep the Phase 0 "Repeat" field as a stored label only | No scheduling or notifications until Phase 3 |
+| Reminder timing is approximate (no exact-alarm permission, by decision) | Up to 10 min late while awake, up to ~1 h in Doze; documented in the editor (§13.6) |
+| OEM battery managers ("app killers") and force-stop | Force-stop removes all alarms until the app is opened again; some OEMs behave like force-stop. Not fixable without exact/foreground mechanisms (§13.8) |
+| Phase 3 not tested on a physical device or on API 24–33 | Emulator API 37 only; see the manual checklist in the Phase 3 report |
+| Reboot re-arming not verified | Emulator could not complete it (§13.8). If Android drops `BOOT_COMPLETED` (as the overloaded emulator did), alarms stay unarmed until the app is next opened |
 | Shared connection is serialized; calling the outer database from inside a `transaction()` callback would deadlock | Repositories use only `tx`; documented in `serialDatabase.ts` |
 | StrongBox fallback only on `StrongBoxUnavailableException`; other StrongBox failures make the first launch fail, and software-backed keys are accepted silently (audit L4) | Untested on hardware; review with real devices |
 | op-sqlite enables `load_extension` on every Android connection (audit L6) | Not exploitable with static or parameterized SQL; needs an op-sqlite option or patch |
@@ -588,3 +626,171 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Opening view uses the system theme; with a forced dark theme on a light system, startup shows a light background for a moment | Cosmetic. The native launch window can't know the in-app preference |
 | App-level TurboModule codegen: a stale native CMake cache (`android/app/.cxx`) can leave the module unregistered after adding the spec | One-time; fixed by deleting `android/app/.cxx`. Noted for contributors |
 | `connectedDebugAndroidTest` uninstalls the app | Test-only; local data on the test device is lost |
+
+---
+
+## 13. Reminders and notifications (Phase 3)
+
+### 13.1 Architecture
+
+```
+SQLCipher (source of truth)          JS                              Kotlin (com.trezor.app.reminders)
+reminders table  ──readStored()──▶ reconcile() ──sync(entries)──▶ TrezorRemindersModule
+                 ◀─completeFired──  ▲   │                            │
+                                    │   └─getFiredOnceIds()◀──────── ScheduleStore  (encrypted record)
+       RemindersProvider: on change (300 ms debounce),                ReminderScheduler (AlarmManager)
+       on launch, on return to foreground                             ReminderNotifications (channel "reminders")
+                                                                      ReminderAlarmReceiver / ReminderRestoreReceiver
+                                                                      ReminderTaps ──event "trezorReminderTap"──▶ RootNavigator
+```
+
+- The encrypted database is the only source of truth. The native record is an
+  **operational copy**: `sync` replaces it entirely from the database, so it can
+  always be rebuilt and is never read back as data.
+- Reconciliation (`src/reminders/scheduler.ts`): (1) ONCE reminders the system
+  has fired are marked completed in the database (only if they still exist, are
+  ONCE and not completed — a deleted reminder is never recreated); (2) the whole
+  native schedule is replaced with the current database state. Runs are serial
+  and coalesced. Every run gives the same result, so there are no duplicates or
+  stale alarms **[verified: Jest, instrumentation]**.
+- Each reminder has a fixed pair of `PendingIntent`s (data URI
+  `trezor-reminder:<id>`, request codes 0 and 1), so re-arming replaces them.
+  Each notification uses tag `reminder:<id>`, so a reminder shows at most one.
+- No third-party notification library, no Firebase/FCM, no network. Only
+  framework APIs (`AlarmManager`, `Notification.Builder`, `BroadcastReceiver`).
+
+### 13.2 Recurrence semantics
+
+Implemented twice with identical rules — `src/reminders/recurrence.ts` and
+`Recurrence.kt` — and checked against the same 33 hand-computed cases in
+`test-fixtures/recurrence.txt` **[verified: Jest + JVM]**.
+
+| Mode | Rule |
+| --- | --- |
+| ONCE | Fires once at `due_at` (an absolute instant) |
+| DAILY / WEEKLY | Same wall-clock time (`local_start`) every 1 / 7 days in the device's **current** zone |
+| MONTHLY | Same day of month; if the month is shorter, the last day (31 Jan → 28/29 Feb → 31 Mar: the original day is kept, not drifted) |
+| YEARLY | Same date; 29 Feb → 28 Feb in non-leap years |
+| INTERVAL | `due_at + k × interval` (1, 2, 4, 8 or 12 h; stored range 15 min–30 days); absolute, unaffected by zone/DST |
+
+- **DST gap** (local time doesn't exist): moved forward by the gap
+  (02:30 → 03:30). **DST overlap** (occurs twice): the earlier instant.
+- **Time-zone change:** calendar modes follow the new zone's wall clock
+  (09:00 stays 09:00); ONCE and INTERVAL keep their instant.
+- **Missed occurrences** (device off, Doze): never replayed in a burst. A
+  recurring reminder continues with its next occurrence; INTERVAL keeps its
+  rhythm (anchor + k × interval). A ONCE reminder whose time passed before it
+  could be armed is not scheduled and shows as **Overdue** in the app.
+- **States:** active ONCE in the future → armed; ONCE fired → marked completed
+  on next reconciliation; ONCE in the past, not fired → Overdue, not armed;
+  repeating → always armed with its next occurrence; completed → nothing armed;
+  reactivated → repeating ones are armed again, a past ONCE stays Overdue (the
+  editor requires a future time when a ONCE reminder is created, retimed, switched
+  to ONCE or reactivated through edit).
+
+### 13.3 Native schedule record
+
+`noBackupFilesDir/reminders/schedule.bin` = `[12-byte IV][AES-256-GCM
+ciphertext]`, AAD `trezor.reminder-schedule|1`. The AES key is a 32-byte random
+key stored as a Keystore-wrapped envelope under key id `reminders` (the existing
+`KeyVault`, §4; unchanged architecture). Contents: per reminder its id, mode,
+start, local start, interval, the armed occurrence, and — **only when "Show
+reminder details" is on** — title and description; plus the set of fired ONCE
+ids. A missing, tampered or undecryptable file is treated as empty and rebuilt
+by the next `sync` **[verified: instrumentation]**. The file is excluded from
+backup like all app data.
+
+It exists so alarms can be re-armed after reboot, update and clock changes
+without opening the database (which needs JS).
+
+### 13.4 Notification privacy
+
+- Setting **Notification privacy → Show reminder details** (default off).
+- Off: title "Trezor", body "You have a reminder." Reminder text is not even
+  written to the native record.
+- On: the reminder title and description (description omitted if empty).
+  Notifications are `VISIBILITY_PRIVATE` with a generic `publicVersion`, so the
+  lock screen shows the generic text unless the user allows private content in
+  Android settings **[verified: emulator, both modes]**.
+- Changing the setting re-syncs immediately; times are unchanged, only content
+  changes **[verified: Jest, instrumentation]**.
+- Nothing about reminders is logged; JS logs only error codes.
+
+### 13.5 Permissions
+
+| Permission | Why |
+| --- | --- |
+| `POST_NOTIFICATIONS` | Required on Android 13+ to show notifications. Asked once, after the user saves an active reminder, behind an in-app explanation ("Allow reminder notifications?" — Continue / Not now). If denied, Settings shows "Notifications are off" and opens Android settings |
+| `RECEIVE_BOOT_COMPLETED` | Re-arm alarms after reboot (alarms don't survive it) |
+
+Not requested: `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
+`FOREGROUND_SERVICE`, `WAKE_LOCK`, `INTERNET` (release). `ReminderRestoreReceiver`
+is exported (system broadcasts) and acts only on `BOOT_COMPLETED`,
+`MY_PACKAGE_REPLACED`, `TIME_SET`, `TIMEZONE_CHANGED`; re-arming is idempotent.
+`ReminderAlarmReceiver` is not exported. The notification tap intent is
+explicit (`MainActivity`, immutable).
+
+### 13.6 Delivery accuracy
+
+No exact-alarm permission (decision 2). Each occurrence is armed with two
+inexact alarms; whichever fires first delivers it and the other is ignored
+(it carries the same occurrence, which is no longer the armed one):
+
+| Alarm | Behaviour |
+| --- | --- |
+| `setWindow(RTC_WAKEUP, t, 10 min)` | Within 10 minutes while the device is awake (Android's minimum window); deferred in Doze |
+| `setAndAllowWhileIdle(RTC_WAKEUP, t)` | Fires in Doze too, but Android allows delay of up to 75 % of the lead time, capped at 1 h |
+
+So a reminder arrives at its time or **up to ~10 minutes late** when the phone
+is in use, and **up to about an hour late** when it is idle. The editor says
+so. Observed on the emulator: 0:22, 2:26 and 1:02 min after the set time.
+
+An occurrence that is due but not yet delivered (inside its window) **stays
+armed** across re-arming (clock sync, time-zone change, the app opening): the
+alarm is re-set at the same past time and fires at once. JS keeps handing such
+ONCE reminders to the native side for 75 minutes (`PENDING_GRACE_MS`); the
+native side re-arms them only if that occurrence is still pending, and never
+re-delivers a delivered one **[verified: instrumentation; emulator]**. (Found
+during emulator testing: a network time sync at 10:35:20 had cancelled a
+10:35 reminder still inside its window.)
+
+### 13.7 Notification taps
+
+Tap → explicit intent to `MainActivity` (`com.trezor.app.reminders.OPEN`,
+extra `reminderId`) → `ReminderTaps` keeps it until JS consumes it →
+`RootNavigator` opens the reminder's detail screen. Consumed on navigation ready
+(cold start), on the `trezorReminderTap` event (running app) and on return to
+foreground. A tap for a deleted reminder shows "Item not found" and recreates
+nothing **[verified: Jest]**. Background and terminated (process killed) taps
+**[verified: emulator]**.
+
+`MainActivity` installs react-native-screens' `RNScreensFragmentFactory`, as
+the library documents: without it, restoring the activity after the process was
+killed in the background crashed on launch (found when tapping a notification
+after the process had been killed; affected any such restore since Phase 0).
+
+### 13.8 Lifecycle
+
+| Event | Behaviour |
+| --- | --- |
+| Reboot | `BOOT_COMPLETED` → `rearmAll` from the native record. **NOT VERIFIED — emulator instability**: on the first emulator reboot Android delivered `BOOT_COMPLETED` after 9 min and then killed the process with "start timeout" before it attached (system overload, load average ~57); the second reboot never completed (system processes crashing). `rearmAll` itself is covered by instrumentation. Must be verified on a physical device |
+| App update | `MY_PACKAGE_REPLACED` → `rearmAll` **[verified: emulator upgrade]** |
+| Clock / zone change | `TIME_SET` / `TIMEZONE_CHANGED` → `rearmAll`; calendar modes follow the new zone **[verified: emulator, Belgrade ↔ New York]** |
+| App launch, return to foreground | Full reconciliation from the database |
+| Process killed by the system | Alarms survive; receivers start the process without UI |
+| Force-stop (Settings → Force stop) | Android removes the app's alarms and blocks its receivers until the user opens it; opening the app re-arms everything. Not avoidable |
+| OEM battery restrictions | Some vendors defer or drop alarms of restricted apps. Users may need to exempt Trezor; not testable on the emulator |
+| Notifications disabled / denied | Alarms still fire, Android drops the notification; Settings shows "Notifications are off" |
+| Keystore or record unreadable in a receiver | Nothing shown; the next reconciliation rebuilds the record |
+| Sample data (debug) | Never scheduled (only the real repository is reconciled) |
+
+### 13.9 Phase 3 tests
+
+| Kind | What | Result |
+| --- | --- | --- |
+| Jest | Recurrence fixtures in an `Intl` zone (Belgrade, New York, London), schedule helpers, entry building, privacy of entries, reconciliation (idempotence, fired ONCE completion, deleted reminders), queue, permission policy, migration v2 (preservation, constraints, rollback), repository fields × 6 modes, settings, editor validation, Home sorting, 17 app-level reminder flows | See §9 |
+| JVM unit (`./gradlew :app:testDebugUnitTest`) | `RecurrenceTest`: shared fixtures, day numbers, invalid intervals, parsing | 4/4 |
+| Instrumentation | `ReminderSchedulerTest` (15) on real AlarmManager, NotificationManager, Keystore | See §9 |
+| Emulator (manual) | Upgrade Phase 2 release → Phase 3 with data; delivery generic and detailed; taps from background and killed process; zone change | As expected (see the Phase 3 report) |
+| Emulator (manual) | Reboot re-arming | **NOT VERIFIED — emulator instability** |
+| Physical device | — | **Not performed** |

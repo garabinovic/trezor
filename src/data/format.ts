@@ -1,11 +1,6 @@
-import {
-  DocumentItem,
-  Item,
-  LoyaltyCard,
-  Reminder,
-  ReminderRepeat,
-} from './types';
+import { DocumentItem, Item, LoyaltyCard, Reminder } from './types';
 import { documentKinds } from './categories';
+import { nextDue, repeatLabel } from '../reminders/reminderSchedule';
 
 // Formatting is done by hand so output is identical on every device,
 // regardless of system locale. The UI is English-only.
@@ -133,17 +128,11 @@ export function formatEdited(iso: string, now = new Date()): string {
     : `Edited ${relative}`;
 }
 
-export function isOverdue(reminder: Reminder, now = new Date()): boolean {
-  return !reminder.completed && new Date(reminder.dueAt) < now;
-}
-
-export const repeatLabels: Record<ReminderRepeat, string> = {
-  none: 'Does not repeat',
-  daily: 'Every day',
-  weekly: 'Every week',
-  monthly: 'Every month',
-  yearly: 'Every year',
-};
+export {
+  isOverdue,
+  repeatLabel,
+  repeatLabels,
+} from '../reminders/reminderSchedule';
 
 const currencySymbols: Record<string, string> = {
   EUR: '€',
@@ -209,10 +198,11 @@ function documentSummary(doc: DocumentItem, now: Date): string {
 }
 
 function reminderSummary(reminder: Reminder, now: Date): string {
-  const due = formatDue(reminder.dueAt, now);
-  return reminder.repeat === 'none'
+  const next = nextDue(reminder, now.getTime());
+  const due = next === null ? '' : formatDue(new Date(next).toISOString(), now);
+  return reminder.repeat === 'once'
     ? due
-    : `${due} · ${repeatLabels[reminder.repeat]}`;
+    : [due, repeatLabel(reminder)].filter(Boolean).join(' · ');
 }
 
 function cardSummary(card: LoyaltyCard): string {

@@ -164,7 +164,9 @@ describe('foreign keys during migrations (M3, L2)', () => {
       "INSERT INTO items VALUES ('n1', 'note', 'Note', 0, 1, 1), ('r1', 'reminder', 'Rem', 0, 2, 2)",
     );
     await db.execute("INSERT INTO notes VALUES ('n1', 'body')");
-    await db.execute("INSERT INTO reminders VALUES ('r1', 5, 'none', '', 0)");
+    await db.execute(
+      "INSERT INTO reminders (item_id, due_at, local_start, repeat, interval_minutes, notes, completed) VALUES ('r1', 5, '1970-01-01T01:00', 'once', NULL, '', 0)",
+    );
     return db;
   }
 
@@ -245,5 +247,159 @@ describe('foreign keys during migrations (M3, L2)', () => {
     await db.execute('PRAGMA foreign_keys = OFF');
     await runMigrations(db);
     expect(await foreignKeysOn(db)).toBe(true);
+  });
+});
+
+describe('v2: reminder scheduling migration', () => {
+  const v1Only = migrations.filter(m => m.version === 1);
+
+  async function v1WithData() {
+    const db = createNodeSqliteDatabase();
+    await runMigrations(db, v1Only);
+    await db.execute(
+      "INSERT INTO items VALUES ('n', 'note', 'Note', 1, 1, 2), ('a', 'reminder', 'Once', 0, 1, 2), ('b', 'reminder', 'Daily', 0, 1, 2), ('c', 'reminder', 'Monthly', 0, 1, 2), ('d', 'reminder', 'Yearly', 1, 1, 2)",
+    );
+    await db.execute("INSERT INTO notes VALUES ('n', 'body')");
+    const due = Date.parse('2026-01-31T09:15:00.000Z');
+    for (const [id, repeat, completed] of [
+      ['a', 'none', 0],
+      ['b', 'daily', 0],
+      ['c', 'monthly', 1],
+      ['d', 'yearly', 0],
+    ] as const) {
+      await db.execute('INSERT INTO reminders VALUES (?, ?, ?, ?, ?)', [
+        id,
+        due,
+        repeat,
+        `desc ${id}`,
+        completed,
+      ]);
+    }
+    return { db, due };
+  }
+
+  test('preserves every reminder; "none" becomes "once"; local start from due_at', async () => {
+    const { db, due } = await v1WithData();
+    expect(await runMigrations(db)).toEqual({ from: 1, to: 2 });
+    const rows = await db.execute(
+      'SELECT item_id, due_at, local_start, repeat, interval_minutes, notes, completed FROM reminders ORDER BY item_id',
+    );
+    const d = new Date(due);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(
+      d.getDate(),
+    )}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    expect(rows).toEqual([
+      {
+        item_id: 'a',
+        due_at: due,
+        local_start: local,
+        repeat: 'once',
+        interval_minutes: null,
+        notes: 'desc a',
+        completed: 0,
+      },
+      {
+        item_id: 'b',
+        due_at: due,
+        local_start: local,
+        repeat: 'daily',
+        interval_minutes: null,
+        notes: 'desc b',
+        completed: 0,
+      },
+      {
+        item_id: 'c',
+        due_at: due,
+        local_start: local,
+        repeat: 'monthly',
+        interval_minutes: null,
+        notes: 'desc c',
+        completed: 1,
+      },
+      {
+        item_id: 'd',
+        due_at: due,
+        local_start: local,
+        repeat: 'yearly',
+        interval_minutes: null,
+        notes: 'desc d',
+        completed: 0,
+      },
+    ]);
+    // Other data untouched; relationships and integrity intact.
+    expect(await db.execute('SELECT * FROM notes')).toEqual([
+      { item_id: 'n', body: 'body' },
+    ]);
+    expect(await db.execute('PRAGMA foreign_key_check')).toEqual([]);
+    expect((await db.execute('PRAGMA quick_check'))[0].quick_check).toBe('ok');
+    expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
+    // Cascade still works on the rebuilt table; the index was recreated.
+    await db.execute("DELETE FROM items WHERE id = 'a'");
+    expect(
+      (await db.execute('SELECT item_id FROM reminders')).map(r => r.item_id),
+    ).toEqual(['b', 'c', 'd']);
+    const indexes = await db.execute(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'reminders'",
+    );
+    expect(indexes.map(i => i.name)).toContain('reminders_open_due');
+  });
+
+  test('new constraints: interval only with a valid interval_minutes', async () => {
+    const db = createNodeSqliteDatabase();
+    await runMigrations(db);
+    await db.execute(
+      "INSERT INTO items VALUES ('x', 'reminder', 't', 0, 1, 1)",
+    );
+    const insert = (
+      repeat: string,
+      interval: number | null,
+      local = '2026-11-02T08:00',
+    ) =>
+      db.execute(
+        'INSERT INTO reminders (item_id, due_at, local_start, repeat, interval_minutes) VALUES (?, 1, ?, ?, ?)',
+        ['x', local, repeat, interval],
+      );
+    await expect(insert('interval', null)).rejects.toThrow();
+    await expect(insert('daily', 60)).rejects.toThrow();
+    await expect(insert('interval', 10)).rejects.toThrow();
+    await expect(insert('none', null)).rejects.toThrow();
+    await expect(insert('daily', null, '2026-11-02 08:00')).rejects.toThrow();
+    await insert('interval', 240);
+    expect(
+      (await db.execute('SELECT interval_minutes FROM reminders'))[0],
+    ).toEqual({
+      interval_minutes: 240,
+    });
+  });
+
+  test('a failure part-way through v2 rolls back to the intact v1 database', async () => {
+    const { db } = await v1WithData();
+    const v2 = migrations.find(m => m.version === 2)!;
+    const broken: Migration[] = [
+      ...v1Only,
+      {
+        ...v2,
+        async up(tx) {
+          await v2.up(tx);
+          throw new Error('power cut');
+        },
+      },
+    ];
+    await expect(runMigrations(db, broken)).rejects.toMatchObject({
+      code: 'MIGRATION_FAILED',
+    });
+    expect(await getUserVersion(db)).toBe(1);
+    expect(
+      (
+        await db.execute(
+          'SELECT item_id, repeat FROM reminders ORDER BY item_id',
+        )
+      ).map(r => `${r.item_id}:${r.repeat}`),
+    ).toEqual(['a:none', 'b:daily', 'c:monthly', 'd:yearly']);
+    expect(await tableNames(db)).not.toContain('reminders_v2');
+    expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
+    // The real v2 then succeeds.
+    expect(await runMigrations(db)).toEqual({ from: 1, to: 2 });
   });
 });

@@ -1,4 +1,5 @@
 import { toIsoDate } from './format';
+import { formatLocalDateTime, localDateTimeOf } from '../reminders/recurrence';
 import { Item } from './types';
 
 /**
@@ -16,6 +17,8 @@ export function createSampleItems(now = new Date()): Item[] {
     new Date(
       now.getTime() - days * 86_400_000 - hours * 3_600_000,
     ).toISOString();
+  const localStartOf = (iso: string) =>
+    formatLocalDateTime(localDateTimeOf(Date.parse(iso)));
   const day = (days: number) => {
     const d = new Date(now);
     d.setDate(d.getDate() + days);
@@ -67,6 +70,8 @@ export function createSampleItems(now = new Date()): Item[] {
       type: 'reminder',
       title: 'Pay electricity bill',
       dueAt: at(-1, 18, 0),
+      localStart: localStartOf(at(-1, 18, 0)),
+      intervalMinutes: null,
       repeat: 'monthly',
       notes: 'Reference number is on the last invoice.',
       completed: false,
@@ -79,7 +84,9 @@ export function createSampleItems(now = new Date()): Item[] {
       type: 'reminder',
       title: 'Dentist appointment',
       dueAt: at(0, 16, 30),
-      repeat: 'none',
+      localStart: localStartOf(at(0, 16, 30)),
+      intervalMinutes: null,
+      repeat: 'once',
       notes: 'Dr. Ellis, 2nd floor. Bring the insurance card.',
       completed: false,
       pinned: false,
@@ -91,6 +98,8 @@ export function createSampleItems(now = new Date()): Item[] {
       type: 'reminder',
       title: 'Renew car registration',
       dueAt: at(5, 9, 0),
+      localStart: localStartOf(at(5, 9, 0)),
+      intervalMinutes: null,
       repeat: 'yearly',
       notes: '',
       completed: false,
@@ -103,6 +112,8 @@ export function createSampleItems(now = new Date()): Item[] {
       type: 'reminder',
       title: 'Water the plants',
       dueAt: at(2, 8, 0),
+      localStart: localStartOf(at(2, 8, 0)),
+      intervalMinutes: null,
       repeat: 'weekly',
       notes: '',
       completed: false,
@@ -115,7 +126,9 @@ export function createSampleItems(now = new Date()): Item[] {
       type: 'reminder',
       title: 'Return library books',
       dueAt: at(-4, 12, 0),
-      repeat: 'none',
+      localStart: localStartOf(at(-4, 12, 0)),
+      intervalMinutes: null,
+      repeat: 'once',
       notes: '',
       completed: true,
       pinned: false,

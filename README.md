@@ -3,8 +3,12 @@
 A private, offline-first personal organizer for notes, reminders, loyalty cards
 and documents. No account, no ads, no cloud.
 
-**Status:** Phase 1 — encrypted local storage. Items and settings are stored in
-a SQLCipher database whose key is protected by Android Keystore.
+**Status:** Phase 3 — reminders with local notifications, on the Phase 2
+organizer. Items and settings are stored in a SQLCipher database whose key is
+protected by Android Keystore. Reminders repeat once, daily, weekly, monthly,
+yearly or at an interval, and notify through Android's own alarms (no cloud,
+no push service). Notification text is generic unless "Show reminder details"
+is turned on.
 
 - [docs/DESIGN.md](docs/DESIGN.md) — design system and UX decisions
 - [docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md) — storage, security, schema, migrations
@@ -44,7 +48,8 @@ npx react-native run-android --no-packager --port 8090
 npx tsc --noEmit
 npm run lint
 npm test                                            # Jest, incl. SQL via node:sqlite
-cd android && ./gradlew :app:connectedDebugAndroidTest   # Keystore tests; needs emulator, uninstalls the app
+cd android && ./gradlew :app:testDebugUnitTest           # JVM: recurrence rules (shared fixtures)
+cd android && ./gradlew :app:connectedDebugAndroidTest   # Keystore, files, alarms; needs emulator, uninstalls the app
 ```
 
 Debug builds add **Run storage self-test** to the React Native dev menu: on-device
@@ -59,10 +64,13 @@ src/
   components/   reusable UI: Text, Button, ListItem, TextField, Dialog, Sheet, …
   data/         domain types, formatters, sample data, ItemsProvider
   storage/      encrypted database, migrations, repositories, key vault wrapper
+  reminders/    recurrence, scheduling reconciliation, notification settings
   native/       TurboModule specs (codegen)
   navigation/   root stack + bottom tabs, typed routes
   screens/      Home, category tabs, detail, editor, search, settings
-android/app/src/main/java/com/trezor/app/vault/   Keystore key vault (Kotlin)
+android/app/src/main/java/com/trezor/app/vault/       Keystore key vault (Kotlin)
+android/app/src/main/java/com/trezor/app/reminders/   alarms, notifications, encrypted schedule (Kotlin)
+test-fixtures/  recurrence cases shared by Jest and JVM tests
 test-utils/     node:sqlite adapter for Jest
 docs/           design, architecture, spike results
 ```
@@ -74,3 +82,6 @@ docs/           design, architecture, spike results
 - All data is encrypted at rest (SQLCipher). The database key is wrapped by a
   non-exportable Android Keystore key and stored in `noBackupFilesDir`.
 - App data is excluded from Android cloud backup and device-to-device transfer.
+- Release permissions: `POST_NOTIFICATIONS` and `RECEIVE_BOOT_COMPLETED` only
+  (reminders). No exact-alarm permission: reminders may arrive up to ~10 minutes
+  late, or up to about an hour when the phone is idle.

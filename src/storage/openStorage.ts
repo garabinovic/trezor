@@ -15,6 +15,8 @@ export interface OpenedStorage {
   /** Loaded up front so the first screen renders complete, without a flash. */
   initialItems: Item[];
   initialTheme: SettingValues['theme.preference'];
+  initialShowReminderDetails: boolean;
+  initialPermissionRequested: boolean;
 }
 
 /** Opens the encrypted database and loads what the first screen needs. */
@@ -24,9 +26,19 @@ export async function openStorage(): Promise<OpenedStorage> {
   const db = serializeDatabase(opened.db);
   const items = new SqliteItemRepository(db);
   const settings = new SqliteSettingsRepository(db);
-  const [initialItems, theme] = await Promise.all([
-    items.listAll(),
-    settings.get('theme.preference'),
-  ]);
-  return { items, settings, initialItems, initialTheme: theme ?? 'system' };
+  const [initialItems, theme, showDetails, permissionRequested] =
+    await Promise.all([
+      items.listAll(),
+      settings.get('theme.preference'),
+      settings.get('notifications.showDetails'),
+      settings.get('notifications.permissionRequested'),
+    ]);
+  return {
+    items,
+    settings,
+    initialItems,
+    initialTheme: theme ?? 'system',
+    initialShowReminderDetails: showDetails === true,
+    initialPermissionRequested: permissionRequested === true,
+  };
 }
