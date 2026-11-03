@@ -7,6 +7,8 @@ import java.io.File
 /**
  * JS bridge for [KeyVault]. Keys are returned to JS as lowercase hex because op-sqlite
  * only accepts the SQLCipher key from JavaScript (see docs/TECHNICAL_ARCHITECTURE.md §4.4).
+ * Every key operation is limited to the database key ([JsKeyAccess]); other keys stay
+ * native-only.
  */
 class TrezorVaultModule(reactContext: ReactApplicationContext) :
     NativeTrezorVaultSpec(reactContext) {
@@ -16,13 +18,14 @@ class TrezorVaultModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = NAME
 
-  override fun hasKey(keyId: String, promise: Promise) = run(promise) { vault.hasKey(keyId) }
+  override fun hasKey(keyId: String, promise: Promise) =
+      run(promise) { vault.hasKey(JsKeyAccess.check(keyId)) }
 
   override fun createKey(keyId: String, promise: Promise) =
-      run(promise) { vault.createKey(keyId).toHexAndZero() }
+      run(promise) { vault.createKey(JsKeyAccess.check(keyId)).toHexAndZero() }
 
   override fun getKey(keyId: String, promise: Promise) =
-      run(promise) { vault.getKey(keyId).toHexAndZero() }
+      run(promise) { vault.getKey(JsKeyAccess.check(keyId)).toHexAndZero() }
 
   override fun randomBytesHex(length: Double): String =
       vault.randomBytes(length.toInt()).toHexAndZero()

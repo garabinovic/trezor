@@ -142,6 +142,16 @@ class KeyVaultTest {
     assertFalse(a.contentEquals(b))
   }
 
+  /** The JS bridge allows only "database"; native code keeps its own keys. */
+  @Test
+  fun nativeCodeKeepsAccessToAttachmentsAndRemindersKeys() {
+    for (id in listOf("attachments", "reminders")) {
+      val created = vault.createKey(id)
+      assertArrayEquals(created, vault.getKey(id))
+      assertTrue(vault.hasKey(id))
+    }
+  }
+
   @Test
   fun invalidKeyIdIsRejected() {
     try {

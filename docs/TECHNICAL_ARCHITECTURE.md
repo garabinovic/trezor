@@ -145,8 +145,8 @@ Android Keystore  "trezor.master.v1"  AES-256-GCM, non-exportable,
 │                                    StrongBox if available, else TEE/software
 ├── wraps → database key (32 random bytes, SecureRandom)
 │             → SQLCipher raw key  x'<64 hex>'
-└── wraps → attachments key (32 random bytes; used only by native code;
-              see §12 for the JS vault API that could still request it)
+└── wraps → attachments key (32 random bytes; native only: the JS vault API
+              accepts only "database", JsKeyAccess)
               → wraps a random key per attachment file (§14)
 ```
 
@@ -766,7 +766,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
 | Phase 4 review findings | Fixed in the review-fix commit: a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
-| `TrezorVault` accepts any key id from JS | `getKey`/`createKey` accept any id matching `^[a-z][a-z0-9-]{0,31}$` and return the **unwrapped key as hex**, so JS code could obtain the `attachments` or `reminders` key, or create `attachments` while its envelope is missing (bypassing `AttachmentKeys`). The app's JS uses only `database`, and the TS wrapper's `KeyId` type allows only that, but nothing enforces it natively. JS runs inside the app process, which can already decrypt through the native modules, so this is defence-in-depth, not a new boundary crossing. **Proposed fix (Phase 1 module, outside Phase 4):** a native allow-list in `TrezorVaultModule` accepting only `database` |
+| JS access to vault keys | **Fixed (KeyVault hardening):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
 | Untrusted PDFs are rendered in-process | Android's `PdfRenderer` (PDFium) parses picked PDFs in Trezor's process, which can unwrap the attachments key. Accepted platform risk |
 | Screen contents in Recents and screenshots (no `FLAG_SECURE`) | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Product decision pending; no change made |
 | Device UI issues (Galaxy A53) | The tab bar overlaps the Android navigation buttons, and the keyboard does not open for an auto-focused field. Both are unresolved (found during Phase 3 testing) |
