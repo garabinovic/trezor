@@ -362,8 +362,8 @@ export function DocumentFields({
           disabled
         />
         <Text variant="caption" color="textTertiary">
-          {draft.attachment
-            ? `${draft.attachment.fileName} is attached. Changing files is not available yet.`
+          {draft.attachments.length > 0
+            ? `${draft.attachments.length} attached. Changing files is not available yet.`
             : 'Adding photos and files is not available yet.'}
         </Text>
       </FieldGroup>

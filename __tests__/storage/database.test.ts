@@ -111,7 +111,7 @@ async function seedCurrent() {
   );
   await db.execute("INSERT INTO notes VALUES ('n1', 'body')");
   await db.execute(
-    "INSERT INTO cards VALUES ('c1', '1234', 'qr', 'Holder', '')",
+    "INSERT INTO cards (item_id, card_number, code_format, holder_name, notes) VALUES ('c1', '1234', 'qr', 'Holder', '')",
   );
   db.close();
 }

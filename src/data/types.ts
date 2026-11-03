@@ -39,22 +39,50 @@ export interface Reminder extends BaseItem {
   completed: boolean;
 }
 
+/** Kept in storage; not shown until code scanning exists. */
 export type CardCodeFormat = 'barcode' | 'qr';
+
+export type AttachmentMimeType =
+  | 'image/jpeg'
+  | 'image/png'
+  | 'image/webp'
+  | 'image/heic'
+  | 'image/heif'
+  | 'application/pdf';
+
+/**
+ * Metadata of an encrypted attachment file. The bytes live in the native
+ * attachment store under `id`; SQLCipher holds this record.
+ */
+export interface Attachment {
+  /** UUIDv7; also names the encrypted file. Immutable. */
+  id: string;
+  /** Original display name. */
+  fileName: string;
+  mimeType: AttachmentMimeType;
+  sizeBytes: number;
+  /** SHA-256 of the plaintext (hex), checked whenever the file is read. */
+  sha256: string;
+  /** Encrypted file format version. */
+  formatVersion: number;
+  /** ISO 8601 */
+  createdAt: string;
+}
 
 export interface LoyaltyCard extends BaseItem {
   type: 'card';
+  /** Store or programme that issued the card. */
+  issuer: string;
   cardNumber: string;
   codeFormat: CardCodeFormat;
   holderName: string;
   notes: string;
+  /** Photos of the card (images only). */
+  frontImage: Attachment | null;
+  backImage: Attachment | null;
 }
 
 export type DocumentKind = 'receipt' | 'warranty' | 'image' | 'document';
-
-export interface Attachment {
-  fileName: string;
-  sizeKb: number;
-}
 
 export interface DocumentItem extends BaseItem {
   type: 'document';
@@ -67,7 +95,8 @@ export interface DocumentItem extends BaseItem {
   amount: number | null;
   currency: string;
   notes: string;
-  attachment: Attachment | null;
+  /** In display order; at most MAX_DOCUMENT_ATTACHMENTS. */
+  attachments: Attachment[];
 }
 
 export type Item = Note | Reminder | LoyaltyCard | DocumentItem;

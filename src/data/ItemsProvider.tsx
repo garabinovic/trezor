@@ -74,11 +74,13 @@ export function ItemsProvider({
 
   /** Applies a change locally, then persists it after any earlier writes. */
   const commit = useCallback(
-    (next: Item[], write: (repo: ItemRepository) => Promise<void>) => {
+    (next: Item[], write: (repo: ItemRepository) => Promise<unknown>) => {
       const repo = activeRepo.current;
       setItems(next);
       writeQueue.current = writeQueue.current
-        .then(() => write(repo))
+        .then(async () => {
+          await write(repo);
+        })
         .catch(async () => {
           setWriteError(true);
           // Fall back to what is actually stored.

@@ -1,6 +1,6 @@
 import { toIsoDate } from './format';
 import { formatLocalDateTime, localDateTimeOf } from '../reminders/recurrence';
-import { Item } from './types';
+import { Attachment, AttachmentMimeType, Item } from './types';
 
 /**
  * Realistic sample content for Phase 0 previews.
@@ -24,6 +24,21 @@ export function createSampleItems(now = new Date()): Item[] {
     d.setDate(d.getDate() + days);
     return toIsoDate(d);
   };
+  // Metadata only: sample attachments have no file behind them.
+  const file = (
+    n: number,
+    fileName: string,
+    mimeType: AttachmentMimeType,
+    sizeKb: number,
+  ): Attachment => ({
+    id: `00000000-0000-7000-8000-${String(n).padStart(12, '0')}`,
+    fileName,
+    mimeType,
+    sizeBytes: sizeKb * 1024,
+    sha256: '0'.repeat(64),
+    formatVersion: 1,
+    createdAt: ago(30),
+  });
 
   return [
     // Notes
@@ -141,10 +156,13 @@ export function createSampleItems(now = new Date()): Item[] {
       id: 'c1',
       type: 'card',
       title: 'Greenleaf Market',
+      issuer: '',
       cardNumber: '6044 1290 3381 4821',
       codeFormat: 'barcode',
       holderName: 'Jordan Hale',
       notes: 'Points reset every January.',
+      frontImage: null,
+      backImage: null,
       pinned: true,
       createdAt: ago(200),
       updatedAt: ago(200),
@@ -153,10 +171,13 @@ export function createSampleItems(now = new Date()): Item[] {
       id: 'c2',
       type: 'card',
       title: 'City Library',
+      issuer: '',
       cardNumber: '2100 0458 7712',
       codeFormat: 'barcode',
       holderName: 'Jordan Hale',
       notes: '',
+      frontImage: null,
+      backImage: null,
       pinned: false,
       createdAt: ago(320),
       updatedAt: ago(320),
@@ -165,10 +186,13 @@ export function createSampleItems(now = new Date()): Item[] {
       id: 'c3',
       type: 'card',
       title: 'Northside Pharmacy',
+      issuer: '',
       cardNumber: '880142276',
       codeFormat: 'qr',
       holderName: '',
       notes: '',
+      frontImage: null,
+      backImage: null,
       pinned: false,
       createdAt: ago(80),
       updatedAt: ago(80),
@@ -177,10 +201,13 @@ export function createSampleItems(now = new Date()): Item[] {
       id: 'c4',
       type: 'card',
       title: 'Ridge Fitness',
+      issuer: '',
       cardNumber: 'RF-20931',
       codeFormat: 'qr',
       holderName: 'Jordan Hale',
       notes: 'Membership renews on the 1st.',
+      frontImage: null,
+      backImage: null,
       pinned: false,
       createdAt: ago(45),
       updatedAt: ago(45),
@@ -198,7 +225,7 @@ export function createSampleItems(now = new Date()): Item[] {
       amount: 549,
       currency: 'EUR',
       notes: 'Model WM-8400. Two-year extended warranty included.',
-      attachment: { fileName: 'warranty-wm8400.pdf', sizeKb: 312 },
+      attachments: [file(1, 'warranty-wm8400.pdf', 'application/pdf', 312)],
       pinned: false,
       createdAt: ago(410),
       updatedAt: ago(410),
@@ -214,7 +241,7 @@ export function createSampleItems(now = new Date()): Item[] {
       amount: 189.9,
       currency: 'EUR',
       notes: '30-day return window.',
-      attachment: { fileName: 'receipt-outpost.jpg', sizeKb: 846 },
+      attachments: [file(2, 'receipt-outpost.jpg', 'image/jpeg', 846)],
       pinned: false,
       createdAt: ago(6),
       updatedAt: ago(6),
@@ -230,7 +257,7 @@ export function createSampleItems(now = new Date()): Item[] {
       amount: 1249,
       currency: 'EUR',
       notes: '',
-      attachment: { fileName: 'laptop-invoice.pdf', sizeKb: 1520 },
+      attachments: [file(3, 'laptop-invoice.pdf', 'application/pdf', 1520)],
       pinned: false,
       createdAt: ago(700),
       updatedAt: ago(15),
@@ -246,7 +273,7 @@ export function createSampleItems(now = new Date()): Item[] {
       amount: null,
       currency: 'EUR',
       notes: 'Expires in 2031.',
-      attachment: { fileName: 'passport.jpg', sizeKb: 2310 },
+      attachments: [file(4, 'passport.jpg', 'image/jpeg', 2310)],
       pinned: true,
       createdAt: ago(120),
       updatedAt: ago(120),
@@ -262,7 +289,7 @@ export function createSampleItems(now = new Date()): Item[] {
       amount: null,
       currency: 'EUR',
       notes: '',
-      attachment: { fileName: 'lease-2026.pdf', sizeKb: 640 },
+      attachments: [file(5, 'lease-2026.pdf', 'application/pdf', 640)],
       pinned: false,
       createdAt: ago(250),
       updatedAt: ago(250),

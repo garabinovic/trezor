@@ -323,13 +323,52 @@ is never silently converted or dropped). It runs through the normal procedure
 keys off, `foreign_key_check` before commit **[verified: Jest; emulator upgrade
 from the Phase 2 release build]**.
 
+### Schema v3 (`user_version = 3`, Phase 4)
+
+Additive only — no table is rebuilt and no existing row is rewritten:
+
+```sql
+attachments (id TEXT PK,                      -- UUIDv7; also names the encrypted file
+             item_id TEXT → items ON DELETE CASCADE,
+             role TEXT CHECK (card_front|card_back|document),
+             position INTEGER CHECK (>= 0),
+             file_name TEXT CHECK (non-empty),  -- original display name
+             mime_type TEXT,
+             size_bytes INTEGER CHECK (>= 0),   -- plaintext
+             sha256 TEXT CHECK (64 chars),      -- of the plaintext
+             format_version INTEGER CHECK (>= 1),
+             created_at INTEGER,
+             CHECK (role = 'document' OR (position = 0 AND mime_type GLOB 'image/*')))
+             UNIQUE INDEX attachments_item_place (item_id, role, position)
+cards       + issuer TEXT NOT NULL DEFAULT ''
+```
+
+- The unique index allows one front and one back per card and a unique order
+  within a document.
+- Structural rules are `CHECK`s. Product limits (allowed MIME types, 25 MB per
+  file, 10 per document) and "card roles only on cards" are enforced by the
+  repository (`attachmentProblem`, `src/data/attachments.ts`), so they can change
+  without a table rebuild.
+- No file paths are stored: the native store derives the file from the id, so
+  backups don't depend on this device's paths (§8).
+- `SqliteItemRepository.save` replaces an item's attachment rows in the item's
+  transaction and returns the ids it no longer has; `delete` returns the
+  deleted item's ids. The caller deletes those files only after the write
+  committed (wired in a later step). An id that belongs to another item fails on
+  the primary key and rolls the whole save back **[verified: Jest]**.
+- Migration 2 → 3 keeps every existing row exactly (cards gain `issuer = ''`);
+  a failure part-way rolls back to the intact v2 database **[verified: Jest]**.
+  It uses the normal snapshot procedure (§6). Real `sqlcipher_export` copies
+  `CREATE UNIQUE INDEX` (it has a separate pass); the test fake now does too.
+  Not yet run on a device.
+
 The full DDL is in `src/storage/migrations.ts`. Relationships:
-`items 1—1 {notes|reminders|cards|documents}`, chosen by `type`. A save that
-tries to change an item's type is rejected **[verified]**.
+`items 1—1 {notes|reminders|cards|documents}`, chosen by `type`;
+`items 1—n attachments`. A save that tries to change an item's type is rejected
+**[verified]**.
 
 **Not stored (deliberately):**
-- `DocumentItem.attachment` is always `null` from storage. Attachments arrive
-  with their own table in a later phase.
+- `cards.code_format` is kept but not shown until code scanning exists.
 - No `rev`/version column per row. It was proposed but has no consumer yet;
   add it with sync or merge-on-restore.
 
@@ -534,6 +573,8 @@ The design keeps backup independent of this device's Keystore:
 | Jest (automated) | 136 tests in 11 suites. Phase 1/1.1 suites (66) unchanged. Phase 2 adds: repository CRUD of every field for each type, type separation, pinning, ordering, search coverage and order, deletes, database errors and invalid input, on both repository implementations (23 more in `itemRepository.test.ts`, now 40); search matching incl. non-ASCII case (7); organizer filters, sorts, Home overview, document summaries (13); editor validation and normalization (13); **app-level flows** (14) driving the real screens and navigation on the real SQLite repositories via `serializeDatabase` (Home with stored data, all tabs and filter chips, create/edit/delete/pin/complete, validation, failed write, search opens the right item, theme and data persist across a remount) | **136/136 pass** |
 | Jest after Phase 3 (automated) | 228 tests in 14 suites; Phase 1–2 tests kept (fixtures updated to the v2 reminder shape; organizer sort tests updated to next-occurrence order, an intended change) plus the Phase 3 tests in §13.9 | **228/228 pass** |
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
+| Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
+| JVM after Phase 4 step 1 | `AttachmentFormatTest` 8, `AttachmentStoreTest` 9, `RecurrenceTest` 4 | **21/21 pass** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
 | Android instrumentation after the exact-alarm change | + `withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm` | **Not run** — emulator unusable; running it on the phone uninstalls the app |

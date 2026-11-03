@@ -160,8 +160,9 @@ class FakeDb {
     let copied = 0;
     for (const o of objects) {
       const ddl = String(o.sql).replace(
-        // Renamed tables are stored with a quoted name: CREATE TABLE "x" (…)
-        new RegExp(`^CREATE (TABLE|INDEX) ("?)${o.name}\\2`),
+        // Renamed tables are stored with a quoted name: CREATE TABLE "x" (…).
+        // Unique indexes are copied too (the real export has a separate pass).
+        new RegExp(`^CREATE (TABLE|INDEX|UNIQUE INDEX) ("?)${o.name}\\2`),
         `CREATE $1 ${alias}.$2${o.name}$2`,
       );
       this.handle.exec(ddl);

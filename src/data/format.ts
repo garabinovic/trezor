@@ -157,8 +157,9 @@ export function maskCardNumber(cardNumber: string): string {
   return digits.length > 4 ? `•••• ${digits.slice(-4)}` : digits;
 }
 
-export function formatFileSize(sizeKb: number): string {
-  return sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb} KB`;
+export function formatFileSize(sizeBytes: number): string {
+  const kb = sizeBytes === 0 ? 0 : Math.max(1, Math.round(sizeBytes / 1024));
+  return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
 }
 
 /** Parses a strict YYYY-MM-DD string; returns null when invalid. */

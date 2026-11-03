@@ -246,16 +246,22 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
 
   return (
     <View style={styles.body}>
-      {doc.attachment && (
-        <Section title="Attachment" grouped>
-          <ListItem
-            icon={Paperclip}
-            title={doc.attachment.fileName}
-            subtitle={`${formatFileSize(
-              doc.attachment.sizeKb,
-            )} · Opening files is not available yet`}
-            disabled
-          />
+      {doc.attachments.length > 0 && (
+        <Section
+          title={doc.attachments.length > 1 ? 'Attachments' : 'Attachment'}
+          grouped
+        >
+          {doc.attachments.map(a => (
+            <ListItem
+              key={a.id}
+              icon={Paperclip}
+              title={a.fileName}
+              subtitle={`${formatFileSize(
+                a.sizeBytes,
+              )} · Opening files is not available yet`}
+              disabled
+            />
+          ))}
         </Section>
       )}
       <Section title="Details" grouped>

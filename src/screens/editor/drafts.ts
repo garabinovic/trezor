@@ -40,10 +40,13 @@ export function createBlankItem(type: ItemType): Item {
       return {
         ...base,
         type,
+        issuer: '',
         cardNumber: '',
         codeFormat: 'barcode',
         holderName: '',
         notes: '',
+        frontImage: null,
+        backImage: null,
       };
     case 'document':
       return {
@@ -56,7 +59,7 @@ export function createBlankItem(type: ItemType): Item {
         amount: null,
         currency: 'EUR',
         notes: '',
-        attachment: null,
+        attachments: [],
       };
   }
 }
@@ -129,6 +132,7 @@ export function normalize(item: Item): Item {
     case 'card':
       return {
         ...trimmed,
+        issuer: trimmed.issuer.trim(),
         cardNumber: trimmed.cardNumber.trim(),
         holderName: trimmed.holderName.trim(),
         notes: trimmed.notes.trim(),

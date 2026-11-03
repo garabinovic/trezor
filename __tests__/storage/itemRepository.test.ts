@@ -1,4 +1,9 @@
-import type { Item } from '../../src/data/types';
+import type {
+  Attachment,
+  DocumentItem,
+  Item,
+  LoyaltyCard,
+} from '../../src/data/types';
 import { createSampleItems } from '../../src/data/sampleData';
 import {
   InMemoryItemRepository,
@@ -15,9 +20,8 @@ import { createNodeSqliteDatabase } from '../../test-utils/nodeSqlite';
 
 const NOW = new Date('2026-10-30T12:00:00.000Z');
 
-// Sample data has a document attachment, which is not persisted yet.
-const persistable = (items: Item[]) =>
-  items.map(i => (i.type === 'document' ? { ...i, attachment: null } : i));
+// Sample data now persists as is, attachment records included.
+const persistable = (items: Item[]) => items;
 
 const byId = (items: Item[]) =>
   [...items].sort((a, b) => a.id.localeCompare(b.id));
@@ -210,6 +214,9 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
     {
       id: 'c',
       type: 'card',
+      issuer: '',
+      frontImage: null,
+      backImage: null,
       title: 'Shop',
       cardNumber: '0012 3456',
       codeFormat: 'barcode',
@@ -222,6 +229,9 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
     {
       id: 'c',
       type: 'card',
+      issuer: '',
+      frontImage: null,
+      backImage: null,
       title: 'Shop+',
       cardNumber: 'AB-99',
       codeFormat: 'qr',
@@ -244,7 +254,7 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
       amount: 499.99,
       currency: 'EUR',
       notes: '',
-      attachment: null,
+      attachments: [],
       pinned: false,
       createdAt: T0,
       updatedAt: T0,
@@ -260,7 +270,7 @@ const fixtures: Record<Item['type'], [Item, Item]> = {
       amount: null,
       currency: 'RSD',
       notes: 'renew',
-      attachment: null,
+      attachments: [],
       pinned: true,
       createdAt: T0,
       updatedAt: T1,
@@ -452,5 +462,218 @@ describe('settings for notifications', () => {
     const reopened = new SqliteSettingsRepository(db);
     expect(await reopened.get('notifications.showDetails')).toBe(true);
     expect(await reopened.get('notifications.permissionRequested')).toBe(true);
+  });
+});
+
+describe.each(implementations)('%s attachments', (_name, create) => {
+  const T = '2026-10-01T08:00:00.000Z';
+  const file = (n: number, patch: Partial<Attachment> = {}): Attachment => ({
+    id: `01a1a0dd-0000-7000-8000-${String(n).padStart(12, '0')}`,
+    fileName: `file-${n}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1000 + n,
+    sha256: String(n % 10).repeat(64),
+    formatVersion: 1,
+    createdAt: T,
+    ...patch,
+  });
+  const photo = (n: number) =>
+    file(n, { fileName: `photo-${n}.jpg`, mimeType: 'image/jpeg' });
+  const doc = (id: string, attachments: Attachment[]): DocumentItem => ({
+    id,
+    type: 'document',
+    kind: 'warranty',
+    title: `Doc ${id}`,
+    merchant: '',
+    date: null,
+    expiresOn: null,
+    amount: null,
+    currency: 'EUR',
+    notes: '',
+    attachments,
+    pinned: false,
+    createdAt: T,
+    updatedAt: T,
+  });
+  const card = (
+    id: string,
+    frontImage: Attachment | null,
+    backImage: Attachment | null,
+  ): LoyaltyCard => ({
+    id,
+    type: 'card',
+    title: 'Gold rewards',
+    issuer: 'Greenleaf Market',
+    cardNumber: '6044',
+    codeFormat: 'barcode',
+    holderName: '',
+    notes: '',
+    frontImage,
+    backImage,
+    pinned: false,
+    createdAt: T,
+    updatedAt: T,
+  });
+
+  let repo: ItemRepository;
+  beforeEach(async () => {
+    repo = await create();
+  });
+
+  const stored = async (id: string) =>
+    (await repo.listAll()).find(i => i.id === id);
+
+  test('a document keeps its attachments, in order, with every field', async () => {
+    const d = doc('d', [file(3), photo(1), file(2)]);
+    expect(await repo.save(d)).toEqual([]);
+    expect(await stored('d')).toEqual(d);
+    expect((await repo.listAttachmentIds()).sort()).toEqual(
+      [file(1).id, file(2).id, file(3).id].sort(),
+    );
+  });
+
+  test('a card keeps its issuer and front and back images', async () => {
+    const c = card('c', photo(1), photo(2));
+    await repo.save(c);
+    expect(await stored('c')).toEqual(c);
+    await repo.save(card('c', null, photo(2)));
+    expect(await stored('c')).toMatchObject({
+      frontImage: null,
+      backImage: photo(2),
+      issuer: 'Greenleaf Market',
+    });
+  });
+
+  test('saving reports the attachments that were removed; reordering removes none', async () => {
+    await repo.save(doc('d', [file(1), file(2), file(3)]));
+    expect(await repo.save(doc('d', [file(3), file(1), file(2)]))).toEqual([]);
+    expect((await stored('d')) as DocumentItem).toMatchObject({
+      attachments: [file(3), file(1), file(2)],
+    });
+    expect(await repo.save(doc('d', [file(1), file(4)]))).toEqual(
+      expect.arrayContaining([file(2).id, file(3).id]),
+    );
+    expect((await repo.listAttachmentIds()).sort()).toEqual(
+      [file(1).id, file(4).id].sort(),
+    );
+    // Replacing a card side reports the old image.
+    await repo.save(card('c', photo(5), null));
+    expect(await repo.save(card('c', photo(6), null))).toEqual([photo(5).id]);
+  });
+
+  test('deleting an item reports its attachments and removes only their records', async () => {
+    await repo.save(doc('a', [file(1), file(2)]));
+    await repo.save(card('c', photo(3), photo(4)));
+    expect((await repo.delete('a')).sort()).toEqual(
+      [file(1).id, file(2).id].sort(),
+    );
+    expect((await repo.delete('c')).sort()).toEqual(
+      [photo(3).id, photo(4).id].sort(),
+    );
+    expect(await repo.delete('unknown')).toEqual([]);
+    expect(await repo.listAttachmentIds()).toEqual([]);
+  });
+
+  test.each([
+    ['too many attachments', doc('d', [...Array(11)].map((_, i) => file(i)))],
+    ['a file over 25 MB', doc('d', [file(1, { sizeBytes: 25 * 1024 * 1024 + 1 })])],
+    ['an unsupported type', doc('d', [file(1, { mimeType: 'text/html' as never })])],
+    ['a PDF as a card image', card('c', file(1), null)],
+    ['an invalid id', doc('d', [file(1, { id: '../keys/database' })])],
+    ['an invalid checksum', doc('d', [file(1, { sha256: 'abc' })])],
+    ['the same file twice', doc('d', [file(1), file(1)])],
+    ['the same file on both card sides', card('c', photo(1), photo(1))],
+  ])('rejects %s without changing anything', async (_case, bad) => {
+    const original = bad.type === 'card' ? card('c', null, null) : doc('d', [file(7)]);
+    await repo.save(original);
+    await expect(repo.save(bad)).rejects.toThrow();
+    expect(await stored(original.id)).toEqual(original);
+  });
+
+  test('exactly 10 attachments of 25 MB each are allowed', async () => {
+    const max = [...Array(10)].map((_, i) =>
+      file(i, { sizeBytes: 25 * 1024 * 1024 }),
+    );
+    await repo.save(doc('d', max));
+    expect(((await stored('d')) as DocumentItem).attachments).toHaveLength(10);
+  });
+
+  test('an attachment belongs to one item only; the failed save changes nothing', async () => {
+    await repo.save(doc('a', [file(1)]));
+    await repo.save(doc('b', [file(2)]));
+    const stolen = { ...doc('b', [file(2), file(1)]), title: 'Changed' };
+    await expect(repo.save(stolen)).rejects.toThrow();
+    expect(await stored('b')).toEqual(doc('b', [file(2)]));
+    expect(await stored('a')).toEqual(doc('a', [file(1)]));
+  });
+
+  test('search finds card issuers and attachment file names', async () => {
+    await repo.save(card('c', null, null));
+    await repo.save(doc('d', [file(1, { fileName: 'Lease-2026.pdf' })]));
+    expect((await repo.search('greenleaf')).map(i => i.id)).toEqual(['c']);
+    expect((await repo.search('lease-2026')).map(i => i.id)).toEqual(['d']);
+  });
+});
+
+describe('SqliteItemRepository attachment storage', () => {
+  test('records survive reopening; no paths are stored, only ids', async () => {
+    const { db, repo } = await sqliteRepo();
+    const a: Attachment = {
+      id: '01a1a0dd-0000-7000-8000-000000000001',
+      fileName: 'receipt.jpg',
+      mimeType: 'image/jpeg',
+      sizeBytes: 2048,
+      sha256: 'f'.repeat(64),
+      formatVersion: 1,
+      createdAt: '2026-10-01T08:00:00.000Z',
+    };
+    const d = {
+      ...(fixtures.document[0] as DocumentItem),
+      attachments: [a],
+    };
+    await repo.save(d);
+    const reopened = new SqliteItemRepository(db);
+    expect((await reopened.listAll()).find(i => i.id === d.id)).toEqual(d);
+    const [row] = await db.execute('SELECT * FROM attachments');
+    expect(row).toEqual({
+      id: a.id,
+      item_id: d.id,
+      role: 'document',
+      position: 0,
+      file_name: 'receipt.jpg',
+      mime_type: 'image/jpeg',
+      size_bytes: 2048,
+      sha256: a.sha256,
+      format_version: 1,
+      created_at: Date.parse(a.createdAt),
+    });
+  });
+
+  test('a database failure while saving attachments rolls the whole item back', async () => {
+    const { db, repo } = await sqliteRepo();
+    const original = fixtures.document[0] as DocumentItem;
+    await repo.save(original);
+    await db.execute(
+      "CREATE TRIGGER no_files BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    const edited = {
+      ...original,
+      title: 'Edited',
+      attachments: [
+        {
+          id: '01a1a0dd-0000-7000-8000-000000000009',
+          fileName: 'x.pdf',
+          mimeType: 'application/pdf' as const,
+          sizeBytes: 1,
+          sha256: '1'.repeat(64),
+          formatVersion: 1,
+          createdAt: original.createdAt,
+        },
+      ],
+    };
+    await expect(repo.save(edited)).rejects.toMatchObject({
+      code: 'WRITE_FAILED',
+    });
+    expect((await repo.listAll())[0]).toEqual(original);
   });
 });

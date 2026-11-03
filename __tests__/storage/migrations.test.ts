@@ -26,6 +26,7 @@ describe('migrations', () => {
     const result = await runMigrations(db);
     expect(result).toEqual({ from: 0, to: LATEST_SCHEMA_VERSION });
     expect(await tableNames(db)).toEqual([
+      'attachments',
       'cards',
       'documents',
       'items',
@@ -252,6 +253,8 @@ describe('foreign keys during migrations (M3, L2)', () => {
 
 describe('v2: reminder scheduling migration', () => {
   const v1Only = migrations.filter(m => m.version === 1);
+  // Exactly v1 → v2 here; v3 has its own tests below.
+  const throughV2 = migrations.filter(m => m.version <= 2);
 
   async function v1WithData() {
     const db = createNodeSqliteDatabase();
@@ -280,7 +283,7 @@ describe('v2: reminder scheduling migration', () => {
 
   test('preserves every reminder; "none" becomes "once"; local start from due_at', async () => {
     const { db, due } = await v1WithData();
-    expect(await runMigrations(db)).toEqual({ from: 1, to: 2 });
+    expect(await runMigrations(db, throughV2)).toEqual({ from: 1, to: 2 });
     const rows = await db.execute(
       'SELECT item_id, due_at, local_start, repeat, interval_minutes, notes, completed FROM reminders ORDER BY item_id',
     );
@@ -400,6 +403,172 @@ describe('v2: reminder scheduling migration', () => {
     expect(await tableNames(db)).not.toContain('reminders_v2');
     expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
     // The real v2 then succeeds.
-    expect(await runMigrations(db)).toEqual({ from: 1, to: 2 });
+    expect(await runMigrations(db, throughV2)).toEqual({ from: 1, to: 2 });
+  });
+});
+
+describe('v3: attachments and card issuer migration', () => {
+  const throughV2 = migrations.filter(m => m.version <= 2);
+  const v3 = migrations.find(m => m.version === 3)!;
+  const SHA = 'a'.repeat(64);
+
+  /** A v2 database with a row in every table. */
+  async function v2WithData() {
+    const db = createNodeSqliteDatabase();
+    await runMigrations(db, throughV2);
+    await db.execute(
+      "INSERT INTO items VALUES ('n', 'note', 'Note', 1, 1, 2), ('r', 'reminder', 'Rem', 0, 1, 2), ('c', 'card', 'Card', 1, 3, 4), ('d', 'document', 'Doc', 0, 5, 6)",
+    );
+    await db.execute("INSERT INTO notes VALUES ('n', 'body')");
+    await db.execute(
+      "INSERT INTO reminders VALUES ('r', 7, '2026-01-31T10:15', 'interval', 120, 'desc', 0)",
+    );
+    await db.execute(
+      "INSERT INTO cards VALUES ('c', '6044 1290', 'qr', 'Ana', 'card notes')",
+    );
+    await db.execute(
+      "INSERT INTO documents VALUES ('d', 'warranty', 'HomeTech', '2025-01-02', '2027-01-02', 54900, 'EUR', 'doc notes')",
+    );
+    await db.execute(
+      'INSERT INTO settings VALUES (\'theme.preference\', \'"dark"\')',
+    );
+    return db;
+  }
+
+  const dump = async (db: ReturnType<typeof createNodeSqliteDatabase>) => {
+    const out: Record<string, unknown[]> = {};
+    for (const table of [
+      'items',
+      'notes',
+      'reminders',
+      'documents',
+      'settings',
+    ]) {
+      out[table] = await db.execute(`SELECT * FROM ${table} ORDER BY 1`);
+    }
+    return out;
+  };
+
+  const insert = (
+    db: ReturnType<typeof createNodeSqliteDatabase>,
+    values: Partial<Record<string, unknown>> = {},
+  ) => {
+    const row = {
+      id: '00000000-0000-7000-8000-000000000001',
+      item_id: 'd',
+      role: 'document',
+      position: 0,
+      file_name: 'receipt.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 10,
+      sha256: SHA,
+      format_version: 1,
+      created_at: 1,
+      ...values,
+    };
+    return db.execute(
+      `INSERT INTO attachments (${Object.keys(row).join(
+        ', ',
+      )}) VALUES (${Object.keys(row)
+        .map(() => '?')
+        .join(', ')})`,
+      Object.values(row) as never[],
+    );
+  };
+
+  test('is additive: every existing row is kept exactly; cards get an empty issuer', async () => {
+    const db = await v2WithData();
+    const before = await dump(db);
+    const cardsBefore = await db.execute('SELECT * FROM cards');
+
+    expect(await runMigrations(db)).toEqual({ from: 2, to: 3 });
+
+    expect(await dump(db)).toEqual(before);
+    expect(await db.execute('SELECT * FROM cards')).toEqual(
+      cardsBefore.map(r => ({ ...r, issuer: '' })),
+    );
+    expect(await db.execute('SELECT * FROM attachments')).toEqual([]);
+    expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
+    expect(await db.execute('PRAGMA foreign_key_check')).toEqual([]);
+  });
+
+  test('constraints: roles, card images, one card side, unique order, parent required', async () => {
+    const db = await v2WithData();
+    await runMigrations(db);
+    await insert(db);
+    await insert(db, {
+      id: '00000000-0000-7000-8000-000000000002',
+      position: 1,
+    });
+    await insert(db, {
+      id: '00000000-0000-7000-8000-000000000003',
+      item_id: 'c',
+      role: 'card_front',
+      mime_type: 'image/jpeg',
+    });
+    const id = (n: number) => `00000000-0000-7000-8000-00000000001${n}`;
+    const rejected = [
+      { id: id(0), role: 'cover' },
+      { id: id(1), position: -1 },
+      { id: id(2), position: 1 }, // same place as another document file
+      { id: id(3), item_id: 'c', role: 'card_back', mime_type: 'application/pdf' },
+      { id: id(4), item_id: 'c', role: 'card_back', mime_type: 'image/png', position: 1 },
+      { id: id(5), item_id: 'c', role: 'card_front', mime_type: 'image/png' }, // second front
+      { id: id(6), size_bytes: -1, position: 5 },
+      { id: id(7), sha256: 'abc', position: 6 },
+      { id: id(8), format_version: 0, position: 7 },
+      { id: id(9), file_name: '', position: 8 },
+      { id: '00000000-0000-7000-8000-000000000001', position: 9 }, // duplicate id
+      { id: id(9), item_id: 'nope', position: 10 }, // no such item
+    ];
+    for (const values of rejected) {
+      await expect(insert(db, values)).rejects.toThrow();
+    }
+    expect(
+      (await db.execute('SELECT count(*) AS n FROM attachments'))[0].n,
+    ).toBe(3);
+  });
+
+  test('deleting an item deletes its attachment records, and only those', async () => {
+    const db = await v2WithData();
+    await runMigrations(db);
+    await insert(db);
+    await insert(db, {
+      id: '00000000-0000-7000-8000-000000000003',
+      item_id: 'c',
+      role: 'card_front',
+      mime_type: 'image/jpeg',
+    });
+    await db.execute("DELETE FROM items WHERE id = 'd'");
+    expect(
+      (await db.execute('SELECT id FROM attachments')).map(r => r.id),
+    ).toEqual(['00000000-0000-7000-8000-000000000003']);
+  });
+
+  test('a failure part-way through v3 rolls back to the intact v2 database', async () => {
+    const db = await v2WithData();
+    const before = await dump(db);
+    const broken: Migration[] = [
+      ...throughV2,
+      {
+        ...v3,
+        async up(tx) {
+          await v3.up(tx);
+          throw new Error('power cut');
+        },
+      },
+    ];
+    await expect(runMigrations(db, broken)).rejects.toMatchObject({
+      code: 'MIGRATION_FAILED',
+    });
+    expect(await getUserVersion(db)).toBe(2);
+    expect(await tableNames(db)).not.toContain('attachments');
+    expect(
+      (await db.execute('PRAGMA table_info(cards)')).map(c => c.name),
+    ).not.toContain('issuer');
+    expect(await dump(db)).toEqual(before);
+    expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
+    // The real v3 then succeeds.
+    expect(await runMigrations(db)).toEqual({ from: 2, to: 3 });
   });
 });

@@ -155,7 +155,7 @@ describe('document list summary', () => {
     amount: null,
     currency: 'EUR',
     notes: '',
-    attachment: null,
+    attachments: [],
     pinned: false,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),

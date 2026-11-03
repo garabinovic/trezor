@@ -1,4 +1,7 @@
+import { attachmentProblem, placedAttachments } from '../data/attachments';
 import type {
+  Attachment,
+  AttachmentMimeType,
   CardCodeFormat,
   DocumentItem,
   DocumentKind,
@@ -43,11 +46,29 @@ function base(row: SqlRow) {
 
 const ITEM_COLUMNS = 'i.id, i.title, i.pinned, i.created_at, i.updated_at';
 
+function attachment(row: SqlRow): Attachment {
+  return {
+    id: str(row.id),
+    fileName: str(row.file_name),
+    mimeType: str(row.mime_type) as AttachmentMimeType,
+    sizeBytes: Number(row.size_bytes),
+    sha256: str(row.sha256),
+    formatVersion: Number(row.format_version),
+    createdAt: toIso(row.created_at),
+  };
+}
+
+const attachmentIdsOfItem = async (db: SqlExecutor, itemId: string) =>
+  (
+    await db.execute('SELECT id FROM attachments WHERE item_id = ?', [itemId])
+  ).map(r => str(r.id));
+
 export class SqliteItemRepository implements ItemRepository {
   constructor(private readonly db: SqlDatabase) {}
 
   async listAll(): Promise<Item[]> {
-    const [notes, reminders, cards, documents] = await Promise.all([
+    const [notes, reminders, cards, documents, attachmentRows] =
+      await Promise.all([
       this.db.execute(
         `SELECT ${ITEM_COLUMNS}, d.body
          FROM items i JOIN notes d ON d.item_id = i.id`,
@@ -58,7 +79,8 @@ export class SqliteItemRepository implements ItemRepository {
          FROM items i JOIN reminders d ON d.item_id = i.id`,
       ),
       this.db.execute(
-        `SELECT ${ITEM_COLUMNS}, d.card_number, d.code_format, d.holder_name, d.notes
+        `SELECT ${ITEM_COLUMNS}, d.issuer, d.card_number, d.code_format,
+                d.holder_name, d.notes
          FROM items i JOIN cards d ON d.item_id = i.id`,
       ),
       this.db.execute(
@@ -66,7 +88,25 @@ export class SqliteItemRepository implements ItemRepository {
                 d.amount_minor, d.currency, d.notes
          FROM items i JOIN documents d ON d.item_id = i.id`,
       ),
+      this.db.execute(
+        `SELECT id, item_id, role, file_name, mime_type, size_bytes, sha256,
+                format_version, created_at
+         FROM attachments ORDER BY item_id, role, position`,
+      ),
     ]);
+
+    const placed = new Map<string, Attachment>(); // "<item>|<card role>"
+    const documentFiles = new Map<string, Attachment[]>();
+    for (const row of attachmentRows) {
+      const itemId = str(row.item_id);
+      if (row.role === 'document') {
+        const list = documentFiles.get(itemId) ?? [];
+        list.push(attachment(row));
+        documentFiles.set(itemId, list);
+      } else {
+        placed.set(`${itemId}|${str(row.role)}`, attachment(row));
+      }
+    }
 
     const items: Item[] = [
       ...notes.map(
@@ -89,10 +129,13 @@ export class SqliteItemRepository implements ItemRepository {
         (r): LoyaltyCard => ({
           ...base(r),
           type: 'card',
+          issuer: str(r.issuer),
           cardNumber: str(r.card_number),
           codeFormat: str(r.code_format) as CardCodeFormat,
           holderName: str(r.holder_name),
           notes: str(r.notes),
+          frontImage: placed.get(`${str(r.id)}|card_front`) ?? null,
+          backImage: placed.get(`${str(r.id)}|card_back`) ?? null,
         }),
       ),
       ...documents.map(
@@ -106,8 +149,7 @@ export class SqliteItemRepository implements ItemRepository {
           amount: fromMinor(r.amount_minor),
           currency: str(r.currency),
           notes: str(r.notes),
-          // Attachments are not stored yet (later phase).
-          attachment: null,
+          attachments: documentFiles.get(str(r.id)) ?? [],
         }),
       ),
     ];
@@ -124,9 +166,13 @@ export class SqliteItemRepository implements ItemRepository {
     return filterBySearch(await this.listAll(), term);
   }
 
-  async save(item: Item): Promise<void> {
+  async save(item: Item): Promise<string[]> {
+    const problem = attachmentProblem(item);
+    if (problem) {
+      throw new StorageError('WRITE_FAILED', problem);
+    }
     try {
-      await this.db.transaction(async tx => {
+      return await this.db.transaction(async tx => {
         await tx.execute(
           `INSERT INTO items (id, type, title, pinned, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)
@@ -150,20 +196,65 @@ export class SqliteItemRepository implements ItemRepository {
           throw new Error(`Item ${item.id} cannot change type`);
         }
         await saveDetail(tx, item);
+        return saveAttachments(tx, item);
       });
     } catch (e) {
       throw new StorageError('WRITE_FAILED', (e as Error).message);
     }
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string): Promise<string[]> {
     try {
-      // Detail rows go with it (ON DELETE CASCADE).
-      await this.db.execute('DELETE FROM items WHERE id = ?', [id]);
+      return await this.db.transaction(async tx => {
+        const ids = await attachmentIdsOfItem(tx, id);
+        // Detail and attachment rows go with it (ON DELETE CASCADE).
+        await tx.execute('DELETE FROM items WHERE id = ?', [id]);
+        return ids;
+      });
     } catch (e) {
       throw new StorageError('WRITE_FAILED', (e as Error).message);
     }
   }
+
+  async listAttachmentIds(): Promise<string[]> {
+    return (await this.db.execute('SELECT id FROM attachments')).map(r =>
+      str(r.id),
+    );
+  }
+}
+
+/**
+ * Makes the item's attachment rows match the item: rows are replaced as a
+ * whole (records are immutable apart from their place, and replacing avoids
+ * transient clashes on the unique place index when reordering). An id that
+ * belongs to another item fails on the primary key. Returns the removed ids.
+ */
+async function saveAttachments(tx: SqlExecutor, item: Item): Promise<string[]> {
+  const before = await attachmentIdsOfItem(tx, item.id);
+  await tx.execute('DELETE FROM attachments WHERE item_id = ?', [item.id]);
+  const placed = placedAttachments(item);
+  for (const { attachment: a, role, position } of placed) {
+    await tx.execute(
+      `INSERT INTO attachments
+         (id, item_id, role, position, file_name, mime_type, size_bytes, sha256,
+          format_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        a.id,
+        item.id,
+        role,
+        position,
+        a.fileName,
+        a.mimeType,
+        a.sizeBytes,
+        a.sha256,
+        a.formatVersion,
+        toMs(a.createdAt),
+      ],
+    );
+  }
+  const kept = new Set(placed.map(p => p.attachment.id));
+  return before.filter(id => !kept.has(id));
 }
 
 function saveDetail(tx: SqlExecutor, item: Item) {
@@ -195,13 +286,15 @@ function saveDetail(tx: SqlExecutor, item: Item) {
       );
     case 'card':
       return tx.execute(
-        `INSERT INTO cards (item_id, card_number, code_format, holder_name, notes)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO cards (item_id, issuer, card_number, code_format, holder_name, notes)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT (item_id) DO UPDATE SET
+           issuer = excluded.issuer,
            card_number = excluded.card_number, code_format = excluded.code_format,
            holder_name = excluded.holder_name, notes = excluded.notes`,
         [
           item.id,
+          item.issuer,
           item.cardNumber,
           item.codeFormat,
           item.holderName,

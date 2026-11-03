@@ -9,14 +9,20 @@ export function searchableText(item: Item): string[] {
     case 'reminder':
       return [item.title, item.notes];
     case 'card':
-      return [item.title, item.cardNumber, item.holderName, item.notes];
+      return [
+        item.title,
+        item.issuer,
+        item.cardNumber,
+        item.holderName,
+        item.notes,
+      ];
     case 'document':
       return [
         item.title,
         item.merchant,
         item.notes,
         documentKinds[item.kind].label,
-        item.attachment?.fileName ?? '',
+        ...item.attachments.map(a => a.fileName),
       ];
   }
 }

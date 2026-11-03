@@ -122,6 +122,36 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    version: 3,
+    description: 'Attachments (encrypted files) and card issuer',
+    async up(tx) {
+      // Additive only: no table is rebuilt and no existing row is rewritten.
+      // Structural rules are CHECKs; product limits (file types, sizes,
+      // counts) are enforced by the repository so they can change without a
+      // rebuild.
+      await tx.execute(`CREATE TABLE attachments (
+        id              TEXT PRIMARY KEY NOT NULL,
+        item_id         TEXT NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+        role            TEXT NOT NULL CHECK (role IN ('card_front','card_back','document')),
+        position        INTEGER NOT NULL CHECK (position >= 0),
+        file_name       TEXT NOT NULL CHECK (length(file_name) > 0),
+        mime_type       TEXT NOT NULL,
+        size_bytes      INTEGER NOT NULL CHECK (size_bytes >= 0),
+        sha256          TEXT NOT NULL CHECK (length(sha256) = 64),
+        format_version  INTEGER NOT NULL CHECK (format_version >= 1),
+        created_at      INTEGER NOT NULL,
+        CHECK (role = 'document' OR (position = 0 AND mime_type GLOB 'image/*'))
+      ) STRICT`);
+      // One front and one back per card; unique order within a document.
+      await tx.execute(
+        'CREATE UNIQUE INDEX attachments_item_place ON attachments (item_id, role, position)',
+      );
+      await tx.execute(
+        "ALTER TABLE cards ADD COLUMN issuer TEXT NOT NULL DEFAULT ''",
+      );
+    },
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = migrations[migrations.length - 1].version;
