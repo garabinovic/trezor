@@ -647,7 +647,11 @@ or a physical device, and no instrumentation test was run.
   pick record that fails `parsePickResult` validation is dropped silently, and
   its `.tza` file stays until startup cleanup. Today Kotlin and TS agree, so
   this can't happen yet.
-- **Open, Low: calls after the module shuts down.** After `invalidate()` (JS reload
+- **Fixed, Low: calls after the module shuts down.** All submissions go
+  through `SafeSubmit`. A refused one rejects with `IO_FAILED`, accepted work
+  still settles, and `invalidate()` is idempotent. Not covered: a picker or
+  Save a copy result that never arrives because the module was torn down
+  while the system UI was open. Before the fix: After `invalidate()` (JS reload
   or host teardown), most `TrezorAttachmentsModule` methods would throw
   `RejectedExecutionException`, and their promises would never settle.
 - **Informational:**
