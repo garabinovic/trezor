@@ -39,6 +39,14 @@ export const fakeAttachments = {
   purges: 0,
   /** Every URI passed to closeView. */
   closed: [] as string[],
+  /** Save a copy / share requests, with what was passed. */
+  exports: [] as { id: string; fileName: string; mimeType: string }[],
+  shares: [] as { id: string; fileName: string; mimeType: string }[],
+  /** What the next Save a copy does: the user saves, cancels, or it fails. */
+  nextExport: 'saved' as 'saved' | 'cancelled' | { error: string },
+  /** Make the next share fail with this code. */
+  nextShareError: null as string | null,
+  sharePurges: 0,
   nextPick: null as NextPick | null,
   failNextDelete: false,
   failNextGc: false,
@@ -58,6 +66,11 @@ export const fakeAttachments = {
     this.failingPages = new Set();
     this.purges = 0;
     this.closed = [];
+    this.exports = [];
+    this.shares = [];
+    this.nextExport = 'saved';
+    this.nextShareError = null;
+    this.sharePurges = 0;
     this.nextPick = null;
     this.failNextDelete = false;
     this.failNextGc = false;
@@ -149,6 +162,49 @@ export const fakeAttachments = {
           fakeAttachments.pageViews.delete(uri);
         }
       }
+    },
+    async saveCopy(
+      id: string,
+      _sizeBytes: number,
+      _sha256: string,
+      fileName: string,
+      mimeType: string,
+    ) {
+      // Like native: the attachment is checked before the picker opens.
+      const error =
+        fakeAttachments.viewErrors.get(id) ??
+        (fakeAttachments.files.has(id) ? null : 'MISSING');
+      if (error) {
+        throw Object.assign(new Error('export failed'), { code: error });
+      }
+      fakeAttachments.exports.push({ id, fileName, mimeType });
+      const next = fakeAttachments.nextExport;
+      fakeAttachments.nextExport = 'saved';
+      if (typeof next === 'object') {
+        throw Object.assign(new Error('export failed'), { code: next.error });
+      }
+      return next;
+    },
+    async share(
+      id: string,
+      _sizeBytes: number,
+      _sha256: string,
+      fileName: string,
+      mimeType: string,
+    ) {
+      const error =
+        fakeAttachments.viewErrors.get(id) ??
+        (fakeAttachments.files.has(id) ? null : 'MISSING') ??
+        fakeAttachments.nextShareError;
+      fakeAttachments.nextShareError = null;
+      if (error) {
+        throw Object.assign(new Error('share failed'), { code: error });
+      }
+      fakeAttachments.shares.push({ id, fileName, mimeType });
+    },
+    async purgeExpiredShares() {
+      fakeAttachments.sharePurges++;
+      return 0;
     },
     async purgeInactiveViews() {
       fakeAttachments.purges++;

@@ -4,13 +4,16 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments
 import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.core.content.FileProvider
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -20,6 +23,7 @@ import com.trezor.app.vault.KeyVault
 import com.trezor.app.vault.NativeTrezorAttachmentsSpec
 import com.trezor.app.vault.VaultException
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import org.json.JSONArray
@@ -52,6 +56,9 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   // Decrypted copies for display live only in the private cache, never in shared storage.
   private val views = AttachmentViews(store, File(reactContext.cacheDir, "attachments/view"))
   private val pdfs = PdfViews(views)
+  private val export = AttachmentExport(store)
+  // The FileProvider serves this directory only (res/xml/attachment_share_paths.xml).
+  private val shares = ShareFiles(store, File(reactContext.cacheDir, "attachments/share"))
   /** One worker: imports, deletes and garbage collection never overlap. */
   private val worker: ExecutorService = Executors.newSingleThreadExecutor()
   /** PDF pages render here, so scrolling isn't held up by an import. */
@@ -64,8 +71,17 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       val parse: (resultCode: Int, data: Intent?) -> List<Uri>,
   )
 
+  private class PendingExport(
+      val promise: Promise,
+      val id: String,
+      val sizeBytes: Long,
+      val sha256: String,
+  )
+
   /** Main thread only. */
   private var pending: PendingPick? = null
+  /** Main thread only. */
+  private var pendingExport: PendingExport? = null
 
   init {
     reactContext.addActivityEventListener(this)
@@ -92,7 +108,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       val activity = reactContext.currentActivity
       when {
         activity == null -> promise.reject("NO_ACTIVITY", "Trezor is not in the foreground")
-        pending != null -> promise.reject("BUSY", "A picker is already open")
+        pending != null || pendingExport != null ->
+            promise.reject("BUSY", "A picker is already open")
         else -> launch(activity, source, imagesOnly, max, promise)
       }
     }
@@ -143,6 +160,10 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   }
 
   override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+    if (requestCode == REQUEST_EXPORT) {
+      onExportDestination(resultCode, data)
+      return
+    }
     if (requestCode != REQUEST_PICK) return
     // Absent when the app process was restarted while the picker was open: nothing waits
     // for the result, so nothing is imported.
@@ -320,11 +341,158 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     }
   }
 
+  /**
+   * Save a copy: checks the attachment, then lets the user choose where to create a new
+   * document (the system picker never replaces an existing file), then decrypts into it.
+   */
+  override fun saveCopy(
+      id: String,
+      sizeBytes: Double,
+      sha256: String,
+      fileName: String,
+      mimeType: String,
+      promise: Promise,
+  ) {
+    if (mimeType !in MediaTypes.ALL) {
+      promise.reject("INVALID_ARGUMENT", "Unsupported type")
+      return
+    }
+    worker.execute {
+      try {
+        export.verify(id, sizeBytes.toLong(), sha256)
+      } catch (e: Exception) {
+        rejectRead(promise, e)
+        return@execute
+      }
+      UiThreadUtil.runOnUiThread {
+        val activity = reactContext.currentActivity
+        when {
+          activity == null -> promise.reject("NO_ACTIVITY", "Trezor is not in the foreground")
+          pending != null || pendingExport != null ->
+              promise.reject("BUSY", "A picker is already open")
+          else -> {
+            val intent =
+                CreateDocument(mimeType)
+                    .createIntent(activity, ShareFiles.nameFor(fileName, mimeType))
+            pendingExport = PendingExport(promise, id, sizeBytes.toLong(), sha256)
+            try {
+              activity.startActivityForResult(intent, REQUEST_EXPORT)
+            } catch (e: ActivityNotFoundException) {
+              pendingExport = null
+              promise.reject("PICKER_UNAVAILABLE", "No document picker available")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private fun onExportDestination(resultCode: Int, data: Intent?) {
+    val job = pendingExport ?: return
+    pendingExport = null
+    val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+    if (uri == null) {
+      job.promise.resolve("cancelled")
+      return
+    }
+    worker.execute {
+      try {
+        export.write(job.id, job.sizeBytes, job.sha256, documentDestination(uri))
+        job.promise.resolve("saved")
+      } catch (e: AttachmentExport.ExportException) {
+        job.promise.reject(e.code, "Could not save the copy")
+      } catch (e: Exception) {
+        job.promise.reject(AttachmentExport.EXPORT_FAILED, "Could not save the copy")
+      }
+    }
+  }
+
+  private fun documentDestination(uri: Uri) =
+      object : AttachmentExport.Destination {
+        override fun existingSize(): Long? =
+            reactContext.contentResolver
+                .query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+                ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
+
+        override fun open(): OutputStream =
+            reactContext.contentResolver.openOutputStream(uri, "w")
+                ?: throw java.io.IOException("Destination can't be opened")
+
+        override fun delete(): Boolean =
+            DocumentsContract.deleteDocument(reactContext.contentResolver, uri)
+      }
+
+  /** Share: a checked copy in the share cache, offered through the system share sheet. */
+  override fun share(
+      id: String,
+      sizeBytes: Double,
+      sha256: String,
+      fileName: String,
+      mimeType: String,
+      promise: Promise,
+  ) {
+    if (mimeType !in MediaTypes.ALL) {
+      promise.reject("INVALID_ARGUMENT", "Unsupported type")
+      return
+    }
+    worker.execute {
+      val file =
+          try {
+            shares.prepare(id, sizeBytes.toLong(), sha256, fileName, mimeType)
+          } catch (e: Exception) {
+            rejectRead(promise, e)
+            return@execute
+          }
+      UiThreadUtil.runOnUiThread {
+        try {
+          val activity = reactContext.currentActivity
+          if (activity == null) {
+            promise.reject("NO_ACTIVITY", "Trezor is not in the foreground")
+            return@runOnUiThread
+          }
+          val uri =
+              FileProvider.getUriForFile(
+                  reactContext, reactContext.packageName + ShareIntent.AUTHORITY_SUFFIX, file)
+          val spec = ShareIntent.describe(uri.toString(), mimeType, file.name)
+          activity.startActivity(ShareIntent.toChooser(spec, reactContext.contentResolver))
+          promise.resolve(null)
+        } catch (e: ActivityNotFoundException) {
+          promise.reject("SHARE_UNAVAILABLE", "No app can receive this file")
+        } catch (e: Exception) {
+          promise.reject("IO_FAILED", "Could not share the file")
+        } finally {
+          // Kept for the retention period from now on; see ShareFiles.
+          shares.release(file)
+        }
+      }
+    }
+  }
+
+  override fun purgeExpiredShares(promise: Promise) {
+    worker.execute {
+      try {
+        promise.resolve(shares.purgeExpired().toDouble())
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Could not clean up shared files")
+      }
+    }
+  }
+
+  /** Rejects for a failure reading the encrypted attachment. */
+  private fun rejectRead(promise: Promise, e: Exception) {
+    when (e) {
+      is AttachmentStore.StoreException -> promise.reject(viewErrorCode(e.code), "Attachment can't be read")
+      is VaultException -> promise.reject("KEY_UNAVAILABLE", "Attachment key unavailable")
+      else -> promise.reject("IO_FAILED", "Attachment can't be read")
+    }
+  }
+
   override fun collectGarbage(knownIds: ReadableArray, promise: Promise) {
     val known = (0 until knownIds.size()).mapNotNull { knownIds.getString(it) }.toSet()
     worker.execute {
       try {
         views.purge()
+        shares.purgeExpired()
         promise.resolve(store.collectGarbage(known).toDouble())
       } catch (e: Exception) {
         promise.reject("IO_FAILED", "Could not clean up attachment files")
@@ -350,5 +518,6 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     /** Mirrors MAX_DOCUMENT_ATTACHMENTS in src/data/attachments.ts. */
     private const val MAX_PICK = 10
     private const val REQUEST_PICK = 0x7a01
+    private const val REQUEST_EXPORT = 0x7a02
   }
 }

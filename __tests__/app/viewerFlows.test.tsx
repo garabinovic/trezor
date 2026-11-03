@@ -342,14 +342,13 @@ describe('document viewer', () => {
 describe('cleanup', () => {
   test('returning to the app removes view files nothing shows', async () => {
     const listeners: ((state: string) => void)[] = [];
-    const spy = jest
-      .spyOn(AppState, 'addEventListener')
-      .mockImplementation((_type, listener) => {
-        listeners.push(listener as (state: string) => void);
-        return { remove: () => undefined } as ReturnType<
-          typeof AppState.addEventListener
-        >;
-      });
+    // Replaced and put back by hand: mockRestore() on the preset's AppState
+    // mock leaves addEventListener returning undefined for later tests.
+    const original = AppState.addEventListener;
+    AppState.addEventListener = ((_type: string, listener: unknown) => {
+      listeners.push(listener as (state: string) => void);
+      return { remove: () => undefined };
+    }) as typeof AppState.addEventListener;
     try {
       await launch();
       expect(fakeAttachments.purges).toBe(0);
@@ -357,12 +356,158 @@ describe('cleanup', () => {
         listeners.forEach(l => l('background'));
       });
       expect(fakeAttachments.purges).toBe(0);
+      expect(fakeAttachments.sharePurges).toBe(0);
       await ReactTestRenderer.act(async () => {
         listeners.forEach(l => l('active'));
       });
       expect(fakeAttachments.purges).toBe(1);
+      expect(fakeAttachments.sharePurges).toBe(1);
     } finally {
-      spy.mockRestore();
+      AppState.addEventListener = original;
     }
+  });
+});
+
+describe('save a copy and share', () => {
+  async function openCardFront() {
+    await launch();
+    await openTab(app, 'Cards');
+    await pressText(app, 'Greenleaf Rewards');
+    await pressLabel(app, 'Open front photo');
+    await layout();
+  }
+
+  async function openInvoice() {
+    await launch();
+    await openTab(app, 'Documents');
+    await pressText(app, 'Washing machine');
+    await pressText(app, 'invoice.pdf');
+    await layout();
+  }
+
+  /** The originals are never touched by saving or sharing. */
+  function expectOriginalsIntact() {
+    expect(fakeAttachments.deleted).toEqual([]);
+    [front, back, invoice, box, manual].forEach(a =>
+      expect(fakeAttachments.files.has(a.id)).toBe(true),
+    );
+  }
+
+  test('saves a copy of a card photo with its name and type', async () => {
+    await openCardFront();
+    await pressText(app, 'Save a copy');
+    expect(fakeAttachments.exports).toEqual([
+      { id: front.id, fileName: 'front.jpg', mimeType: 'image/jpeg' },
+    ]);
+    expect(hasText(app, 'Copy saved.')).toBe(true);
+    expectOriginalsIntact();
+  });
+
+  test('saves a copy of a PDF, also after paging to it', async () => {
+    await openInvoice();
+    await pressText(app, 'Save a copy');
+    await pressLabel(app, 'Next file');
+    await pressLabel(app, 'Next file');
+    // The message belonged to the previous file.
+    expect(hasText(app, 'Copy saved.')).toBe(false);
+    await pressText(app, 'Save a copy');
+    expect(fakeAttachments.exports).toEqual([
+      { id: invoice.id, fileName: 'invoice.pdf', mimeType: 'application/pdf' },
+      { id: manual.id, fileName: 'manual.pdf', mimeType: 'application/pdf' },
+    ]);
+    expectOriginalsIntact();
+  });
+
+  test('cancelling the destination picker changes nothing and says nothing', async () => {
+    await openInvoice();
+    fakeAttachments.nextExport = 'cancelled';
+    await pressText(app, 'Save a copy');
+    expect(hasText(app, 'Copy saved.')).toBe(false);
+    expect(hasText(app, 'Save a copy')).toBe(true);
+    expectOriginalsIntact();
+  });
+
+  test('export failures say what happened to the destination', async () => {
+    const cases: [string, string][] = [
+      [
+        'EXPORT_FAILED',
+        'The copy couldn’t be saved. The incomplete copy was removed.',
+      ],
+      [
+        'EXPORT_INCOMPLETE',
+        'The copy couldn’t be saved. An incomplete file may remain where you chose to save it.',
+      ],
+      [
+        'DESTINATION_NOT_EMPTY',
+        'That file already exists and was left unchanged. Choose a new name.',
+      ],
+      ['PICKER_UNAVAILABLE', 'No app on this device can save files.'],
+    ];
+    await openInvoice();
+    for (const [code, message] of cases) {
+      fakeAttachments.nextExport = { error: code };
+      await pressText(app, 'Save a copy');
+      expect(hasText(app, message)).toBe(true);
+    }
+    expectOriginalsIntact();
+  });
+
+  test('shares a photo and a PDF with their names and types', async () => {
+    await openCardFront();
+    await pressText(app, 'Share');
+    await pressLabel(app, 'Close');
+    await pressLabel(app, 'Back');
+    await openTab(app, 'Documents');
+    await pressText(app, 'Washing machine');
+    await pressText(app, 'invoice.pdf');
+    await layout();
+    await pressText(app, 'Share');
+
+    expect(fakeAttachments.shares).toEqual([
+      { id: front.id, fileName: 'front.jpg', mimeType: 'image/jpeg' },
+      { id: invoice.id, fileName: 'invoice.pdf', mimeType: 'application/pdf' },
+    ]);
+    // Nothing to report after handing over to the share sheet.
+    expect(hasText(app, 'Copy saved.')).toBe(false);
+    expectOriginalsIntact();
+  });
+
+  test('missing, damaged and keyless files are neither saved nor shared', async () => {
+    await openInvoice();
+    const cases: [string, string, string][] = [
+      [
+        'DAMAGED',
+        'The file is damaged and can’t be saved.',
+        'The file is damaged and can’t be shared.',
+      ],
+      [
+        'KEY_UNAVAILABLE',
+        'The file can’t be saved: its encryption key is unavailable.',
+        'The file can’t be shared: its encryption key is unavailable.',
+      ],
+    ];
+    for (const [code, saveText, shareText] of cases) {
+      fakeAttachments.viewErrors.set(invoice.id, code);
+      await pressText(app, 'Save a copy');
+      expect(hasText(app, saveText)).toBe(true);
+      await pressText(app, 'Share');
+      expect(hasText(app, shareText)).toBe(true);
+    }
+    fakeAttachments.viewErrors.clear();
+    fakeAttachments.files.delete(invoice.id);
+    await pressText(app, 'Save a copy');
+    expect(hasText(app, 'The file is missing and can’t be saved.')).toBe(true);
+    await pressText(app, 'Share');
+    expect(hasText(app, 'The file is missing and can’t be shared.')).toBe(true);
+    fakeAttachments.files.add(invoice.id);
+    fakeAttachments.nextShareError = 'SHARE_UNAVAILABLE';
+    await pressText(app, 'Share');
+    expect(hasText(app, 'No app on this device can receive this file.')).toBe(
+      true,
+    );
+
+    expect(fakeAttachments.exports).toEqual([]);
+    expect(fakeAttachments.shares).toEqual([]);
+    expectOriginalsIntact();
   });
 });

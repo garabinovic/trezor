@@ -54,14 +54,18 @@ function AppContent() {
 }
 
 function ReadyApp({ storage }: { storage: OpenedStorage }) {
-  // Decrypted view copies that no screen holds any more are removed whenever
-  // the app comes back to the foreground; startup removes all of them.
+  // Whenever the app comes back to the foreground: view copies that no screen
+  // holds any more, and share copies older than 24 hours, are removed. The
+  // startup cleanup (openStorage) does the same.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') {
         nativeAttachmentPlatform
           .purgeInactiveViews()
           .catch(() => console.warn('[attachments] view cleanup failed'));
+        nativeAttachmentPlatform
+          .purgeExpiredShares()
+          .catch(() => console.warn('[attachments] share cleanup failed'));
       }
     });
     return () => subscription.remove();

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only files Trezor's FileProvider can serve: decrypted share copies in
+     cacheDir/attachments/share/ (ShareFiles.kt). Nothing else in the app's storage,
+     including the encrypted attachments and the database, is reachable through it. -->
+<paths>
+    <cache-path name="shared" path="attachments/share/" />
+</paths>

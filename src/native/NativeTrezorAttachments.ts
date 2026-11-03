@@ -38,6 +38,35 @@ export interface Spec extends TurboModule {
   /** Deletes view files no screen holds (when the app returns to the foreground). */
   purgeInactiveViews(): Promise<number>;
   /**
+   * Checks the attachment, asks the user where to create a new document
+   * (Storage Access Framework) and decrypts straight into it. Resolves
+   * 'saved' or 'cancelled'. Rejects like `openView`, or with
+   * DESTINATION_NOT_EMPTY, EXPORT_FAILED (partial copy deleted),
+   * EXPORT_INCOMPLETE (partial copy could not be deleted), BUSY,
+   * NO_ACTIVITY or PICKER_UNAVAILABLE.
+   */
+  saveCopy(
+    id: string,
+    sizeBytes: number,
+    sha256: string,
+    fileName: string,
+    mimeType: string,
+  ): Promise<string>;
+  /**
+   * Checks the attachment, decrypts it into the share cache and opens the
+   * system share sheet with a temporary read grant. Rejects like `openView`,
+   * or with NO_ACTIVITY or SHARE_UNAVAILABLE.
+   */
+  share(
+    id: string,
+    sizeBytes: number,
+    sha256: string,
+    fileName: string,
+    mimeType: string,
+  ): Promise<void>;
+  /** Deletes share files older than 24 hours (startup and foreground). */
+  purgeExpiredShares(): Promise<number>;
+  /**
    * Deletes files of attachments not in `knownIds`, unfinished imports and
    * every view file. Startup only, with the database's complete list of
    * attachment ids.

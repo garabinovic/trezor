@@ -37,6 +37,9 @@ function fakePlatform() {
     renderPdfPage: async () => 'file:///p',
     closePdf: async () => {},
     purgeInactiveViews: async () => 0,
+    saveCopy: async () => 'cancelled',
+    share: async () => {},
+    purgeExpiredShares: async () => 0,
     collectGarbage: async () => 0,
   };
   return {

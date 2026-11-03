@@ -31,6 +31,17 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+      <!-- Shared attachments: not exported; apps get a temporary read grant for one
+           file at a time, and only files under cache/attachments/share/ exist here. -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.attachments"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/attachment_share_paths" />
+      </provider>
       <!-- Reminder alarms: only our own PendingIntents reach this receiver. -->
       <receiver
         android:name=".reminders.ReminderAlarmReceiver"

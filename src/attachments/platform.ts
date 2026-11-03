@@ -35,6 +35,14 @@ export type AttachmentErrorCode =
   | 'PDF_PROTECTED'
   /** A PDF Android's renderer can't read. */
   | 'PDF_UNSUPPORTED'
+  /** Save a copy: the chosen document already had content; nothing written. */
+  | 'DESTINATION_NOT_EMPTY'
+  /** Save a copy failed; the partial copy was deleted. */
+  | 'EXPORT_FAILED'
+  /** Save a copy failed; the partial copy could not be deleted. */
+  | 'EXPORT_INCOMPLETE'
+  /** No app can receive a shared file. */
+  | 'SHARE_UNAVAILABLE'
   | 'UNKNOWN';
 
 const errorCodes = new Set<string>([
@@ -48,6 +56,10 @@ const errorCodes = new Set<string>([
   'DAMAGED',
   'PDF_PROTECTED',
   'PDF_UNSUPPORTED',
+  'DESTINATION_NOT_EMPTY',
+  'EXPORT_FAILED',
+  'EXPORT_INCOMPLETE',
+  'SHARE_UNAVAILABLE',
 ]);
 
 const failureCodes = new Set<string>([
@@ -160,6 +172,15 @@ export interface AttachmentPlatform {
   closePdf(handle: string): Promise<void>;
   /** Deletes view files nothing holds (app back in the foreground). */
   purgeInactiveViews(): Promise<number>;
+  /**
+   * Lets the user pick where to save a decrypted copy (Storage Access
+   * Framework). The original encrypted file is never changed.
+   */
+  saveCopy(attachment: Attachment): Promise<'saved' | 'cancelled'>;
+  /** Opens the system share sheet for a checked, decrypted copy. */
+  share(attachment: Attachment): Promise<void>;
+  /** Deletes share copies older than 24 hours (startup and foreground). */
+  purgeExpiredShares(): Promise<number>;
   /** Startup only: removes files no database row refers to, and views. */
   collectGarbage(knownIds: string[]): Promise<number>;
 }
@@ -231,6 +252,43 @@ export const nativeAttachmentPlatform: AttachmentPlatform = {
   async closePdf(handle) {
     try {
       await NativeTrezorAttachments.closePdf(handle);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async saveCopy({ id, sizeBytes, sha256, fileName, mimeType }) {
+    try {
+      const result = await NativeTrezorAttachments.saveCopy(
+        id,
+        sizeBytes,
+        sha256,
+        fileName,
+        mimeType,
+      );
+      return result === 'saved' ? 'saved' : 'cancelled';
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async share({ id, sizeBytes, sha256, fileName, mimeType }) {
+    try {
+      await NativeTrezorAttachments.share(
+        id,
+        sizeBytes,
+        sha256,
+        fileName,
+        mimeType,
+      );
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async purgeExpiredShares() {
+    try {
+      return await NativeTrezorAttachments.purgeExpiredShares();
     } catch (e) {
       throw toAttachmentError(e);
     }

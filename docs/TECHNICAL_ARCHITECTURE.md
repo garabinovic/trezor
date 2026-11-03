@@ -578,6 +578,8 @@ The design keeps backup independent of this device's Keystore:
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
 | Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
+| Jest after Phase 4 step 7 (save a copy, share) | 342 tests in 21 suites: + 6 app-level flows (image and PDF export with name and type, cancel, failure messages incl. partial file and existing destination, share of photo and PDF, missing/damaged/keyless/no receiver), foreground cleanup of expired shares; originals checked unchanged | **342/342 pass** |
+| JVM after Phase 4 step 7 | + `AttachmentExportTest` 4 (exact image and PDF export, originals byte-identical, existing destination untouched, partial destination deleted or reported, damaged/missing/keyless checked first), `ShareFilesTest` 7 (checked copy in its own folder, names can't escape, nothing left on failure, 24 h retention, active share kept, old leftovers removed, read-only grant, FileProvider paths and manifest) | **48/48 pass** |
 | Jest after Phase 4 step 6 (viewer) | 336 tests in 21 suites: + 8 app-level viewer flows (card front/back paging, copies closed on switch, close and back, missing/damaged/undecodable photo, PDF page count and on-demand rendering, mixed files closed one by one, protected/unsupported/damaged/key/missing PDFs, failing page, app closed mid-view, foreground cleanup), 5 zoom-math tests | **336/336 pass** |
 | JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
 | Jest after Phase 4 step 5 (documents UI) | 323 tests in 19 suites: + 14 app-level document flows (all four types with photos and PDFs across a restart, document without attachments unchanged, detail list with type and size, reorder, replace, remove, failed save keeps files, discard, partial imports, 10-file limit and picker counts, date validation unchanged), attachment limit validation, type and size labels | **323/323 pass** |
@@ -1035,9 +1037,58 @@ switching or closing deletes its copy **[verified: Jest]**.
 - There is no external viewer, no `Intent` to other apps and no network. The
   TZA format and the database are unchanged.
 
-### 14.9 Not verified yet
+### 14.9 Save a copy and Share (Phase 4 step 7)
 
-- The module (pickers, content URIs, Keystore key, view files, PdfRenderer)
-  and the card, document and viewer screens have not run on a device. Installing on the A53 would upgrade its
+Both are buttons in the viewer, for the file shown. Neither changes the
+encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
+
+**Save a copy** (`AttachmentExport`):
+1. The attachment is checked completely (size and SHA-256) before anything
+   else. A missing or damaged file, or a missing key, is reported without
+   opening a picker.
+2. `ACTION_CREATE_DOCUMENT` (the system "save to" picker) is suggested the
+   original name and type. The user picks the folder and name. The picker
+   creates a new document: it never replaces an existing file, and a name
+   that's taken gets a number.
+3. The attachment is decrypted straight into the document's output stream,
+   so there is no plaintext file in between. Each chunk is authenticated, and
+   size and SHA-256 are checked again at the end.
+- A destination that already has content is refused and left untouched
+  (`DESTINATION_NOT_EMPTY`).
+- A write that fails part-way deletes the document
+  (`DocumentsContract.deleteDocument`, `EXPORT_FAILED`). If the provider won't
+  delete it, the user is told an incomplete file may remain
+  (`EXPORT_INCOMPLETE`).
+- Cancelling the picker does nothing.
+
+**Share** (`ShareFiles`, `ShareIntent`):
+- The attachment is decrypted into
+  `cacheDir/attachments/share/<32 random hex>/<file name>` and checked against
+  its record before the file gets its name. Only then does it get a URI.
+- The URI comes from `androidx.core.content.FileProvider` (authority
+  `com.trezor.app.attachments`), which is `exported="false"` and has
+  `grantUriPermissions="true"`. Its only path is `<cache-path
+  path="attachments/share/">`, so the encrypted attachments, the database and
+  other cache files can't be reached through it. A JVM test parses the
+  manifest and the paths file to keep it that way.
+- The `ACTION_SEND` intent carries the stored MIME type, `EXTRA_STREAM` and
+  `ClipData`, and only `FLAG_GRANT_READ_URI_PERMISSION`: no write grant and
+  no persistable grant. It goes through `Intent.createChooser`.
+- Share copies are kept for 24 hours, because the receiving app may read
+  them later. `purgeExpired` deletes older ones at startup (`collectGarbage`)
+  and when the app returns to the foreground. A share still being prepared or
+  launched is never deleted, whatever its timestamp **[verified: JVM]**.
+- Names are cleaned again (last segment, no control characters) and get an
+  extension if they have none.
+
+Messages: missing, damaged, key unavailable, no app to save with, no app to
+receive, destination not empty, and failed with or without a leftover file.
+After a share there is nothing to report: the share sheet takes over.
+
+### 14.10 Not verified yet
+
+- The module (pickers, content URIs, Keystore key, view files, PdfRenderer,
+  the save-to picker, FileProvider grants, share sheet) and the card,
+  document and viewer screens have not run on a device. Installing on the A53 would upgrade its
   real data to schema v3, so it waits for approval. Instrumentation tests are
   deferred: running them would uninstall the app from the user's phone.
