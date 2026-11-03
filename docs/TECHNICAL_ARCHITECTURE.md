@@ -1,15 +1,19 @@
 # Trezor — Technical Architecture
 
-Status: **Phase 3 implemented** (reminders and local notifications, §13), on
-top of Phase 2 (core organizer), Phase 1 and the Phase 1.1 corrections. This document describes what is built, why, and how it differs from
+Status: **Phase 4 implemented** (encrypted attachments for cards and
+documents, §14), on top of Phase 3 (reminders and local notifications, §13),
+Phase 2 (core organizer), Phase 1 and the Phase 1.1 corrections. This document
+describes what is built, why, and how it differs from
 the Phase 1 proposal (git history: `docs: add Phase 1 technical architecture
 proposal`). Phase 1.1 fixed the findings of the Phase 1 security audit; see
 §10.1.
 
 Claims marked **[verified]** were checked by an automated test or on the
 Android emulator (API 37, arm64) on 2026-10-30 (Phase 1–2) or 2026-11-02
-(Phase 3). Nothing has been verified on a physical device yet. Everything else is design
-intent or a recommendation.
+(Phase 3). Phase 4 was verified on 2026-11-03 by JVM and Jest tests, and its
+schema migration also on real SQLCipher (§5). Reminders were also checked on
+one physical device (§13.8). **No Phase 4 feature has run on a device or
+emulator yet** (§14.10). Everything else is design intent or a recommendation.
 
 ---
 
@@ -30,6 +34,9 @@ StorageProvider                 (startup: opening → ready | error)
    │      │
    │      ├── vault (TS) ── TrezorVault TurboModule (Kotlin) ── Android Keystore
    │      └── databaseFiles (TS) ── TrezorDatabaseFiles TurboModule (Kotlin)
+   │
+   ├── attachments/platform (TS) ── TrezorAttachments TurboModule (Kotlin)
+   │      encrypted files, pickers, viewer copies, save a copy, share (§14)
    │
    └── InMemoryItemRepository   (debug-only sample data, tests)
 ```
@@ -69,6 +76,9 @@ Rules:
 | `src/reminders/` | Recurrence rules, reminder schedule helpers, reconciliation, `RemindersProvider` (Phase 3, §13) |
 | `android/app/src/main/java/com/trezor/app/reminders/` | Recurrence (Kotlin mirror), encrypted schedule record, alarms, notifications, receivers, `TrezorReminders` TurboModule (Phase 3) |
 | `test-fixtures/recurrence.txt` | Hand-computed recurrence cases shared by the Jest and JVM tests |
+| `android/app/src/main/java/com/trezor/app/attachments/` | TZA format, encrypted store, import rules, key policy, viewer copies, PDF rendering, export, share files, `TrezorAttachments` TurboModule (Phase 4, §14) |
+| `src/attachments/`, `src/native/NativeTrezorAttachments.ts` | TS wrapper and error codes, photo tiles, zoomable image, PDF pages (Phase 4) |
+| `src/screens/editor/attachmentSession.ts`, `src/screens/AttachmentViewerScreen.tsx` | Files picked while editing; the viewer with Save a copy and Share (Phase 4) |
 
 ---
 
@@ -363,7 +373,41 @@ cards       + issuer TEXT NOT NULL DEFAULT ''
   a failure part-way rolls back to the intact v2 database **[verified: Jest]**.
   It uses the normal snapshot procedure (§6). Real `sqlcipher_export` copies
   `CREATE UNIQUE INDEX` (it has a separate pass); the test fake now does too.
-  Not yet run on a device.
+- **Real SQLCipher check (2026-11-03) [verified: real SQLCipher, not on a
+  device].** This used op-sqlite's own SQLCipher source, not a fake.
+  - **Build:** op-sqlite 19.0.3 bundles `cpp/sqlcipher/sqlite3.c` (SQLCipher
+    4.19.0, SQLite 3.53.4). It was compiled for macOS with the same SQLCipher
+    flags as the Android build (`SQLITE_HAS_CODEC`, `SQLITE_TEMP_STORE=3`,
+    `sqlcipher_extra_init/shutdown`, OpenSSL provider).
+  - **Bridge:** a `ctypes` bridge keyed each connection with `sqlite3_key_v2`,
+    as op-sqlite does.
+  - **Production code:** everything above `open()` was production code:
+    `openTrezorDatabase` with key checks, verification, the `sqlcipher_export`
+    snapshot and `runMigrations`, plus the repositories.
+  - **Data:** a v2 database was created through that path and filled with
+    representative rows: 15 items, two notes with non-ASCII text, quotes and a
+    newline, seven reminders covering all six repeat modes and a completed one,
+    two cards (barcode and QR), four documents of all kinds with dates and
+    amounts, and four settings.
+  - **Results:**
+    - every v2 row and schema object was unchanged, except the added `issuer`
+      column (`''` on both cards);
+    - reminder modes, intervals and local start times read back unchanged
+      through the repository;
+    - `attachments` and its unique index exist; the foreign key cascades, and
+      the unique and CHECK rules reject bad rows;
+    - `integrity_check` returned ok, and `foreign_key_check` and
+      `cipher_integrity_check` returned no rows;
+    - the snapshot is the identical v2 database, still encrypted;
+    - a wrong key is refused without changing the file;
+    - a failure injected after all of v3's statements left the v2 database
+      byte-for-byte as before, and the real migration then succeeded on it;
+    - an untouched copy of the v2 file kept the same SHA-256.
+  - **Negative control:** a deliberately broken v3 (changing a note) made the
+    check fail.
+  - **Not covered:** the OpenSSL version (4.0.3 on the Mac vs 3.3.2 on
+    Android) and Android's file system. The harness was a one-off and is not
+    in the repository.
 
 The full DDL is in `src/storage/migrations.ts`. Relationships:
 `items 1—1 {notes|reminders|cards|documents}`, chosen by `type`;
@@ -563,9 +607,31 @@ The design keeps backup independent of this device's Keystore:
   - integer timestamps;
   - a typed, versioned schema;
   - every write path goes through repositories.
-- **Key rotation:** the envelope's `version` and `keyId`, and the master key
-  alias `.v1`, leave room to rotate keys and add a separate file key for
-  attachments.
+- **Key rotation:** the envelope's `version` and `keyId` and the master key
+  alias `.v1` leave room to rotate keys.
+
+**Attachments (Phase 4) — what a Phase 6 backup must keep.** Nothing below is
+implemented as a backup yet:
+- The database stores no file paths. A file is found only by its attachment id
+  (`<id>.tza`), and ids are UUIDv7, so they survive a restore unchanged.
+- Each file has its own random key (DEK), wrapped by the device-bound
+  `attachments` key. `AttachmentFormat.rewrap` re-wraps only the 48-byte DEK
+  under another key and copies the encrypted body byte for byte
+  **[verified: JVM]**. A backup can wrap DEKs under its passphrase-derived key
+  without decrypting any file, and a restore can wrap them under the new
+  device's `attachments` key.
+- The `attachments` rows carry `size_bytes`, `sha256` and `format_version`,
+  so a restore can verify every file completely before swapping it in.
+- **Restore order:**
+  1. stage the files;
+  2. verify each against its row;
+  3. swap in the database;
+  4. move the files into place.
+  The live attachments directory must not be touched before the swap. Startup
+  garbage collection deletes `.tza` files without a row, so restored files must
+  not be moved in before their rows.
+- Decrypted view and share copies live only in `cacheDir` and are never part
+  of a backup.
 
 ---
 
@@ -576,17 +642,18 @@ The design keeps backup independent of this device's Keystore:
 | Jest (automated) | 136 tests in 11 suites. Phase 1/1.1 suites (66) unchanged. Phase 2 adds: repository CRUD of every field for each type, type separation, pinning, ordering, search coverage and order, deletes, database errors and invalid input, on both repository implementations (23 more in `itemRepository.test.ts`, now 40); search matching incl. non-ASCII case (7); organizer filters, sorts, Home overview, document summaries (13); editor validation and normalization (13); **app-level flows** (14) driving the real screens and navigation on the real SQLite repositories via `serializeDatabase` (Home with stored data, all tabs and filter chips, create/edit/delete/pin/complete, validation, failed write, search opens the right item, theme and data persist across a remount) | **136/136 pass** |
 | Jest after Phase 3 (automated) | 228 tests in 14 suites; Phase 1–2 tests kept (fixtures updated to the v2 reminder shape; organizer sort tests updated to next-occurrence order, an intended change) plus the Phase 3 tests in §13.9 | **228/228 pass** |
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
+| JVM after Phase 4 step 1 | `AttachmentFormatTest` 8, `AttachmentStoreTest` 9, `RecurrenceTest` 4 | **21/21 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
 | Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
-| Jest after Phase 4 step 7 (save a copy, share) | 342 tests in 21 suites: + 6 app-level flows (image and PDF export with name and type, cancel, failure messages incl. partial file and existing destination, share of photo and PDF, missing/damaged/keyless/no receiver), foreground cleanup of expired shares; originals checked unchanged | **342/342 pass** |
-| JVM after Phase 4 step 7 | + `AttachmentExportTest` 4 (exact image and PDF export, originals byte-identical, existing destination untouched, partial destination deleted or reported, damaged/missing/keyless checked first), `ShareFilesTest` 7 (checked copy in its own folder, names can't escape, nothing left on failure, 24 h retention, active share kept, old leftovers removed, read-only grant, FileProvider paths and manifest) | **48/48 pass** |
-| Jest after Phase 4 step 6 (viewer) | 336 tests in 21 suites: + 8 app-level viewer flows (card front/back paging, copies closed on switch, close and back, missing/damaged/undecodable photo, PDF page count and on-demand rendering, mixed files closed one by one, protected/unsupported/damaged/key/missing PDFs, failing page, app closed mid-view, foreground cleanup), 5 zoom-math tests | **336/336 pass** |
-| JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
-| Jest after Phase 4 step 5 (documents UI) | 323 tests in 19 suites: + 14 app-level document flows (all four types with photos and PDFs across a restart, document without attachments unchanged, detail list with type and size, reorder, replace, remove, failed save keeps files, discard, partial imports, 10-file limit and picker counts, date validation unchanged), attachment limit validation, type and size labels | **323/323 pass** |
+| JVM after Phase 4 step 3 | + `AttachmentImportRulesTest` 6 (type by content, names, UUIDv7, key policy), `AttachmentImporterTest` 5 (real store: round trip, declared type ignored, size limit with and without a declared size, unreadable sources, cleaned names) | **32/32 pass** |
 | Jest after Phase 4 step 4 (cards UI) | 301 tests in 18 suites: + 12 app-level card flows (plain number without code glyphs, issuer, photos shown and their copies deleted, missing or damaged photos, create with both photos across a restart, replace, remove, failed save keeps the stored file, discard deletes new picks, failed picks explained, stored code type kept, list summary), 4 editor-session tests, view open/close codes | **301/301 pass** |
 | JVM after Phase 4 step 4 | + `AttachmentViewsTest` 4 (verified copy under random names, no copy on mismatch or missing file, close refuses other paths, purge) | **36/36 pass** |
-| JVM after Phase 4 step 3 | + `AttachmentImportRulesTest` 6 (type by content, names, UUIDv7, key policy), `AttachmentImporterTest` 5 (real store: round trip, declared type ignored, size limit with and without a declared size, unreadable sources, cleaned names) | **32/32 pass** |
-| JVM after Phase 4 step 1 | `AttachmentFormatTest` 8, `AttachmentStoreTest` 9, `RecurrenceTest` 4 | **21/21 pass** |
+| Jest after Phase 4 step 5 (documents UI) | 323 tests in 19 suites: + 14 app-level document flows (all four types with photos and PDFs across a restart, document without attachments unchanged, detail list with type and size, reorder, replace, remove, failed save keeps files, discard, partial imports, 10-file limit and picker counts, date validation unchanged), attachment limit validation, type and size labels | **323/323 pass** |
+| Jest after Phase 4 step 6 (viewer) | 336 tests in 21 suites: + 8 app-level viewer flows (card front/back paging, copies closed on switch, close and back, missing/damaged/undecodable photo, PDF page count and on-demand rendering, mixed files closed one by one, protected/unsupported/damaged/key/missing PDFs, failing page, app closed mid-view, foreground cleanup), 5 zoom-math tests | **336/336 pass** |
+| JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
+| Jest after Phase 4 step 7 (save a copy, share) | 342 tests in 21 suites: + 6 app-level flows (image and PDF export with name and type, cancel, failure messages incl. partial file and existing destination, share of photo and PDF, missing/damaged/keyless/no receiver), foreground cleanup of expired shares; originals checked unchanged | **342/342 pass** |
+| JVM after Phase 4 step 7 | + `AttachmentExportTest` 4 (exact image and PDF export, originals byte-identical, existing destination untouched, partial destination deleted or reported, damaged/missing/keyless checked first), `ShareFilesTest` 7 (checked copy in its own folder, names can't escape, nothing left on failure, 24 h retention, active share kept, old leftovers removed, read-only grant, FileProvider paths and manifest) | **48/48 pass** |
+| Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
 | Android instrumentation after the exact-alarm change | + `withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm` | **Not run** — emulator unusable; running it on the phone uninstalls the app |
@@ -647,10 +714,14 @@ UI.
 | `@op-engineering/op-sqlite` | **19.0.3** (exact) | app | SQLite + SQLCipher 4.19.0, OpenSSL 3.3.2 (`io.github.ronickg:openssl:3.3.2-1`, pulled by op-sqlite) |
 | `androidx.test.ext:junit` | 1.2.1 | androidTest only | Instrumentation test runner support |
 | `androidx.test:runner` | 1.6.2 | androidTest only | Instrumentation test runner |
-| `junit:junit` | 4.13.2 | JVM unit tests only (Phase 3) | Runs `RecurrenceTest` on the JVM; not packaged in the app |
+| `junit:junit` | 4.13.2 | JVM unit tests only (Phase 3) | Runs the JVM tests (recurrence, attachments); not packaged in the app |
+| `androidx.activity` / `androidx.core` | Compiled against 1.7.0 / 1.13.0; the release ships 1.8.1 / 1.17.0. Both come with React Native and other libraries | app, used directly since Phase 4 | Photo Picker and document contracts; `FileProvider` for Share. Not declared in `build.gradle`, so the versions follow React Native; the APIs used exist in all of them |
 
 No new JS runtime dependencies besides op-sqlite. Phase 3 adds no runtime
-dependency (reminders use only Android framework APIs). The vault uses only
+dependency (reminders use only Android framework APIs). Phase 4 adds none
+either: `PdfRenderer`, `javax.crypto`, the Storage Access Framework and the
+two AndroidX libraries above were already in the app, and zooming uses RN's
+`PanResponder`. It adds no permission, only a non-exported `FileProvider`. The vault uses only
 platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 
 ---
@@ -682,6 +753,17 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Opening view uses the system theme; with a forced dark theme on a light system, startup shows a light background for a moment | Cosmetic. The native launch window can't know the in-app preference |
 | App-level TurboModule codegen: a stale native CMake cache (`android/app/.cxx`) can leave the module unregistered after adding the spec | One-time; fixed by deleting `android/app/.cxx`. Noted for contributors |
 | `connectedDebugAndroidTest` uninstalls the app | Test-only; local data on the test device is lost |
+| **Phase 4 not run on a device.** Pickers, content URIs, the `attachments` key in the real Keystore, view files with Fresco, `PdfRenderer`, the save-to picker, FileProvider grants and receiving apps are untested on hardware; `PdfViews` and the Android glue have no automated test | JVM and Jest cover the logic around them (§14). Device testing needs approval, because installing upgrades the user's real data to schema v3. Instrumentation tests are deferred |
+| Password-protected PDFs | Not supported: "PDF is password-protected" (no password entry). Save a copy and Share still work |
+| HEIC/HEIF photos | Decoded only on Android 9+ (minimum is Android 7); older versions say the photo can't be shown. Save a copy and Share still work |
+| EXIF metadata | Originals are kept exactly, including EXIF data such as GPS location; Share and Save a copy pass it on. No warning is shown |
+| Share copies may vanish early | Kept up to 24 h in `cacheDir`, which Android may clear sooner under storage pressure; a receiving app that reads late may then find nothing |
+| Incomplete exports | Some document providers refuse `deleteDocument`; the user is told an incomplete file may remain |
+| PDF viewing | No zoom; very large PDFs open slower (every page size is read on open); pages are rendered at screen width |
+| Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
+| Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
+| **Open review findings (Phase 4 step 8, not fixed; behaviour unchanged pending approval)** | **M:** a share that fails to launch keeps its decrypted copy for 24 h instead of deleting it (`TrezorAttachmentsModule.share`). **L:** Save a copy opens the destination with `"w"`, which some providers don't truncate, and a provider that returns an existing document without a size would pass the empty check (`"wt"` is safer). **L:** an `IOException` while closing a picked file's stream escapes `AttachmentImporter.import`, so that pick's promise never settles and the editor stays busy. **L:** pressing Save while picked files are still being imported saves the item without them, and they are deleted without a message. **L:** if listing the attachments directory fails while the key envelope is also gone, a new `attachments` key could be created (very narrow). **Nit:** `mif1`/`msf1` brands also start some AVIF files, which would be stored as HEIF and then fail to display; `TrezorVault.getKey` accepts any key id, including `attachments`; untrusted PDFs are rendered in-process by the platform renderer |
+| Device UI issues (Galaxy A53) | The tab bar overlaps the Android navigation buttons, and the keyboard does not open for an auto-focused field. Both are unresolved (found during Phase 3 testing) |
 
 ---
 
@@ -914,7 +996,10 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   `BUSY`, `NO_ACTIVITY`, `PICKER_UNAVAILABLE`, `KEY_UNAVAILABLE`,
   `INVALID_ARGUMENT`. JS drops any record that fails `attachmentRecordProblem`
   **[verified: Jest]**.
-- `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)`.
+- `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)` (§14.3), plus
+  `openView`/`closeView`, `openPdf`/`renderPdfPage`/`closePdf`,
+  `purgeInactiveViews` (§14.4, §14.8), `saveCopy`, `share` and
+  `purgeExpiredShares` (§14.9).
 - Nothing is logged except error codes.
 
 ### 14.3 Crash safety and cleanup
@@ -928,7 +1013,9 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   imports, and leaves other files alone. A failure is logged as a code and
   retried next launch. If the database cannot be opened, nothing is removed
   **[verified: Jest]**.
-- Files picked for a draft that is then discarded stay until the next startup.
+- Files picked for a draft that is then discarded are deleted at once by the
+  editor session (§14.5). Only a crash or a killed process leaves them for
+  the startup cleanup.
 - If the process is killed while a picker is open, nothing is imported.
 
 ### 14.4 Showing photos
@@ -998,8 +1085,9 @@ files picked while one editor is open **[verified: Jest]**:
   explained under the list, and files beyond the limit are reported ("2 files
   weren’t added …"). `validate` also refuses more than 10.
 - **Detail screen:** each file shows its name with its type and size ("PDF ·
-  1.2 MB", "JPEG image · 340 KB"). Rows don't open the file yet (viewer: step
-  6), and no file is decrypted to show the list.
+  1.2 MB", "JPEG image · 340 KB") and opens the viewer (§14.8). No file is
+  decrypted to show the list, so a missing or damaged file shows up only when
+  it is opened.
 - Dates, expiry, merchant, amount, currency and notes and their validation
   are unchanged **[verified: Jest]**.
 
@@ -1074,10 +1162,16 @@ encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
 - The `ACTION_SEND` intent carries the stored MIME type, `EXTRA_STREAM` and
   `ClipData`, and only `FLAG_GRANT_READ_URI_PERMISSION`: no write grant and
   no persistable grant. It goes through `Intent.createChooser`.
-- Share copies are kept for 24 hours, because the receiving app may read
-  them later. `purgeExpired` deletes older ones at startup (`collectGarbage`)
-  and when the app returns to the foreground. A share still being prepared or
-  launched is never deleted, whatever its timestamp **[verified: JVM]**.
+- Share copies are kept at least 24 hours, because the receiving app may read
+  them later. `purgeExpired` deletes copies older than that at startup
+  (`collectGarbage`) and when the app returns to the foreground. A share still
+  being prepared or launched is never deleted, whatever its timestamp
+  **[verified: JVM]**. There is no background job, so if Trezor isn't opened
+  again a copy stays in the private cache until the next launch or until
+  Android clears the cache.
+- **Open finding:** when the share sheet can't be launched (`NO_ACTIVITY`,
+  `SHARE_UNAVAILABLE`, URI failure), the prepared copy isn't deleted at once;
+  it waits for the same 24-hour cleanup (§12).
 - Names are cleaned again (last segment, no control characters) and get an
   extension if they have none.
 
@@ -1087,8 +1181,14 @@ After a share there is nothing to report: the share sheet takes over.
 
 ### 14.10 Not verified yet
 
-- The module (pickers, content URIs, Keystore key, view files, PdfRenderer,
-  the save-to picker, FileProvider grants, share sheet) and the card,
-  document and viewer screens have not run on a device. Installing on the A53 would upgrade its
-  real data to schema v3, so it waits for approval. Instrumentation tests are
-  deferred: running them would uninstall the app from the user's phone.
+- The module and the card, document and viewer screens have not run on a
+  device or emulator. That covers the pickers, content URIs, the Keystore
+  key, view files, `PdfRenderer`, the save-to picker, FileProvider grants and
+  the share sheet.
+  - Installing on the test phone would upgrade its real data to schema v3,
+    so it waits for approval.
+  - Instrumentation tests are deferred: running them would uninstall the app
+    from the phone.
+- The v2 → v3 migration has run on real SQLCipher (§5), but on macOS, not
+  Android.
+- Known limitations are listed in §12.

@@ -113,8 +113,9 @@ leave.
 | ------------ | -------------------------------------------------------------------------------------------------------- |
 | Home         | Date, search entry, category counts, "Coming up" reminders, pinned items, recent items. Welcome state on first launch. |
 | Category tab | Title, item count, optional filter chips, list, FAB, empty state with a "create first" action.           |
-| Item detail  | Back, edit, pin, delete. Note body; reminder due/repeat + "Mark as done"; card panel with number; document fields + attachment. |
-| Item editor  | Title + type-specific fields, inline validation, Cancel/Save.                                             |
+| Item detail  | Back, edit, pin, delete. Note body; reminder due/repeat + "Mark as done"; card photos (front/back) and number panel; document fields + list of attached files (name, type, size). Tapping a photo or file opens the viewer. |
+| Item editor  | Title + type-specific fields, inline validation, Cancel/Save. Cards: issuer and front/back photos (add, replace, remove). Documents: up to 10 photos or PDFs (add photos, add files; per file move up/down, replace, remove). |
+| Attachment viewer | Full screen, Close (X), Previous/Next between the item's files, a one-line position ("2 of 3 · PDF · 1.2 MB · Page 1 of 4"). Photos: pinch, pan, double-tap zoom. PDFs: pages scrolled vertically. "Save a copy" and "Share" at the bottom. |
 | Search       | Auto-focused field, results grouped by type, hint and no-results states.                                  |
 | Settings     | Appearance, Security, Data, About. Features not yet built are shown but clearly marked "Not available yet". |
 
@@ -127,7 +128,7 @@ their own colours, font sizes or spacing.
 | ----------------- | ------------------------------------------------------------------------ |
 | `Text`            | Typography variants + semantic colour.                                   |
 | `Icon`            | Lucide wrapper enforcing stroke width, sizes and colours.                |
-| `Button`          | `primary`, `secondary`, `ghost`, `destructive`; `md` / `sm`; optional icon. |
+| `Button`          | `primary`, `secondary`, `ghost`, `destructive`; `md` / `sm`; optional icon; optional `accessibilityLabel` when the label alone is ambiguous ("Remove front photo"). |
 | `IconButton`      | 44×44 touch target, used in headers.                                     |
 | `TextField`       | Label, placeholder, helper, error, multiline.                            |
 | `SearchField`     | Rounded, icon-led; can act as a button that opens Search.                |
@@ -155,9 +156,17 @@ their own colours, font sizes or spacing.
 - **Unavailable features are shown honestly.** Settings lists App lock, Backup
   and Export so the product's direction is visible, but they're disabled and
   labelled "Not available yet". Nothing pretends to work.
-- **Cards** show the card number large and spaced for a cashier to type in. The
-  barcode area is a labelled placeholder until barcode rendering is built; we
-  don't draw fake stripes that someone might try to scan.
+- **Cards** show the card number large and spaced for a cashier to type in,
+  captioned "Card number · No barcode saved". Until codes can be scanned or
+  shown for real there is no barcode area, no barcode or QR icon, and no
+  code-type choice: we don't draw anything someone might try to scan. A
+  stored code type is kept unchanged.
+- **Attachments** reuse existing components only (`Button`, `ListItem`,
+  `Sheet`, `EmptyState`, `IconButton`). Photo tiles use `surfaceMuted` and
+  `radius.md`, in card proportions. Problems are explained in plain sentences
+  where they happen ("Photo file is missing", "PDF is password-protected",
+  "“scan.docx” isn’t supported…"); nothing fails silently. Files picked and
+  then discarded are removed at once.
 - **Language** — English only, sentence case everywhere, short verbs on buttons
   ("Save", "Delete", "Mark as done").
 
