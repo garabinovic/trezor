@@ -55,7 +55,7 @@ Rules:
 
 | Path | Responsibility |
 | --- | --- |
-| `android/app/src/main/java/com/trezor/app/vault/` | `KeyVault` (Keystore + envelopes), `TrezorVaultModule` (JS bridge), typed `VaultException` |
+| `android/app/src/main/java/com/trezor/app/vault/` | `KeyVault` (Keystore + envelopes), `TrezorVaultModule` (JS bridge, limited to the `database` key by `JsKeyAccess`), typed `VaultException` |
 | `src/native/NativeTrezorVault.ts` | TurboModule spec (app-level codegen, `codegenConfig` in `package.json`) |
 | `src/storage/vault.ts` | TS wrapper; maps native rejections to `StorageError` |
 | `android/app/src/main/java/com/trezor/app/storage/` | `DatabaseFiles`: definite file state, no-replace rename, temp-only delete (database directory only) |
@@ -64,9 +64,9 @@ Rules:
 | `src/storage/sqlcipher.ts` | Key-format check, keyed `open()` (drops the key from op-sqlite's retained options), encryption/integrity verification |
 | `src/storage/snapshot.ts` | Atomic, verified pre-migration snapshots |
 | `src/storage/serialDatabase.ts` | Serializes every statement and transaction on the shared connection |
-| `src/storage/migrations.ts` | Schema v1, `user_version` migration runner, foreign-key procedure |
+| `src/storage/migrations.ts` | Schema v1 (initial), v2 (reminder scheduling) and v3 (attachments, card issuer); `user_version` migration runner; foreign-key procedure |
 | `src/storage/SqliteItemRepository.ts` | Row ↔ `Item` mapping, atomic writes |
-| `src/storage/SettingsRepository.ts` | Typed settings (`theme.preference`) |
+| `src/storage/SettingsRepository.ts` | Typed settings (`SettingValues`): `theme.preference`, `notifications.showDetails`, `notifications.permissionRequested`, `notifications.exactAlarmRequested` |
 | `src/storage/StorageProvider.tsx`, `openStorage.ts` | Startup state for the app shell |
 | `src/storage/ids.ts` | UUIDv7 |
 | `src/data/search.ts` | Searchable fields per type; Unicode-aware matching (Phase 2) |
@@ -570,8 +570,8 @@ Follows SQLite's documented procedure for schema changes:
   - Matching happens in JS (`src/data/search.ts`), because SQLite's
     `LIKE`/`lower()` only fold ASCII case and "Š" wouldn't match "š".
   - Fields searched: notes (title, body); reminders (title, description);
-    cards (name, number, holder, notes); documents (title, issuer, notes, type
-    label, file name).
+    cards (name, issuer, number, holder, notes); documents (title, store or
+    issuer (`merchant`), notes, type label, attachment file names).
   - Results are grouped by type on screen and re-run when stored items change.
   - A failed search shows an error state, not an empty result.
 - **Categories:** in the approved design the categories *are* the four item
@@ -654,7 +654,9 @@ implemented as a backup yet:
 | JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
 | Jest after Phase 4 step 7 (save a copy, share) | 342 tests in 21 suites: + 6 app-level flows (image and PDF export with name and type, cancel, failure messages incl. partial file and existing destination, share of photo and PDF, missing/damaged/keyless/no receiver), foreground cleanup of expired shares; originals checked unchanged | **342/342 pass** |
 | JVM after Phase 4 step 7 | + `AttachmentExportTest` 4 (exact image and PDF export, originals byte-identical, existing destination untouched, partial destination deleted or reported, damaged/missing/keyless checked first), `ShareFilesTest` 7 (checked copy in its own folder, names can't escape, nothing left on failure, 24 h retention, active share kept, old leftovers removed, read-only grant, FileProvider paths and manifest) | **48/48 pass** |
-| Phase 4 review fixes | JVM +11: share launch failures delete the copy (URI, activity, receiver), success keeps it 24 h, failing cleanup keeps the original error; export `"wt"` with fallback, unknown size refused untouched, unopenable destination cleaned up; close-time `IOException`; `importAll` continues after failures; key never created when files can't be listed; `hasAnyFile` fails closed; AVIF not taken for HEIF. Jest +5: Save disabled during import (document and card), no second selection while one runs, failed import unblocks Save, leaving during an import deletes late files | **JVM 59/59, Jest 347/347** |
+| Phase 4 review fixes (`06004a0`) | JVM +11: share launch failures delete the copy (URI, activity, receiver), success keeps it 24 h, failing cleanup keeps the original error; export `"wt"` with fallback, unknown size refused untouched, unopenable destination cleaned up; close-time `IOException`; `importAll` continues after failures; key never created when files can't be listed; `hasAnyFile` fails closed; AVIF not taken for HEIF. Jest +5: Save disabled during import (document and card), no second selection while one runs, failed import unblocks Save, leaving during an import deletes late files | **JVM 59/59, Jest 347/347** |
+| KeyVault hardening (`04c4605`) | JVM +5 `JsKeyAccessTest`: only `database` allowed; `attachments`, `reminders`, unknown and malformed ids rejected; the three JS key operations go through the check; native code keeps its own keys. Instrumentation: + `nativeCodeKeepsAccessToAttachmentsAndRemindersKeys` (compiled, **not run**) | **JVM 64/64, Jest 347/347** |
+| UTF-8-safe export names (`6786ceb`) | JVM +8 `ExportFileNamesTest`: byte limit, extension kept, code-point-safe cut, exact and one-over boundary, no-extension, hidden and empty names, overlong extension, lone surrogate, a real share copy on disk, Share and Save a copy use the same helper | **JVM 72/72, Jest 347/347** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
@@ -665,9 +667,16 @@ implemented as a backup yet:
 | Manual (Phase 1, unchanged since) | First launch; create note/card/reminder; edit; delete; pin; complete; search; Done filter; Home counts, Pinned and Recently updated; theme; persistence across force-stop; missing-key error + retry; release installed over debug | All as expected |
 | Manual on-disk inspection (Phase 1) | Raw `trezor.db`: no plaintext of entered data or schema; random header; host `sqlite3` refuses; envelope holds only the wrapped key | As expected |
 
-Commands: `npx tsc --noEmit`, `npm run lint`, `npm test`,
-`cd android && ./gradlew :app:connectedDebugAndroidTest` (needs a running
-emulator or device; **it uninstalls the app afterwards**).
+Three kinds of automated tests, run separately:
+
+| Kind | Where | Command | Runs on |
+| --- | --- | --- | --- |
+| Jest (21 suites) | `__tests__/` (storage on `node:sqlite`, app flows through `test-utils/appHarness.tsx`, native modules faked in `jest.setup.js`) | `npm test` | Node, no Android |
+| JVM unit | `android/app/src/test/` (`attachments/` 8 classes, `reminders/RecurrenceTest`, `vault/JsKeyAccessTest`) | `cd android && ./gradlew :app:testDebugUnitTest` | Host JVM, no Android |
+| Android instrumentation | `android/app/src/androidTest/` (`KeyVaultTest`, `DatabaseFilesTest`, `ReminderSchedulerTest`) | `cd android && ./gradlew :app:connectedDebugAndroidTest` | Emulator or device; **uninstalls the app afterwards, erasing its data** |
+
+Also run `npx tsc --noEmit` and `npm run lint`. **No instrumentation test was
+run in Phase 4.** The new instrumentation case is compiled only.
 
 ---
 
@@ -764,9 +773,11 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | PDF viewing | No zoom; very large PDFs open slower (every page size is read on open); pages are rendered at screen width |
 | Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
-| Phase 4 review findings | Fixed in the review-fix commit: a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
+| Long non-ASCII export names | **Fixed (`6786ceb`):** Share and Save a copy names were limited to 120 UTF-16 characters, so a long CJK name exceeded the 255-byte file-name limit and Share always failed. Now at most 200 UTF-8 bytes (§14.9) |
+| Second Phase 4 review, open (Low) | Not fixed: (1) the attachments directory isn't `fsync`ed after the import rename (§14.3); (2) records `parsePickResult` rejects are dropped silently and their `.tza` file stays until startup cleanup (§14.2); (3) after `invalidate()`, most `TrezorAttachmentsModule` calls would throw `RejectedExecutionException` and their promises never settle. Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
+| Phase 4 review findings | Fixed in the review-fix commit (`06004a0`): a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
-| JS access to vault keys | **Fixed (KeyVault hardening):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
+| JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
 | Untrusted PDFs are rendered in-process | Android's `PdfRenderer` (PDFium) parses picked PDFs in Trezor's process, which can unwrap the attachments key. Accepted platform risk |
 | Screen contents in Recents and screenshots (no `FLAG_SECURE`) | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Product decision pending; no change made |
 | Device UI issues (Galaxy A53) | The tab bar overlaps the Android navigation buttons, and the keyboard does not open for an auto-focused field. Both are unresolved (found during Phase 3 testing) |
@@ -1002,7 +1013,7 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   another type. Over 25 MB is refused while reading, even if the declared size
   is wrong. Names are reduced to their last segment, without control or
   bidirectional characters, at most 120 characters, and get an extension if
-  they have none **[verified: JVM]**.
+  they have none **[verified: JVM]**. That is the stored display name; copies written outside the store are also limited to 200 UTF-8 bytes (§14.9).
 - One file's failure, including an `IOException` when closing its stream,
   becomes that file's `READ_FAILED` or `IMPORT_FAILED`. Its encrypted file is
   removed, and the other picked files are still imported. Every pick promise
@@ -1011,8 +1022,14 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   bytes never reach JavaScript. Per-file failures: `TOO_LARGE`,
   `UNSUPPORTED_TYPE`, `READ_FAILED`, `IMPORT_FAILED`. Whole-call rejections:
   `BUSY`, `NO_ACTIVITY`, `PICKER_UNAVAILABLE`, `KEY_UNAVAILABLE`,
-  `INVALID_ARGUMENT`. JS drops any record that fails `attachmentRecordProblem`
-  **[verified: Jest]**.
+  `INVALID_ARGUMENT`.
+- **Records JS rejects:** `parsePickResult` drops any record that fails
+  `attachmentRecordProblem` **[verified: Jest]**. A dropped record is not
+  added to `failed`, so the user isn't told, and its `.tza` file (already
+  imported by native code) isn't deleted. That file is unreferenced and stays
+  until the next startup cleanup. Kotlin and TS apply the same limits today,
+  so a valid import is never dropped; this is a guard against future drift
+  (§12).
 - `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)` (§14.3), plus
   `openView`/`closeView`, `openPdf`/`renderPdfPage`/`closePdf`,
   `purgeInactiveViews` (§14.4, §14.8), `saveCopy`, `share` and
@@ -1021,9 +1038,24 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
 
 ### 14.3 Crash safety and cleanup
 
-- Files are imported before the row that refers to them is saved, and deleted
-  only after the row is gone. A crash can leave an unreferenced file, never a
-  row without its file.
+- **Order of operations:**
+  1. A file is encrypted to `tmp/<id>.part`, `fsync`ed, decrypted back and
+     checked, then renamed to `<id>.tza`, all **before** the row that refers
+     to it is saved.
+  2. The database transaction decides which item owns which attachment.
+  3. Files are deleted only **after** the transaction removing their rows
+     has committed.
+- **What can and can't go wrong:**
+  - A crash or kill can leave an unreferenced file, which the startup cleanup
+    removes.
+  - Database and file system are not one atomic unit, though. The directory
+    isn't `fsync`ed after the rename (`AttachmentStore.import` syncs only the
+    file). A power loss after the database commit but before the rename
+    reaches disk could, in principle, leave a row whose file is missing. The
+    viewer then shows "File is missing".
+  - The startup cleanup removes unreferenced files but cannot recreate a
+    missing one.
+  - Not seen in practice or reproduced. See §12.
 - At startup, after the database opened and before any screen can pick a
   file, `openStorage` passes the database's attachment ids to
   `collectGarbage`. It removes unreferenced `.tza` files and unfinished
@@ -1159,9 +1191,14 @@ encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
    so there is no plaintext file in between. Each chunk is authenticated, and
    size and SHA-256 are checked again at the end.
 - A destination that already has content is refused and left untouched
-  (`DESTINATION_NOT_EMPTY`). So is one whose provider doesn't report a size,
-  since it could be an existing file (`DESTINATION_UNVERIFIED`). Nothing is
-  written to or deleted from either **[verified: JVM]**.
+  (`DESTINATION_NOT_EMPTY`) **[verified: JVM]**.
+- **`DESTINATION_UNVERIFIED`:** if the provider doesn't report the
+  destination's size (no `OpenableColumns.SIZE`, or the query fails), the
+  export is refused before anything is opened **[verified: JVM]**.
+  - The destination is **not deleted**: it could be an existing file. So the
+    empty document the picker created normally stays where the user chose.
+  - The UI says so: "This location can’t confirm the file is new, so nothing
+    was saved. An empty file may remain there. Choose another location."
 - The stream is opened with `"wt"` (write and truncate). Only a provider that
   rejects `"wt"` gets `"w"`, and only after the destination was shown to be
   empty **[verified: JVM]**. Providers differ: these rules cover the providers
@@ -1206,8 +1243,18 @@ encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
   failures (`NoActivityException` → `NO_ACTIVITY`, `ActivityNotFoundException`
   → `SHARE_UNAVAILABLE`) has no automated test: it is Android glue, and
   instrumentation tests are deferred.
-- Names are cleaned again (last segment, no control characters) and get an
-  extension if they have none.
+- **File names** (Share and the name suggested to the Save a copy picker)
+  come from `ExportFileNames.forExport`. The stored display name is not
+  changed.
+  1. The name is cleaned as on import: last segment, no control or bidi
+     characters.
+  2. Lone surrogates are dropped, and an extension is added if missing.
+  3. The name is limited to **200 UTF-8 bytes**: the 255-byte file-name
+     limit minus a 55-byte margin for provider suffixes such as " (1)".
+  - The extension is kept. The base is cut on a code-point boundary. An
+    extension over 16 bytes is replaced by the type's own (`.pdf`, `.jpg`, …).
+  - **[verified: JVM]**, including a real share copy with a 352-byte CJK name
+    (`6786ceb`).
 
 Messages: missing, damaged, key unavailable, no app to save with, no app to
 receive, destination not empty, and failed with or without a leftover file.
