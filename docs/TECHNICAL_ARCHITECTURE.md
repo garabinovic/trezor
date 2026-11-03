@@ -578,6 +578,7 @@ The design keeps backup independent of this device's Keystore:
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
 | Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
+| Jest after Phase 4 step 5 (documents UI) | 323 tests in 19 suites: + 14 app-level document flows (all four types with photos and PDFs across a restart, document without attachments unchanged, detail list with type and size, reorder, replace, remove, failed save keeps files, discard, partial imports, 10-file limit and picker counts, date validation unchanged), attachment limit validation, type and size labels | **323/323 pass** |
 | Jest after Phase 4 step 4 (cards UI) | 301 tests in 18 suites: + 12 app-level card flows (plain number without code glyphs, issuer, photos shown and their copies deleted, missing or damaged photos, create with both photos across a restart, replace, remove, failed save keeps the stored file, discard deletes new picks, failed picks explained, stored code type kept, list summary), 4 editor-session tests, view open/close codes | **301/301 pass** |
 | JVM after Phase 4 step 4 | + `AttachmentViewsTest` 4 (verified copy under random names, no copy on mismatch or missing file, close refuses other paths, purge) | **36/36 pass** |
 | JVM after Phase 4 step 3 | + `AttachmentImportRulesTest` 6 (type by content, names, UUIDv7, key policy), `AttachmentImporterTest` 5 (real store: round trip, declared type ignored, size limit with and without a declared size, unreadable sources, cleaned names) | **32/32 pass** |
@@ -976,9 +977,31 @@ files picked while one editor is open **[verified: Jest]**:
   photo, unreadable, couldn't be saved, key unavailable, no picker. Nothing in
   the draft changes.
 
-### 14.7 Not verified yet
+### 14.7 Documents (Phase 4 step 5)
+
+- Every document type (receipt, warranty, image, document) can have up to
+  10 attachments, photos or PDFs, kept in the order shown.
+- **Editor:**
+  - "Add photos" opens the Photo Picker (images only); "Add files" opens the
+    document picker (images and PDFs);
+  - both pick several files at once, at most the number still free, and are
+    disabled at 10;
+  - each file's ⋮ menu offers Move up, Move down, Replace (one photo or PDF,
+    same position) and Remove.
+- **Lifecycle:** the same session rules as card photos (§14.5), verified for
+  documents as well **[verified: Jest]**.
+- **Partial imports:** the files that worked are added. Each failure is
+  explained under the list, and files beyond the limit are reported ("2 files
+  weren’t added …"). `validate` also refuses more than 10.
+- **Detail screen:** each file shows its name with its type and size ("PDF ·
+  1.2 MB", "JPEG image · 340 KB"). Rows don't open the file yet (viewer: step
+  6), and no file is decrypted to show the list.
+- Dates, expiry, merchant, amount, currency and notes and their validation
+  are unchanged **[verified: Jest]**.
+
+### 14.8 Not verified yet
 
 - The module (pickers, content URIs, Keystore key, view files) and the card
-  screens have not run on a device. Installing on the A53 would upgrade its
+  and document screens have not run on a device. Installing on the A53 would upgrade its
   real data to schema v3, so it waits for approval. Instrumentation tests are
   deferred: running them would uninstall the app from the user's phone.

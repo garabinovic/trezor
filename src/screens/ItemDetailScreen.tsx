@@ -3,7 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Calendar,
-  Paperclip,
+  FileText,
+  Image as ImageIcon,
   Pencil,
   Pin,
   PinOff,
@@ -34,8 +35,9 @@ import {
   formatAmount,
   formatCardNumber,
   formatDue,
-  formatFileSize,
+  describeAttachment,
   formatFullDate,
+  isImage,
   formatEdited,
   isOverdue,
   LoyaltyCard,
@@ -261,12 +263,9 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
           {doc.attachments.map(a => (
             <ListItem
               key={a.id}
-              icon={Paperclip}
+              icon={isImage(a) ? ImageIcon : FileText}
               title={a.fileName}
-              subtitle={`${formatFileSize(
-                a.sizeBytes,
-              )} · Opening files is not available yet`}
-              disabled
+              subtitle={describeAttachment(a)}
             />
           ))}
         </Section>

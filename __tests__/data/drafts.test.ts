@@ -183,3 +183,33 @@ describe('reminder validation', () => {
     expect((out as typeof base).intervalMinutes).toBeNull();
   });
 });
+
+describe('document attachments', () => {
+  const file = (n: number) => ({
+    id: `01a1a0dd-991f-783c-9531-3fab9ef479${String(n).padStart(2, '0')}`,
+    fileName: `page-${n}.pdf`,
+    mimeType: 'application/pdf' as const,
+    sizeBytes: 1000,
+    sha256: 'a'.repeat(64),
+    formatVersion: 1,
+    createdAt: '2026-11-03T00:00:00.000Z',
+  });
+  const files = (count: number) =>
+    Array.from({ length: count }, (_, i) => file(i + 1));
+
+  test('up to 10 are valid; more are refused with how many to remove', () => {
+    expect(
+      validate(doc({ attachments: files(10) })).attachments,
+    ).toBeUndefined();
+    expect(validate(doc({ attachments: files(12) })).attachments).toBe(
+      'A document can have at most 10 attachments. Remove 2.',
+    );
+  });
+
+  test('normalize keeps attachments and their order untouched', () => {
+    const attachments = [file(3), file(1), file(2)];
+    expect((normalize(doc({ attachments })) as DocumentItem).attachments).toBe(
+      attachments,
+    );
+  });
+});

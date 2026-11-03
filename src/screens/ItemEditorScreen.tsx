@@ -115,10 +115,18 @@ export function ItemEditorScreen({ route, navigation }: Props) {
           />
         )}
         {draft.type === 'card' && (
-          <CardFields draft={draft} attachments={attachments} {...fieldProps} />
+          <CardFields
+            draft={draft}
+            attachmentSession={attachments}
+            {...fieldProps}
+          />
         )}
         {draft.type === 'document' && (
-          <DocumentFields draft={draft} {...fieldProps} />
+          <DocumentFields
+            draft={draft}
+            attachmentSession={attachments}
+            {...fieldProps}
+          />
         )}
       </View>
 

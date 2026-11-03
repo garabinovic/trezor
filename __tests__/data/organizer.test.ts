@@ -1,4 +1,4 @@
-import { itemSummary } from '../../src/data/format';
+import { describeAttachment, itemSummary } from '../../src/data/format';
 import {
   buildHomeOverview,
   COMING_UP_LIMIT,
@@ -175,5 +175,18 @@ describe('document list summary', () => {
     expect(itemSummary({ ...base, expiresOn: null }, NOW)).toBe(
       'Document · 1 May 2024',
     );
+  });
+});
+
+describe('describeAttachment', () => {
+  test.each([
+    ['application/pdf', 1_258_291, 'PDF · 1.2 MB'],
+    ['image/jpeg', 348_160, 'JPEG image · 340 KB'],
+    ['image/png', 100, 'PNG image · 1 KB'],
+    ['image/webp', 2048, 'WebP image · 2 KB'],
+    ['image/heic', 25 * 1024 * 1024, 'HEIC image · 25.0 MB'],
+    ['image/heif', 0, 'HEIF image · 0 KB'],
+  ] as const)('%s of %d bytes is "%s"', (mimeType, sizeBytes, text) => {
+    expect(describeAttachment({ mimeType, sizeBytes })).toBe(text);
   });
 });

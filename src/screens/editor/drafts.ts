@@ -1,4 +1,4 @@
-import { createId, Item, ItemType } from '../../data';
+import { createId, Item, ItemType, MAX_DOCUMENT_ATTACHMENTS } from '../../data';
 import { INTERVAL_PRESETS, withStart } from '../../reminders/reminderSchedule';
 
 export type FieldErrors = Partial<Record<string, string>>;
@@ -102,6 +102,11 @@ export function validate(
     errors.cardNumber = 'Enter the card number.';
   }
   if (item.type === 'document') {
+    if (item.attachments.length > MAX_DOCUMENT_ATTACHMENTS) {
+      errors.attachments = `A document can have at most ${MAX_DOCUMENT_ATTACHMENTS} attachments. Remove ${
+        item.attachments.length - MAX_DOCUMENT_ATTACHMENTS
+      }.`;
+    }
     if (item.amount != null && Number.isNaN(item.amount)) {
       errors.amount = 'Enter a valid amount, e.g. 24.90';
     }

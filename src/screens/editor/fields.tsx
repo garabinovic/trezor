@@ -1,18 +1,37 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ImagePlus, Paperclip } from 'lucide-react-native';
+import {
+  ArrowDown,
+  ArrowUp,
+  EllipsisVertical,
+  FilePlus,
+  FileText,
+  Image as ImageIcon,
+  ImagePlus,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react-native';
 import { AttachmentImage } from '../../attachments/AttachmentImage';
-import { toAttachmentError } from '../../attachments/platform';
+import { PickSource, toAttachmentError } from '../../attachments/platform';
 import {
   Button,
   ChipGroup,
   ChipOption,
   DateField,
+  Icon,
+  IconButton,
+  ListItem,
+  Sheet,
   Text,
   TextField,
 } from '../../components';
 import {
+  Attachment,
+  describeAttachment,
+  DocumentItem,
   DocumentKind,
+  isImage,
+  MAX_DOCUMENT_ATTACHMENTS,
   documentKinds,
   ItemOfType,
   ItemType,
@@ -24,9 +43,13 @@ import {
   ReminderRepeat,
   toIsoDate,
 } from '../../data';
-import { spacing } from '../../theme';
+import { spacing, Theme, useStyles } from '../../theme';
 import type { AttachmentSession } from './attachmentSession';
-import { importFailureText, pickErrorText } from './attachmentMessages';
+import {
+  importFailureText,
+  pickErrorText,
+  skippedText,
+} from './attachmentMessages';
 import { FieldErrors } from './drafts';
 import {
   INTERVAL_PRESETS,
@@ -223,8 +246,8 @@ export function CardFields({
   draft,
   onChange,
   errors,
-  attachments,
-}: FieldsProps<'card'> & { attachments: AttachmentSession }) {
+  attachmentSession,
+}: FieldsProps<'card'> & { attachmentSession: AttachmentSession }) {
   // The stored code type (barcode / QR) is kept but not offered until codes
   // can be scanned or shown for real.
   return (
@@ -254,7 +277,11 @@ export function CardFields({
         autoCapitalize="characters"
         autoCorrect={false}
       />
-      <CardPhotos draft={draft} onChange={onChange} session={attachments} />
+      <CardPhotos
+        draft={draft}
+        onChange={onChange}
+        session={attachmentSession}
+      />
       <TextField
         label="Cardholder"
         value={draft.holderName}
@@ -406,7 +433,8 @@ export function DocumentFields({
   draft,
   onChange,
   errors,
-}: FieldsProps<'document'>) {
+  attachmentSession,
+}: FieldsProps<'document'> & { attachmentSession: AttachmentSession }) {
   const [amountText, setAmountText] = useState(
     draft.amount != null ? String(draft.amount) : '',
   );
@@ -479,20 +507,12 @@ export function DocumentFields({
           </View>
         </View>
       )}
-      <FieldGroup label="Attachment">
-        <Button
-          label="Attach file"
-          icon={Paperclip}
-          variant="secondary"
-          onPress={() => {}}
-          disabled
-        />
-        <Text variant="caption" color="textTertiary">
-          {draft.attachments.length > 0
-            ? `${draft.attachments.length} attached. Changing files is not available yet.`
-            : 'Adding photos and files is not available yet.'}
-        </Text>
-      </FieldGroup>
+      <DocumentAttachments
+        draft={draft}
+        onChange={onChange}
+        session={attachmentSession}
+        error={errors.attachments}
+      />
       <TextField
         label="Notes"
         value={draft.notes}
@@ -501,6 +521,190 @@ export function DocumentFields({
         multiline
       />
     </>
+  );
+}
+
+/**
+ * A document's files, in display order: add photos or files (images and
+ * PDFs), and per file move, replace or remove. Same file lifecycle as card
+ * photos (see attachmentSession.ts).
+ */
+function DocumentAttachments({
+  draft,
+  onChange,
+  session,
+  error,
+}: {
+  draft: DocumentItem;
+  onChange: (patch: Partial<DocumentItem>) => void;
+  session: AttachmentSession;
+  error?: string;
+}) {
+  const themed = useStyles(createThemedStyles);
+  const [busy, setBusy] = useState(false);
+  const [problems, setProblems] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const files = draft.attachments;
+  const remaining = MAX_DOCUMENT_ATTACHMENTS - files.length;
+  const selectedIndex = files.findIndex(a => a.id === selectedId);
+  const selected = selectedIndex >= 0 ? files[selectedIndex] : null;
+
+  /** Runs one pick; `apply` gets what was imported. */
+  const run = async (
+    source: PickSource,
+    maxCount: number,
+    apply: (imported: Attachment[]) => void,
+  ) => {
+    setProblems([]);
+    setBusy(true);
+    try {
+      const result = await session.pick({
+        source,
+        imagesOnly: source === 'photos',
+        maxCount,
+      });
+      if (!result) {
+        return;
+      }
+      if (result.imported.length > 0) {
+        apply(result.imported);
+      }
+      setProblems([
+        ...result.failed.map(f => importFailureText(f, 'file')),
+        ...(result.skipped > 0
+          ? [skippedText(result.skipped, MAX_DOCUMENT_ATTACHMENTS)]
+          : []),
+      ]);
+    } catch (e) {
+      const text = pickErrorText(
+        toAttachmentError(e).code,
+        source === 'photos' ? 'photo' : 'file',
+      );
+      setProblems(text ? [text] : []);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = (source: PickSource) =>
+    run(source, remaining, imported =>
+      onChange({ attachments: [...files, ...imported] }),
+    );
+
+  const replace = (old: Attachment) => {
+    setSelectedId(null);
+    run('files', 1, ([next]) => {
+      onChange({
+        attachments: files.map(a => (a.id === old.id ? next : a)),
+      });
+      session.release([old.id]);
+    });
+  };
+
+  const remove = (old: Attachment) => {
+    setSelectedId(null);
+    onChange({ attachments: files.filter(a => a.id !== old.id) });
+    session.release([old.id]);
+  };
+
+  const move = (from: number, to: number) => {
+    setSelectedId(null);
+    const next = [...files];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange({ attachments: next });
+  };
+
+  return (
+    <FieldGroup label="Attachments">
+      {files.map(a => (
+        <View key={a.id} style={themed.fileRow}>
+          <Icon icon={isImage(a) ? ImageIcon : FileText} />
+          <View style={styles.fileText}>
+            <Text variant="bodyStrong" numberOfLines={1}>
+              {a.fileName}
+            </Text>
+            <Text variant="caption" color="textSecondary">
+              {describeAttachment(a)}
+            </Text>
+          </View>
+          <IconButton
+            icon={EllipsisVertical}
+            label={`Options for ${a.fileName}`}
+            color="textSecondary"
+            onPress={() => !busy && setSelectedId(a.id)}
+          />
+        </View>
+      ))}
+      <View style={styles.row}>
+        <View style={styles.flex}>
+          <Button
+            label="Add photos"
+            icon={ImagePlus}
+            variant="secondary"
+            size="sm"
+            fullWidth
+            disabled={busy || remaining <= 0}
+            onPress={() => add('photos')}
+          />
+        </View>
+        <View style={styles.flex}>
+          <Button
+            label="Add files"
+            icon={FilePlus}
+            variant="secondary"
+            size="sm"
+            fullWidth
+            disabled={busy || remaining <= 0}
+            onPress={() => add('files')}
+          />
+        </View>
+      </View>
+      {[...(error ? [error] : []), ...problems].map(text => (
+        <Text key={text} variant="caption" color="danger">
+          {text}
+        </Text>
+      ))}
+      <Text variant="caption" color="textTertiary">
+        {remaining > 0
+          ? `Photos or PDFs, up to ${MAX_DOCUMENT_ATTACHMENTS} files of 25 MB each. Files are encrypted and stay on this device.`
+          : `${MAX_DOCUMENT_ATTACHMENTS} of ${MAX_DOCUMENT_ATTACHMENTS} files attached. Remove one to add another.`}
+      </Text>
+      <Sheet
+        visible={selected !== null}
+        title={selected?.fileName ?? ''}
+        onClose={() => setSelectedId(null)}
+      >
+        {selected && (
+          <>
+            <ListItem
+              icon={ArrowUp}
+              title="Move up"
+              disabled={selectedIndex === 0}
+              onPress={() => move(selectedIndex, selectedIndex - 1)}
+            />
+            <ListItem
+              icon={ArrowDown}
+              title="Move down"
+              disabled={selectedIndex === files.length - 1}
+              onPress={() => move(selectedIndex, selectedIndex + 1)}
+            />
+            <ListItem
+              icon={RefreshCw}
+              title="Replace"
+              subtitle="Choose another photo or PDF"
+              onPress={() => replace(selected)}
+            />
+            <ListItem
+              icon={Trash2}
+              title="Remove"
+              titleColor="danger"
+              onPress={() => remove(selected)}
+            />
+          </>
+        )}
+      </Sheet>
+    </FieldGroup>
   );
 }
 
@@ -526,6 +730,23 @@ const styles = StyleSheet.create({
   amount: { flex: 2 },
   currency: { flex: 1 },
   group: { gap: spacing.sm },
+  flex: { flex: 1 },
+  fileText: { flex: 1, gap: spacing.xxs },
   photoSlot: { flex: 1, gap: spacing.xs },
   photoActions: { flexDirection: 'row', justifyContent: 'space-between' },
 });
+
+const createThemedStyles = ({ colors, radius }: Theme) =>
+  StyleSheet.create({
+    fileRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+      minHeight: 56,
+      paddingLeft: spacing.md,
+      borderRadius: radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+  });

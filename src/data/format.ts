@@ -1,4 +1,11 @@
-import { DocumentItem, Item, LoyaltyCard, Reminder } from './types';
+import {
+  Attachment,
+  AttachmentMimeType,
+  DocumentItem,
+  Item,
+  LoyaltyCard,
+  Reminder,
+} from './types';
 import { documentKinds } from './categories';
 import { nextDue, repeatLabel } from '../reminders/reminderSchedule';
 
@@ -160,6 +167,24 @@ export function maskCardNumber(cardNumber: string): string {
 export function formatFileSize(sizeBytes: number): string {
   const kb = sizeBytes === 0 ? 0 : Math.max(1, Math.round(sizeBytes / 1024));
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
+}
+
+const attachmentTypeLabels: Record<AttachmentMimeType, string> = {
+  'image/jpeg': 'JPEG image',
+  'image/png': 'PNG image',
+  'image/webp': 'WebP image',
+  'image/heic': 'HEIC image',
+  'image/heif': 'HEIF image',
+  'application/pdf': 'PDF',
+};
+
+/** "PDF · 1.2 MB" */
+export function describeAttachment(
+  a: Pick<Attachment, 'mimeType' | 'sizeBytes'>,
+): string {
+  return `${attachmentTypeLabels[a.mimeType] ?? 'File'} · ${formatFileSize(
+    a.sizeBytes,
+  )}`;
 }
 
 /** Parses a strict YYYY-MM-DD string; returns null when invalid. */
