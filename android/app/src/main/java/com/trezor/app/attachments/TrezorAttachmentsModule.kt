@@ -383,7 +383,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
           else -> {
             val intent =
                 CreateDocument(mimeType)
-                    .createIntent(activity, ShareFiles.nameFor(fileName, mimeType))
+                    .createIntent(activity, ExportFileNames.forExport(fileName, mimeType))
             pendingExport = PendingExport(promise, id, sizeBytes.toLong(), sha256)
             try {
               activity.startActivityForResult(intent, REQUEST_EXPORT)

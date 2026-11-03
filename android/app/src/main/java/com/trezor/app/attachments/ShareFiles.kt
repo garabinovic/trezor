@@ -52,7 +52,7 @@ class ShareFiles(
         buffered.flush()
         out.fd.sync()
       }
-      val target = File(folder, nameFor(fileName, mimeType))
+      val target = File(folder, ExportFileNames.forExport(fileName, mimeType))
       if (!part.renameTo(target)) {
         throw AttachmentStore.StoreException(
             AttachmentStore.StoreException.Code.IO_FAILED, "Could not prepare share")
@@ -127,9 +127,5 @@ class ShareFiles(
     const val RETENTION_MS = 24L * 60 * 60 * 1000
     private const val PART_NAME = ".part"
     private const val BUFFER_BYTES = 64 * 1024
-
-    /** The stored display name, cleaned again and with an extension for [mimeType]. */
-    internal fun nameFor(fileName: String, mimeType: String): String =
-        AttachmentImporter.fileName(AttachmentImporter.cleanName(fileName), mimeType)
   }
 }
