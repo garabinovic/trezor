@@ -44,6 +44,19 @@ class AttachmentImporter(
     IMPORT_FAILED,
   }
 
+  /**
+   * Imports each source in turn. One file's failure, whatever it is, becomes that file's
+   * outcome and never stops the others, so the caller always gets one outcome per source.
+   */
+  fun importAll(sources: List<() -> Source>, imagesOnly: Boolean): List<Outcome> =
+      sources.map { source ->
+        try {
+          import(source(), imagesOnly)
+        } catch (e: Exception) {
+          Outcome.Failed("File", Code.IMPORT_FAILED)
+        }
+      }
+
   fun import(source: Source, imagesOnly: Boolean): Outcome {
     val reported = cleanName(source.displayName)
     fun failed(code: Code) = Outcome.Failed(reported.ifEmpty { "File" }, code)
@@ -56,27 +69,51 @@ class AttachmentImporter(
           null
         } ?: return failed(Code.READ_FAILED)
 
-    BufferedInputStream(raw, BUFFER_BYTES).use { input ->
-      val mimeType =
-          try {
-            input.mark(MediaTypes.SNIFF_BYTES)
-            val header = input.readNBytesCompat(MediaTypes.SNIFF_BYTES)
-            input.reset()
-            MediaTypes.sniff(header)
-          } catch (e: Exception) {
-            return failed(Code.READ_FAILED)
-          } ?: return failed(Code.UNSUPPORTED_TYPE)
-      if (imagesOnly && mimeType !in MediaTypes.IMAGES) return failed(Code.UNSUPPORTED_TYPE)
-
-      val id = newId()
-      return try {
-        val result = store.import(id, input, maxBytes)
-        Outcome.Imported(id, fileName(reported, mimeType), mimeType, result.sizeBytes, result.sha256)
-      } catch (e: AttachmentStore.StoreException) {
-        failed(if (e.code == AttachmentStore.StoreException.Code.TOO_LARGE) Code.TOO_LARGE else Code.IMPORT_FAILED)
+    val input = BufferedInputStream(raw, BUFFER_BYTES)
+    var outcome: Outcome? = null
+    try {
+      outcome = importFrom(input, reported, imagesOnly, ::failed)
+    } finally {
+      try {
+        input.close()
       } catch (e: Exception) {
-        failed(Code.IMPORT_FAILED)
+        // A source that fails on close isn't trusted to have been read correctly: the
+        // file is removed and reported, rather than kept. An earlier reason stays.
+        (outcome as? Outcome.Imported)?.let {
+          store.delete(it.id)
+          outcome = failed(Code.READ_FAILED)
+        }
+        if (outcome == null) outcome = failed(Code.READ_FAILED)
       }
+    }
+    return outcome!!
+  }
+
+  private fun importFrom(
+      input: BufferedInputStream,
+      reported: String,
+      imagesOnly: Boolean,
+      failed: (Code) -> Outcome.Failed,
+  ): Outcome {
+    val mimeType =
+        try {
+          input.mark(MediaTypes.SNIFF_BYTES)
+          val header = input.readNBytesCompat(MediaTypes.SNIFF_BYTES)
+          input.reset()
+          MediaTypes.sniff(header)
+        } catch (e: Exception) {
+          return failed(Code.READ_FAILED)
+        } ?: return failed(Code.UNSUPPORTED_TYPE)
+    if (imagesOnly && mimeType !in MediaTypes.IMAGES) return failed(Code.UNSUPPORTED_TYPE)
+
+    val id = newId()
+    return try {
+      val result = store.import(id, input, maxBytes)
+      Outcome.Imported(id, fileName(reported, mimeType), mimeType, result.sizeBytes, result.sha256)
+    } catch (e: AttachmentStore.StoreException) {
+      failed(if (e.code == AttachmentStore.StoreException.Code.TOO_LARGE) Code.TOO_LARGE else Code.IMPORT_FAILED)
+    } catch (e: Exception) {
+      failed(Code.IMPORT_FAILED)
     }
   }
 

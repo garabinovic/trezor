@@ -19,6 +19,39 @@ import org.junit.rules.TemporaryFolder
 
 class AttachmentStoreTest {
 
+  @Test
+  fun hasAnyFileNeverGuessesNoWhenTheDirectoryCantBeRead() {
+    assertFalse(store.hasAnyFile()) // no directory yet: a fresh install
+    store.import(a, ByteArrayInputStream(bytes(10)), 1000)
+    assertTrue(store.hasAnyFile())
+
+    // The store path exists but is not a directory.
+    val notADir = File(folder.root, "file-instead")
+    notADir.writeBytes(byteArrayOf(1))
+    try {
+      AttachmentStore(notADir) { keyBytes.copyOf() }.hasAnyFile()
+      fail("must fail closed")
+    } catch (e: AttachmentStore.StoreException) {
+      assertEquals(Code.IO_FAILED, e.code)
+    }
+
+    // A directory that can't be listed (skipped where permissions don't apply, e.g. root).
+    assertTrue(root.setReadable(false))
+    try {
+      if (!root.canRead()) {
+        try {
+          store.hasAnyFile()
+          fail("must fail closed")
+        } catch (e: AttachmentStore.StoreException) {
+          assertEquals(Code.IO_FAILED, e.code)
+        }
+      }
+    } finally {
+      root.setReadable(true)
+    }
+  }
+
+
   @get:Rule val folder = TemporaryFolder()
 
   private lateinit var root: File

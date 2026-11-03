@@ -37,6 +37,8 @@ export type AttachmentErrorCode =
   | 'PDF_UNSUPPORTED'
   /** Save a copy: the chosen document already had content; nothing written. */
   | 'DESTINATION_NOT_EMPTY'
+  /** Save a copy: the location doesn't report whether the file is new; nothing written. */
+  | 'DESTINATION_UNVERIFIED'
   /** Save a copy failed; the partial copy was deleted. */
   | 'EXPORT_FAILED'
   /** Save a copy failed; the partial copy could not be deleted. */
@@ -57,6 +59,7 @@ const errorCodes = new Set<string>([
   'PDF_PROTECTED',
   'PDF_UNSUPPORTED',
   'DESTINATION_NOT_EMPTY',
+  'DESTINATION_UNVERIFIED',
   'EXPORT_FAILED',
   'EXPORT_INCOMPLETE',
   'SHARE_UNAVAILABLE',

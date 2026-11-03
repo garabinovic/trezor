@@ -96,8 +96,9 @@ class AttachmentImporterTest {
           override fun read(b: ByteArray, off: Int, len: Int): Int {
             if (served > 0) throw IOException("gone")
             served++
-            jpeg.copyInto(b, off, 0, minOf(len, 16))
-            return minOf(len, 16)
+            // More than the type check reads, so the failure hits the import itself.
+            jpeg.copyInto(b, off, 0, minOf(len, 100))
+            return minOf(len, 100)
           }
         }
     assertEquals(Code.READ_FAILED, failure(importer().import(Source("a", null) { null }, true)))
@@ -107,6 +108,54 @@ class AttachmentImporterTest {
     assertEquals(Code.IMPORT_FAILED, failure(importer().import(Source("a", null) { failing }, true)))
     assertTrue(store.storedIds().isEmpty())
     assertTrue(File(root, "tmp").listFiles().orEmpty().isEmpty())
+  }
+
+  /** A stream that reads fine but fails when closed. */
+  private fun closeFails(bytes: ByteArray) =
+      object : ByteArrayInputStream(bytes) {
+        override fun close() = throw IOException("close failed")
+      }
+
+  @Test
+  fun aSourceThatFailsOnCloseIsReportedAndLeavesNoFile() {
+    val outcome = importer().import(Source("scan.jpg", null) { closeFails(jpeg) }, imagesOnly = true)
+    assertEquals(Code.READ_FAILED, failure(outcome))
+    assertEquals("scan.jpg", (outcome as Outcome.Failed).fileName)
+    assertTrue(store.storedIds().isEmpty())
+    assertTrue(File(root, "tmp").listFiles().orEmpty().isEmpty())
+  }
+
+  @Test
+  fun aCloseFailureKeepsAnEarlierReason() {
+    val small = importer(maxBytes = 1_000)
+    assertEquals(
+        Code.TOO_LARGE, failure(small.import(Source("big.jpg", null) { closeFails(jpeg) }, true)))
+    assertEquals(
+        Code.UNSUPPORTED_TYPE,
+        failure(importer().import(Source("a.txt", null) { closeFails("hello".toByteArray()) }, false)))
+  }
+
+  @Test
+  fun oneFileFailingNeverStopsTheOthers() {
+    val outcomes =
+        importer()
+            .importAll(
+                listOf(
+                    { source(jpeg, "a.jpg") },
+                    { Source("b.jpg", null) { closeFails(jpeg) } },
+                    { throw IllegalStateException("provider crashed") },
+                    { source(pdf, "d.pdf") },
+                ),
+                imagesOnly = false,
+            )
+    assertEquals(4, outcomes.size)
+    assertTrue(outcomes[0] is Outcome.Imported)
+    assertEquals(Code.READ_FAILED, failure(outcomes[1]))
+    assertEquals(Code.IMPORT_FAILED, failure(outcomes[2]))
+    assertTrue(outcomes[3] is Outcome.Imported)
+    assertEquals(
+        setOf((outcomes[0] as Outcome.Imported).id, (outcomes[3] as Outcome.Imported).id),
+        store.storedIds())
   }
 
   @Test

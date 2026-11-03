@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AttachmentPlatform,
   nativeAttachmentPlatform,
@@ -7,6 +7,11 @@ import {
 } from '../../attachments/platform';
 
 export interface AttachmentSession {
+  /**
+   * A pick or its import is still running. The editor must not save until it
+   * ends, or the files the user chose would be left out of the item.
+   */
+  busy: boolean;
   /**
    * Opens a picker and imports what the user picks. The imported files belong
    * to this session until `commit`. Resolves with null if the editor closed
@@ -39,6 +44,7 @@ export function useAttachmentSession(
   platform: AttachmentPlatform = nativeAttachmentPlatform,
 ): AttachmentSession {
   const owned = useRef(new Set<string>());
+  const [running, setRunning] = useState(0);
   const open = useRef(true);
   const committed = useRef(false);
 
@@ -69,8 +75,15 @@ export function useAttachmentSession(
 
   return useMemo(
     () => ({
+      busy: running > 0,
       async pick(options) {
-        const result = await platform.pick(options);
+        setRunning(n => n + 1);
+        let result: PickResult;
+        try {
+          result = await platform.pick(options);
+        } finally {
+          setRunning(n => n - 1);
+        }
         const ids = result.imported.map(a => a.id);
         if (!open.current || committed.current) {
           remove(ids);
@@ -90,6 +103,6 @@ export function useAttachmentSession(
         owned.current.clear();
       },
     }),
-    [platform, remove],
+    [platform, remove, running],
   );
 }

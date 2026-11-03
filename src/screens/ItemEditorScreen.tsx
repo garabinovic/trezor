@@ -64,6 +64,10 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   };
 
   const save = () => {
+    // Files are still being added: saving now would leave them out.
+    if (attachments.busy) {
+      return;
+    }
     const nextErrors = validate(draft, existing);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -99,7 +103,12 @@ export function ItemEditorScreen({ route, navigation }: Props) {
           backLabel="Cancel"
           actions={
             <View style={styles.save}>
-              <Button label="Save" size="sm" onPress={save} />
+              <Button
+                label="Save"
+                size="sm"
+                onPress={save}
+                disabled={attachments.busy}
+              />
             </View>
           }
         />

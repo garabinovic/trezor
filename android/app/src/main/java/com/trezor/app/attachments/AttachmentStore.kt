@@ -178,6 +178,19 @@ class AttachmentStore(private val root: File, private val key: () -> ByteArray) 
     return removed
   }
 
+  /**
+   * Whether any encrypted attachment file exists. Never guesses "no": a store directory
+   * that exists but can't be listed, or isn't a directory, throws IO_FAILED, so a caller
+   * deciding whether a new key is safe fails closed (see AttachmentKeys).
+   */
+  fun hasAnyFile(): Boolean {
+    if (!root.exists()) return false
+    val files =
+        (if (root.isDirectory) root.listFiles() else null)
+            ?: throw StoreException(StoreException.Code.IO_FAILED, "Attachment directory can't be read")
+    return files.any { it.isFile && it.name.endsWith(SUFFIX) }
+  }
+
   /** Attachment ids that have a file (diagnostics and tests). */
   fun storedIds(): Set<String> =
       root.listFiles()

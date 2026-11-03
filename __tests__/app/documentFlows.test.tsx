@@ -461,3 +461,85 @@ describe('document editor', () => {
     );
   });
 });
+
+describe('while files are still being added', () => {
+  async function finishImport() {
+    await ReactTestRenderer.act(async () => {
+      fakeAttachments.releasePicks();
+    });
+    await settle();
+  }
+
+  test('Save waits for the import, then saves the files the user chose', async () => {
+    await launch();
+    await editDoc('Groceries');
+    fakeAttachments.holdPicks = true;
+    const scan = picked('scan.pdf');
+    await pick('Add files', { imported: [scan] });
+
+    expect(hasText(app, 'Adding files…')).toBe(true);
+    await expect(pressText(app, 'Save')).rejects.toThrow('disabled');
+    expect(await storedDoc('doc-r')).toEqual(receipt);
+
+    await finishImport();
+    expect(hasText(app, 'Adding files…')).toBe(false);
+    expect(hasText(app, 'scan.pdf')).toBe(true);
+    await pressText(app, 'Save');
+    expect(await storedIds('doc-r')).toEqual([scan.id]);
+    expect(fakeAttachments.deleted).toEqual([]);
+  });
+
+  test('no second selection can start while one is running', async () => {
+    await launch();
+    await editDoc('Washing machine');
+    fakeAttachments.holdPicks = true;
+    await pick('Add photos', { imported: [picked('a.jpg', 'image/jpeg')] });
+    await expect(pressText(app, 'Add files')).rejects.toThrow('disabled');
+    await expect(pressText(app, 'Add photos')).rejects.toThrow('disabled');
+    // The file menu doesn't open either.
+    await pressLabel(app, 'Options for manual.pdf');
+    expect(hasText(app, 'Move up')).toBe(false);
+    expect(fakeAttachments.picks).toHaveLength(1);
+
+    await finishImport();
+    fakeAttachments.holdPicks = false;
+    await pick('Add files', { imported: [picked('b.pdf')] });
+    expect(fakeAttachments.picks).toHaveLength(2);
+    await pressText(app, 'Save');
+    expect(await storedIds('doc-w')).toHaveLength(4);
+  });
+
+  test('a failed import unblocks Save and changes nothing', async () => {
+    await launch();
+    await editDoc('Groceries');
+    fakeAttachments.holdPicks = true;
+    await pick('Add files', {
+      failed: [{ fileName: 'big.pdf', code: 'TOO_LARGE' }],
+    });
+    await expect(pressText(app, 'Save')).rejects.toThrow('disabled');
+    await finishImport();
+    expect(hasText(app, '“big.pdf” is larger than 25 MB.')).toBe(true);
+    await typeInto(app, 'Notes', 'Kept');
+    await pressText(app, 'Save');
+    expect(await storedDoc('doc-r')).toEqual({
+      ...receipt,
+      notes: 'Kept',
+      updatedAt: expect.any(String),
+    });
+  });
+
+  test('leaving the editor during an import deletes the files when they arrive', async () => {
+    await launch();
+    await editDoc('Groceries');
+    fakeAttachments.holdPicks = true;
+    const late = picked('late.pdf');
+    await pick('Add files', { imported: [late] });
+    await typeInto(app, 'Notes', 'Changed');
+    await discard();
+    expect(hasText(app, 'Corner Shop')).toBe(true);
+
+    await finishImport();
+    expect(fakeAttachments.deleted).toEqual([late.id]);
+    expect(await storedDoc('doc-r')).toEqual(receipt);
+  });
+});

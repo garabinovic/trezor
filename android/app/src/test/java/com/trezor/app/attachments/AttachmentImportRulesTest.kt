@@ -37,8 +37,32 @@ class AttachmentImportRulesTest {
     assertNull(MediaTypes.sniff(ascii("PK", 10))) // zip / office documents
     assertNull(MediaTypes.sniff(ascii("RIFF") + bytes(1, 2, 3, 4) + ascii("WAVE")))
     assertNull(MediaTypes.sniff(ftyp("avif")))
+    assertNull(MediaTypes.sniff(ftyp("avis")))
     assertNull(MediaTypes.sniff(ftyp("isom"))) // mp4 video
     assertNull(MediaTypes.sniff(ascii("<html><body>")))
+  }
+
+  /** A full `ftyp` box: size, "ftyp", major brand, minor version, compatible brands. */
+  private fun ftypBox(major: String, vararg compatible: String): ByteArray {
+    val size = 16 + 4 * compatible.size
+    return bytes(0, 0, 0, size) + ascii("ftyp") + ascii(major) + ByteArray(4) +
+        compatible.fold(ByteArray(0)) { acc, b -> acc + ascii(b) }
+  }
+
+  @Test
+  fun avifIsNeverTakenForHeif() {
+    // AVIF stills from common encoders: generic HEIF major brand, AVIF compatible brand.
+    assertNull(MediaTypes.sniff(ftypBox("mif1", "mif1", "avif", "miaf", "MA1B")))
+    assertNull(MediaTypes.sniff(ftypBox("msf1", "msf1", "avis", "iso8")))
+    assertNull(MediaTypes.sniff(ftypBox("avif", "mif1", "avif", "miaf")))
+    // Real HEIF/HEIC keep working.
+    assertEquals(MediaTypes.HEIF, MediaTypes.sniff(ftypBox("mif1", "mif1", "heic", "miaf")))
+    assertEquals(MediaTypes.HEIC, MediaTypes.sniff(ftypBox("heic", "mif1", "heic")))
+    // Box size 0 ("to the end of the file") still has its brands read.
+    val toEnd = ftypBox("mif1", "mif1", "avif").also { it[3] = 0 }
+    assertNull(MediaTypes.sniff(toEnd))
+    // Brands past the declared box end are not read.
+    assertEquals(MediaTypes.HEIF, MediaTypes.sniff(ftypBox("mif1", "heic") + ascii("avif")))
   }
 
   @Test
@@ -108,5 +132,24 @@ class AttachmentImportRulesTest {
       assertEquals(VaultException.Code.KEY_NOT_FOUND, e.code)
     }
     assertEquals(0, orphaned.created)
+
+    // Can't tell whether files exist: fail closed, never create a key.
+    var created = 0
+    val unknown =
+        AttachmentKeys(
+            hasKey = { false },
+            getKey = { ByteArray(32) },
+            createKey = { created++; ByteArray(32) },
+            hasFiles = {
+              throw AttachmentStore.StoreException(AttachmentStore.StoreException.Code.IO_FAILED, "x")
+            },
+        )
+    try {
+      unknown.obtain()
+      fail("must not create a key when files can't be listed")
+    } catch (e: AttachmentStore.StoreException) {
+      assertEquals(AttachmentStore.StoreException.Code.IO_FAILED, e.code)
+    }
+    assertEquals(0, created)
   }
 }

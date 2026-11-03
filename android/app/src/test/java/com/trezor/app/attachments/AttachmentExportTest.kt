@@ -40,14 +40,19 @@ class AttachmentExportTest {
       var existing: Long? = 0,
       val failAfter: Int = Int.MAX_VALUE,
       val deletable: Boolean = true,
+      /** Modes the provider accepts. */
+      val modes: Set<String> = setOf("wt", "w"),
   ) : AttachmentExport.Destination {
     val written = ByteArrayOutputStream()
     var opened = false
     var deleted = false
+    val tried = mutableListOf<String>()
 
     override fun existingSize() = existing
 
-    override fun open(): OutputStream {
+    override fun open(mode: String): OutputStream {
+      tried.add(mode)
+      if (mode !in modes) throw IllegalArgumentException("mode $mode not supported")
       opened = true
       return object : OutputStream() {
         override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
@@ -115,6 +120,44 @@ class AttachmentExportTest {
         exportCode { export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, existing) })
     assertFalse(existing.opened)
     assertFalse(existing.deleted)
+  }
+
+  @Test
+  fun writesTruncatingAndFallsBackOnlyForProvidersWithoutIt() {
+    val normal = FakeDestination()
+    export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, normal)
+    assertEquals(listOf("wt"), normal.tried)
+    assertArrayEquals(pdf, normal.written.toByteArray())
+
+    // "w" only after the destination was shown to be empty.
+    val old = FakeDestination(modes = setOf("w"))
+    export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, old)
+    assertEquals(listOf("wt", "w"), old.tried)
+    assertArrayEquals(pdf, old.written.toByteArray())
+  }
+
+  @Test
+  fun aDestinationOfUnknownSizeIsNeitherWrittenNorDeleted() {
+    // e.g. a provider that hands back an existing document and reports no size.
+    val unknown = FakeDestination(existing = null)
+    assertEquals(
+        AttachmentExport.DESTINATION_UNVERIFIED,
+        exportCode { export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, unknown) })
+    assertTrue(unknown.tried.isEmpty())
+    assertFalse(unknown.deleted)
+  }
+
+  @Test
+  fun aDestinationThatCantBeOpenedIsCleanedUp() {
+    val closed = FakeDestination(modes = emptySet())
+    assertEquals(
+        AttachmentExport.EXPORT_FAILED,
+        exportCode { export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, closed) })
+    assertTrue(closed.deleted) // the empty document the picker created
+    val stuck = FakeDestination(modes = emptySet(), deletable = false)
+    assertEquals(
+        AttachmentExport.EXPORT_INCOMPLETE,
+        exportCode { export.write(pdfId, pdfRecord.sizeBytes, pdfRecord.sha256, stuck) })
   }
 
   @Test

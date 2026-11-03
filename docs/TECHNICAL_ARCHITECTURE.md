@@ -145,7 +145,8 @@ Android Keystore  "trezor.master.v1"  AES-256-GCM, non-exportable,
 │                                    StrongBox if available, else TEE/software
 ├── wraps → database key (32 random bytes, SecureRandom)
 │             → SQLCipher raw key  x'<64 hex>'
-└── wraps → attachments key (32 random bytes; native only, never in JS)
+└── wraps → attachments key (32 random bytes; used only by native code;
+              see §12 for the JS vault API that could still request it)
               → wraps a random key per attachment file (§14)
 ```
 
@@ -653,6 +654,7 @@ implemented as a backup yet:
 | JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
 | Jest after Phase 4 step 7 (save a copy, share) | 342 tests in 21 suites: + 6 app-level flows (image and PDF export with name and type, cancel, failure messages incl. partial file and existing destination, share of photo and PDF, missing/damaged/keyless/no receiver), foreground cleanup of expired shares; originals checked unchanged | **342/342 pass** |
 | JVM after Phase 4 step 7 | + `AttachmentExportTest` 4 (exact image and PDF export, originals byte-identical, existing destination untouched, partial destination deleted or reported, damaged/missing/keyless checked first), `ShareFilesTest` 7 (checked copy in its own folder, names can't escape, nothing left on failure, 24 h retention, active share kept, old leftovers removed, read-only grant, FileProvider paths and manifest) | **48/48 pass** |
+| Phase 4 review fixes | JVM +11: share launch failures delete the copy (URI, activity, receiver), success keeps it 24 h, failing cleanup keeps the original error; export `"wt"` with fallback, unknown size refused untouched, unopenable destination cleaned up; close-time `IOException`; `importAll` continues after failures; key never created when files can't be listed; `hasAnyFile` fails closed; AVIF not taken for HEIF. Jest +5: Save disabled during import (document and card), no second selection while one runs, failed import unblocks Save, leaving during an import deletes late files | **JVM 59/59, Jest 347/347** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
@@ -762,7 +764,11 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | PDF viewing | No zoom; very large PDFs open slower (every page size is read on open); pages are rendered at screen width |
 | Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
-| **Open review findings (Phase 4 step 8, not fixed; behaviour unchanged pending approval)** | **M:** a share that fails to launch keeps its decrypted copy for 24 h instead of deleting it (`TrezorAttachmentsModule.share`). **L:** Save a copy opens the destination with `"w"`, which some providers don't truncate, and a provider that returns an existing document without a size would pass the empty check (`"wt"` is safer). **L:** an `IOException` while closing a picked file's stream escapes `AttachmentImporter.import`, so that pick's promise never settles and the editor stays busy. **L:** pressing Save while picked files are still being imported saves the item without them, and they are deleted without a message. **L:** if listing the attachments directory fails while the key envelope is also gone, a new `attachments` key could be created (very narrow). **Nit:** `mif1`/`msf1` brands also start some AVIF files, which would be stored as HEIF and then fail to display; `TrezorVault.getKey` accepts any key id, including `attachments`; untrusted PDFs are rendered in-process by the platform renderer |
+| Phase 4 review findings | Fixed in the review-fix commit: a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
+| Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
+| `TrezorVault` accepts any key id from JS | `getKey`/`createKey` accept any id matching `^[a-z][a-z0-9-]{0,31}$` and return the **unwrapped key as hex**, so JS code could obtain the `attachments` or `reminders` key, or create `attachments` while its envelope is missing (bypassing `AttachmentKeys`). The app's JS uses only `database`, and the TS wrapper's `KeyId` type allows only that, but nothing enforces it natively. JS runs inside the app process, which can already decrypt through the native modules, so this is defence-in-depth, not a new boundary crossing. **Proposed fix (Phase 1 module, outside Phase 4):** a native allow-list in `TrezorVaultModule` accepting only `database` |
+| Untrusted PDFs are rendered in-process | Android's `PdfRenderer` (PDFium) parses picked PDFs in Trezor's process, which can unwrap the attachments key. Accepted platform risk |
+| Screen contents in Recents and screenshots (no `FLAG_SECURE`) | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Product decision pending; no change made |
 | Device UI issues (Galaxy A53) | The tab bar overlaps the Android navigation buttons, and the keyboard does not open for an auto-focused field. Both are unresolved (found during Phase 3 testing) |
 
 ---
@@ -976,6 +982,10 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
 - The `attachments` key is created only while no attachment file exists. If it
   is missing while files exist, nothing is created or deleted, and picking
   fails with `KEY_UNAVAILABLE` (`AttachmentKeys`) **[verified: JVM]**.
+  `AttachmentStore.hasAnyFile` fails closed. A store directory that exists
+  but can't be listed, or isn't a directory, throws instead of answering "no
+  files", so no key is created over files that can't be seen
+  **[verified: JVM]**.
 
 ### 14.2 Native module `TrezorAttachments`
 
@@ -984,12 +994,19 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   (`ACTION_OPEN_DOCUMENT` with the supported types). Neither needs a storage
   permission; the picked URIs are read once and not kept.
 - Each file is imported on one background worker. The type is taken from the
-  first bytes (JPEG, PNG, WebP, HEIC/HEIF, PDF). The name and type the
+  first 64 bytes (JPEG, PNG, WebP, HEIC/HEIF, PDF). For HEIF the whole `ftyp`
+  brand list is read. AVIF is refused as unsupported even when its major
+  brand is the generic `mif1`/`msf1`, so it is never stored as HEIF
+  **[verified: JVM]**. The name and type the
   providing app declares do not decide it, so a renamed file can't pass as
   another type. Over 25 MB is refused while reading, even if the declared size
   is wrong. Names are reduced to their last segment, without control or
   bidirectional characters, at most 120 characters, and get an extension if
   they have none **[verified: JVM]**.
+- One file's failure, including an `IOException` when closing its stream,
+  becomes that file's `READ_FAILED` or `IMPORT_FAILED`. Its encrypted file is
+  removed, and the other picked files are still imported. Every pick promise
+  settles **[verified: JVM]**.
 - The result is JSON metadata only (`{ imported, failed, skipped }`); file
   bytes never reach JavaScript. Per-file failures: `TOO_LARGE`,
   `UNSUPPORTED_TYPE`, `READ_FAILED`, `IMPORT_FAILED`. Whole-call rejections:
@@ -1045,7 +1062,7 @@ files picked while one editor is open **[verified: Jest]**:
 
 | Event | Files |
 | --- | --- |
-| Pick | Imported now and owned by the session |
+| Pick | Imported now and owned by the session. While a pick or its import runs, Save is disabled and "Adding files…" / "Adding photo…" is shown, so an item is never saved without files the user chose **[verified: Jest]**. The busy flag is cleared just before the editor adds the files to the draft. Both are state updates in the same async continuation, which React batches; a Save in between is not expected but isn't excluded by construction |
 | Replace or remove a photo picked in this session | Deleted at once (no row refers to it) |
 | Replace or remove a stored photo | Kept until the save that drops it commits, then deleted by `ItemsProvider` |
 | Save | The session's files that the item keeps now belong to it; the others are deleted |
@@ -1142,7 +1159,19 @@ encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
    so there is no plaintext file in between. Each chunk is authenticated, and
    size and SHA-256 are checked again at the end.
 - A destination that already has content is refused and left untouched
-  (`DESTINATION_NOT_EMPTY`).
+  (`DESTINATION_NOT_EMPTY`). So is one whose provider doesn't report a size,
+  since it could be an existing file (`DESTINATION_UNVERIFIED`). Nothing is
+  written to or deleted from either **[verified: JVM]**.
+- The stream is opened with `"wt"` (write and truncate). Only a provider that
+  rejects `"wt"` gets `"w"`, and only after the destination was shown to be
+  empty **[verified: JVM]**. Providers differ: these rules cover the providers
+  that report sizes and honour `ACTION_CREATE_DOCUMENT`. Whether a given one
+  (Drive, Downloads, OEM file managers) reports a size for a new document has
+  not been checked on a device. One that doesn't will refuse every export with
+  "This location can’t confirm the file is new, so nothing was saved…". The
+  fallback to `"w"` follows any failure to open with `"wt"`, not only an
+  unsupported mode. That is harmless because the destination is known to be
+  empty, and if `"w"` also fails the export is cleaned up as a failed write.
 - A write that fails part-way deletes the document
   (`DocumentsContract.deleteDocument`, `EXPORT_FAILED`). If the provider won't
   delete it, the user is told an incomplete file may remain
@@ -1169,9 +1198,14 @@ encrypted original, the TZA format or the database **[verified: JVM, Jest]**.
   **[verified: JVM]**. There is no background job, so if Trezor isn't opened
   again a copy stays in the private cache until the next launch or until
   Android clears the cache.
-- **Open finding:** when the share sheet can't be launched (`NO_ACTIVITY`,
-  `SHARE_UNAVAILABLE`, URI failure), the prepared copy isn't deleted at once;
-  it waits for the same 24-hour cleanup (§12).
+- If the share sheet can't be started (URI failure, no foreground activity,
+  no app that can receive the file), no app can have the copy, so its folder
+  is deleted at once (`ShareFiles.launch`). The original error is reported
+  even if that cleanup fails, and other shares in progress are untouched.
+  `ShareFiles.launch` is **[verified: JVM]**. How the module maps the Android
+  failures (`NoActivityException` → `NO_ACTIVITY`, `ActivityNotFoundException`
+  → `SHARE_UNAVAILABLE`) has no automated test: it is Android glue, and
+  instrumentation tests are deferred.
 - Names are cleaned again (last segment, no control characters) and get an
   extension if they have none.
 

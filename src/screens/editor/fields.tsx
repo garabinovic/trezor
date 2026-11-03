@@ -409,6 +409,11 @@ function CardPhotos({
           );
         })}
       </View>
+      {busy && (
+        <Text variant="caption" color="textSecondary">
+          Adding photo…
+        </Text>
+      )}
       {problem && (
         <Text variant="caption" color="danger">
           {problem}
@@ -660,6 +665,11 @@ function DocumentAttachments({
           />
         </View>
       </View>
+      {busy && (
+        <Text variant="caption" color="textSecondary">
+          Adding files…
+        </Text>
+      )}
       {[...(error ? [error] : []), ...problems].map(text => (
         <Text key={text} variant="caption" color="danger">
           {text}

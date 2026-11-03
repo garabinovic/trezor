@@ -127,6 +127,8 @@ export function actionMessage(
       return `The file can’t be ${done}: its encryption key is unavailable.`;
     case 'DESTINATION_NOT_EMPTY':
       return 'That file already exists and was left unchanged. Choose a new name.';
+    case 'DESTINATION_UNVERIFIED':
+      return 'This location can’t confirm the file is new, so nothing was saved. An empty file may remain there. Choose another location.';
     case 'EXPORT_FAILED':
       return 'The copy couldn’t be saved. The incomplete copy was removed.';
     case 'EXPORT_INCOMPLETE':

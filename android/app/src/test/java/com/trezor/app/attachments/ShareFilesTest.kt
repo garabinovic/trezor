@@ -33,7 +33,7 @@ class ShareFilesTest {
     val key = ByteArray(32) { 6 }
     store = AttachmentStore(File(folder.root, "files/attachments")) { key.copyOf() }
     dir = File(folder.root, "cache/attachments/share")
-    shares = ShareFiles(store, dir) { clock }
+    shares = ShareFiles(store, dir, now = { clock })
     record = store.import(id, ByteArrayInputStream(content), 1L shl 30)
   }
 
@@ -112,6 +112,69 @@ class ShareFilesTest {
     assertTrue(recent.exists())
     assertFalse(old.exists())
     assertTrue(store.exists(id))
+  }
+
+  private class NoReceiver : Exception("no app")
+
+  @Test
+  fun aSuccessfulLaunchKeepsTheCopyForTheRetentionPeriod() {
+    val file = prepare()
+    var launched: String? = null
+    shares.launch(file, uriFor = { "content://x/${it.name}" }, start = { launched = it })
+    assertEquals("content://x/Receipt March.pdf", launched)
+    assertTrue(file.exists())
+    clock += 23 * hour
+    assertEquals(0, shares.purgeExpired())
+    clock += 2 * hour
+    assertEquals(1, shares.purgeExpired())
+  }
+
+  @Test
+  fun everyFailedLaunchDeletesTheCopyAtOnceAndKeepsTheError() {
+    val failures: List<Pair<Class<out Throwable>, (File) -> Unit>> =
+        listOf(
+            // No URI (e.g. FileProvider misconfigured).
+            IllegalArgumentException::class.java to { f -> shares.launch(f, uriFor = { throw IllegalArgumentException("uri") }, start = {}) },
+            // No foreground activity.
+            IllegalStateException::class.java to { f -> shares.launch(f, uriFor = { "u" }, start = { throw IllegalStateException("activity") }) },
+            // No app can receive it (ActivityNotFoundException on a device).
+            NoReceiver::class.java to { f -> shares.launch(f, uriFor = { "u" }, start = { throw NoReceiver() }) },
+        )
+    val other = prepare("Other.pdf") // another share being prepared at the same time
+    for ((expected, launch) in failures) {
+      val name = expected.simpleName
+      val file = prepare()
+      val thrown =
+          try {
+            launch(file)
+            null
+          } catch (e: Throwable) {
+            e
+          }
+      // The launch's own error comes through, not a cleanup error.
+      assertEquals(name, expected, thrown?.javaClass)
+      assertFalse(name, file.parentFile!!.exists())
+    }
+    assertTrue(other.exists())
+    assertEquals(listOf(other.parentFile!!.name), dir.list()!!.toList())
+    // Still active, so not purged even when old.
+    clock += 48 * hour
+    assertEquals(0, shares.purgeExpired())
+  }
+
+  @Test
+  fun aFailingCleanupNeverHidesTheLaunchError() {
+    val stubborn = ShareFiles(store, dir, { clock }) { throw SecurityException("can't delete") }
+    val file = stubborn.prepare(id, record.sizeBytes, record.sha256, "a.pdf", MediaTypes.PDF)
+    try {
+      stubborn.launch(file, uriFor = { "u" }, start = { throw NoReceiver() })
+      fail("expected the launch failure")
+    } catch (e: NoReceiver) {
+      // The original error, not the cleanup's.
+    }
+    // Left for the normal expiry cleanup.
+    clock += 25 * hour
+    assertEquals(1, shares.purgeExpired())
   }
 
   @Test

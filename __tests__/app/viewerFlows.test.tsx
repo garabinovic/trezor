@@ -442,6 +442,10 @@ describe('save a copy and share', () => {
         'That file already exists and was left unchanged. Choose a new name.',
       ],
       ['PICKER_UNAVAILABLE', 'No app on this device can save files.'],
+      [
+        'DESTINATION_UNVERIFIED',
+        'This location can’t confirm the file is new, so nothing was saved. An empty file may remain there. Choose another location.',
+      ],
     ];
     await openInvoice();
     for (const [code, message] of cases) {

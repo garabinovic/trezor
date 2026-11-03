@@ -48,8 +48,19 @@ export const fakeAttachments = {
   nextShareError: null as string | null,
   sharePurges: 0,
   nextPick: null as NextPick | null,
+  /** While true, picks wait for releasePicks() (an import still running). */
+  holdPicks: false,
+  heldPicks: [] as (() => void)[],
+  picksInFlight: 0,
   failNextDelete: false,
   failNextGc: false,
+
+  /** Lets held picks finish. */
+  releasePicks() {
+    const held = this.heldPicks;
+    this.heldPicks = [];
+    held.forEach(resolve => resolve());
+  },
 
   reset() {
     this.files = new Set();
@@ -72,6 +83,9 @@ export const fakeAttachments = {
     this.nextShareError = null;
     this.sharePurges = 0;
     this.nextPick = null;
+    this.holdPicks = false;
+    this.heldPicks = [];
+    this.picksInFlight = 0;
     this.failNextDelete = false;
     this.failNextGc = false;
   },
@@ -79,9 +93,20 @@ export const fakeAttachments = {
   /** The module object the app sees (same shape as NativeTrezorAttachments). */
   module: {
     async pick(source: string, imagesOnly: boolean, maxCount: number) {
+      // Like native: one picker at a time.
+      if (fakeAttachments.picksInFlight > 0) {
+        throw Object.assign(new Error('busy'), { code: 'BUSY' });
+      }
       fakeAttachments.picks.push({ source, imagesOnly, maxCount });
       const next = fakeAttachments.nextPick ?? {};
       fakeAttachments.nextPick = null;
+      if (fakeAttachments.holdPicks) {
+        fakeAttachments.picksInFlight++;
+        await new Promise<void>(resolve =>
+          fakeAttachments.heldPicks.push(resolve),
+        );
+        fakeAttachments.picksInFlight--;
+      }
       if (next.error) {
         throw Object.assign(new Error('pick failed'), { code: next.error });
       }

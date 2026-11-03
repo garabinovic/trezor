@@ -32,7 +32,11 @@ export interface Spec extends TurboModule {
    */
   openPdf(id: string, sizeBytes: number, sha256: string): Promise<string>;
   /** Renders one page at `widthPx` into a private PNG; resolves with its URI. */
-  renderPdfPage(handle: string, index: number, widthPx: number): Promise<string>;
+  renderPdfPage(
+    handle: string,
+    index: number,
+    widthPx: number,
+  ): Promise<string>;
   /** Closes the PDF and deletes its copy and every page rendered from it. */
   closePdf(handle: string): Promise<void>;
   /** Deletes view files no screen holds (when the app returns to the foreground). */
@@ -41,7 +45,8 @@ export interface Spec extends TurboModule {
    * Checks the attachment, asks the user where to create a new document
    * (Storage Access Framework) and decrypts straight into it. Resolves
    * 'saved' or 'cancelled'. Rejects like `openView`, or with
-   * DESTINATION_NOT_EMPTY, EXPORT_FAILED (partial copy deleted),
+   * DESTINATION_NOT_EMPTY, DESTINATION_UNVERIFIED (size unknown; nothing
+   * written or deleted), EXPORT_FAILED (partial copy deleted),
    * EXPORT_INCOMPLETE (partial copy could not be deleted), BUSY,
    * NO_ACTIVITY or PICKER_UNAVAILABLE.
    */

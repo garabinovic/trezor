@@ -7,6 +7,8 @@ import com.trezor.app.vault.VaultException
  * when nothing depends on it yet: if the key is gone while encrypted files exist, a new key
  * would not bring them back, so this fails instead and leaves the files untouched.
  *
+ * [hasFiles] must throw when it can't tell; the failure propagates and no key is created.
+ *
  * Returned keys are copies; the caller zeroes them.
  */
 class AttachmentKeys(

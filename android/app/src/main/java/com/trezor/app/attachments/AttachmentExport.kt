@@ -18,7 +18,8 @@ class AttachmentExport(private val store: AttachmentStore) {
     /** Size of what is already there, if the provider reports it. */
     fun existingSize(): Long?
 
-    fun open(): OutputStream
+    /** Opens for writing in [mode] (`"wt"` or `"w"`, as `ContentResolver` takes them). */
+    fun open(mode: String): OutputStream
 
     /** Deletes the destination document; false if the provider doesn't allow it. */
     fun delete(): Boolean
@@ -33,8 +34,13 @@ class AttachmentExport(private val store: AttachmentStore) {
   }
 
   /**
-   * Writes the decrypted attachment to [destination]. A destination that already has
-   * content is refused and left untouched, so an existing file is never overwritten.
+   * Writes the decrypted attachment to [destination], which must be shown to be empty:
+   * one with content is refused, and so is one whose size the provider doesn't report
+   * (it could be an existing file). Refused destinations are neither written nor deleted,
+   * so an existing file is never overwritten or removed.
+   *
+   * The stream is opened with `"wt"` (write, truncate). Providers that don't accept that
+   * mode get `"w"`; the destination is known to be empty, so nothing old can remain.
    */
   fun write(id: String, expectedSize: Long, expectedSha256: String, destination: Destination) {
     val existing =
@@ -43,11 +49,14 @@ class AttachmentExport(private val store: AttachmentStore) {
         } catch (e: Exception) {
           null
         }
-    if (existing != null && existing > 0) {
+    if (existing == null) {
+      throw ExportException(DESTINATION_UNVERIFIED, "Destination size unknown")
+    }
+    if (existing > 0) {
       throw ExportException(DESTINATION_NOT_EMPTY, "Destination already has content")
     }
     try {
-      destination.open().use { out ->
+      openTruncating(destination).use { out ->
         val buffered = out.buffered(BUFFER_BYTES)
         store.decryptTo(id, buffered, expectedSize, expectedSha256)
         buffered.flush()
@@ -64,8 +73,17 @@ class AttachmentExport(private val store: AttachmentStore) {
     }
   }
 
+  private fun openTruncating(destination: Destination): OutputStream =
+      try {
+        destination.open("wt")
+      } catch (e: Exception) {
+        destination.open("w")
+      }
+
   companion object {
     const val DESTINATION_NOT_EMPTY = "DESTINATION_NOT_EMPTY"
+    /** The provider doesn't report the destination's size; nothing was written. */
+    const val DESTINATION_UNVERIFIED = "DESTINATION_UNVERIFIED"
     /** Failed; the partial destination was deleted. */
     const val EXPORT_FAILED = "EXPORT_FAILED"
     /** Failed, and the provider would not delete the partial destination. */

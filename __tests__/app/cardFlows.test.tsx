@@ -377,6 +377,22 @@ describe('card editor', () => {
     });
   });
 
+  test('Save waits while a photo is being added', async () => {
+    await launch();
+    await openCard('Book Corner');
+    await pressLabel(app, 'Edit');
+    fakeAttachments.holdPicks = true;
+    const front = photo();
+    await pick('Add front photo', { imported: [front] });
+    expect(hasText(app, 'Adding photo…')).toBe(true);
+    await expect(pressText(app, 'Save')).rejects.toThrow('disabled');
+
+    await ReactTestRenderer.act(async () => fakeAttachments.releasePicks());
+    await settle();
+    await pressText(app, 'Save');
+    expect((await storedCard('card-1')).frontImage?.id).toBe(front.id);
+  });
+
   test('cards list the issuer with the masked number', async () => {
     await launch();
     await openTab(app, 'Cards');

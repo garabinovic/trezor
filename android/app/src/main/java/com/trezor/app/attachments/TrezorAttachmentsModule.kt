@@ -50,7 +50,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
           hasKey = { vault.hasKey(AttachmentKeys.KEY_ID) },
           getKey = { vault.getKey(AttachmentKeys.KEY_ID) },
           createKey = { vault.createKey(AttachmentKeys.KEY_ID) },
-          hasFiles = { store.storedIds().isNotEmpty() },
+          // Throws when it can't tell, so no key is created over unreadable files.
+          hasFiles = { store.hasAnyFile() },
       )
   private val importer = AttachmentImporter(store)
   // Decrypted copies for display live only in the private cache, never in shared storage.
@@ -179,7 +180,11 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       pick.promise.resolve(resultJson(emptyList(), 0))
       return
     }
-    worker.execute { importAll(pick, uris) }
+    try {
+      worker.execute { importAll(pick, uris) }
+    } catch (e: Exception) {
+      pick.promise.reject("IO_FAILED", "Could not import files")
+    }
   }
 
   override fun onNewIntent(intent: Intent) {}
@@ -192,9 +197,14 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       pick.promise.reject("KEY_UNAVAILABLE", "Attachment key unavailable")
       return
     }
-    val accepted = uris.take(pick.maxCount)
-    val outcomes = accepted.map { importer.import(sourceOf(it), pick.imagesOnly) }
-    pick.promise.resolve(resultJson(outcomes, uris.size - accepted.size))
+    // Always settles: per-file failures are outcomes, anything else rejects.
+    try {
+      val accepted = uris.take(pick.maxCount)
+      val outcomes = importer.importAll(accepted.map { uri -> { sourceOf(uri) } }, pick.imagesOnly)
+      pick.promise.resolve(resultJson(outcomes, uris.size - accepted.size))
+    } catch (e: Exception) {
+      pick.promise.reject("IO_FAILED", "Could not import files")
+    }
   }
 
   private fun sourceOf(uri: Uri): AttachmentImporter.Source {
@@ -414,8 +424,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
                 .query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
                 ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
 
-        override fun open(): OutputStream =
-            reactContext.contentResolver.openOutputStream(uri, "w")
+        override fun open(mode: String): OutputStream =
+            reactContext.contentResolver.openOutputStream(uri, mode)
                 ?: throw java.io.IOException("Destination can't be opened")
 
         override fun delete(): Boolean =
@@ -444,25 +454,28 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
             return@execute
           }
       UiThreadUtil.runOnUiThread {
+        // A failure anywhere here deletes the copy at once (ShareFiles.launch); after a
+        // successful launch it is kept for the retention period.
         try {
-          val activity = reactContext.currentActivity
-          if (activity == null) {
-            promise.reject("NO_ACTIVITY", "Trezor is not in the foreground")
-            return@runOnUiThread
-          }
-          val uri =
-              FileProvider.getUriForFile(
-                  reactContext, reactContext.packageName + ShareIntent.AUTHORITY_SUFFIX, file)
-          val spec = ShareIntent.describe(uri.toString(), mimeType, file.name)
-          activity.startActivity(ShareIntent.toChooser(spec, reactContext.contentResolver))
+          shares.launch(
+              file,
+              uriFor = {
+                FileProvider.getUriForFile(
+                    reactContext, reactContext.packageName + ShareIntent.AUTHORITY_SUFFIX, it)
+              },
+              start = { uri ->
+                val activity = reactContext.currentActivity ?: throw NoActivityException()
+                val spec = ShareIntent.describe(uri.toString(), mimeType, file.name)
+                activity.startActivity(ShareIntent.toChooser(spec, reactContext.contentResolver))
+              },
+          )
           promise.resolve(null)
+        } catch (e: NoActivityException) {
+          promise.reject("NO_ACTIVITY", "Trezor is not in the foreground")
         } catch (e: ActivityNotFoundException) {
           promise.reject("SHARE_UNAVAILABLE", "No app can receive this file")
         } catch (e: Exception) {
           promise.reject("IO_FAILED", "Could not share the file")
-        } finally {
-          // Kept for the retention period from now on; see ShareFiles.
-          shares.release(file)
         }
       }
     }
@@ -477,6 +490,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       }
     }
   }
+
+  private class NoActivityException : Exception("No activity")
 
   /** Rejects for a failure reading the encrypted attachment. */
   private fun rejectRead(promise: Promise, e: Exception) {
