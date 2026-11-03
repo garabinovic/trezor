@@ -22,6 +22,11 @@ export const fakeAttachments = {
   picks: [] as { source: string; imagesOnly: boolean; maxCount: number }[],
   deleted: [] as string[],
   gcRuns: [] as string[][],
+  /** Open view URIs → attachment id. */
+  views: new Map<string, string>(),
+  viewCount: 0,
+  /** Make openView reject with this code for these ids. */
+  viewErrors: new Map<string, string>(),
   nextPick: null as NextPick | null,
   failNextDelete: false,
   failNextGc: false,
@@ -31,6 +36,9 @@ export const fakeAttachments = {
     this.picks = [];
     this.deleted = [];
     this.gcRuns = [];
+    this.views = new Map();
+    this.viewCount = 0;
+    this.viewErrors = new Map();
     this.nextPick = null;
     this.failNextDelete = false;
     this.failNextGc = false;
@@ -67,7 +75,26 @@ export const fakeAttachments = {
       }
       return removed;
     },
+    async openView(id: string, _sizeBytes: number, _sha256: string) {
+      const error =
+        fakeAttachments.viewErrors.get(id) ??
+        (fakeAttachments.files.has(id) ? null : 'MISSING');
+      if (error) {
+        throw Object.assign(new Error('view failed'), { code: error });
+      }
+      const uri = `file:///cache/attachments/view/${id}-${++fakeAttachments.viewCount}.view`;
+      fakeAttachments.views.set(uri, id);
+      return uri;
+    },
+    async closeView(uri: string) {
+      if (!fakeAttachments.views.delete(uri)) {
+        throw Object.assign(new Error('not a view'), {
+          code: 'INVALID_ARGUMENT',
+        });
+      }
+    },
     async collectGarbage(knownIds: string[]) {
+      fakeAttachments.views.clear();
       if (fakeAttachments.failNextGc) {
         fakeAttachments.failNextGc = false;
         throw Object.assign(new Error('failed'), { code: 'IO_FAILED' });

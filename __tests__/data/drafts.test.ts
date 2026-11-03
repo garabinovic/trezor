@@ -39,7 +39,7 @@ describe('validate', () => {
       expect(validate(createBlankItem(type)).title).toBe('Enter a title.');
     }
     expect(validate(createBlankItem('card')).title).toBe(
-      'Enter the store or card name.',
+      'Enter the card name.',
     );
   });
 

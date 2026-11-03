@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Paperclip } from 'lucide-react-native';
+import { ImagePlus, Paperclip } from 'lucide-react-native';
+import { AttachmentImage } from '../../attachments/AttachmentImage';
+import { toAttachmentError } from '../../attachments/platform';
 import {
   Button,
   ChipGroup,
@@ -10,11 +12,11 @@ import {
   TextField,
 } from '../../components';
 import {
-  CardCodeFormat,
   DocumentKind,
   documentKinds,
   ItemOfType,
   ItemType,
+  LoyaltyCard,
   formatDate,
   formatTime,
   parseIsoDate,
@@ -23,6 +25,8 @@ import {
   toIsoDate,
 } from '../../data';
 import { spacing } from '../../theme';
+import type { AttachmentSession } from './attachmentSession';
+import { importFailureText, pickErrorText } from './attachmentMessages';
 import { FieldErrors } from './drafts';
 import {
   INTERVAL_PRESETS,
@@ -207,29 +211,38 @@ export function ReminderFields({
       />
       {!onTime && (
         <Text variant="caption" color="textTertiary">
-          Notifications may arrive late as Android saves battery. Allow
-          “Alarms & reminders” in Settings so they arrive on time.
+          Notifications may arrive late as Android saves battery. Allow “Alarms
+          & reminders” in Settings so they arrive on time.
         </Text>
       )}
     </>
   );
 }
 
-const codeFormatOptions: ChipOption<CardCodeFormat>[] = [
-  { value: 'barcode', label: 'Barcode' },
-  { value: 'qr', label: 'QR code' },
-];
-
-export function CardFields({ draft, onChange, errors }: FieldsProps<'card'>) {
+export function CardFields({
+  draft,
+  onChange,
+  errors,
+  attachments,
+}: FieldsProps<'card'> & { attachments: AttachmentSession }) {
+  // The stored code type (barcode / QR) is kept but not offered until codes
+  // can be scanned or shown for real.
   return (
     <>
       <TextField
-        label="Store or card name"
+        label="Card name"
         value={draft.title}
         onChangeText={title => onChange({ title })}
-        placeholder="e.g. Greenleaf Market"
+        placeholder="e.g. Greenleaf Rewards"
         error={errors.title}
         autoFocus={!draft.title}
+      />
+      <TextField
+        label="Issuer"
+        value={draft.issuer}
+        onChangeText={issuer => onChange({ issuer })}
+        placeholder="Store or programme, optional"
+        autoCapitalize="words"
       />
       <TextField
         label="Card number"
@@ -241,15 +254,7 @@ export function CardFields({ draft, onChange, errors }: FieldsProps<'card'>) {
         autoCapitalize="characters"
         autoCorrect={false}
       />
-      <FieldGroup label="Code type">
-        <ChipGroup
-          label="Code type"
-          options={codeFormatOptions}
-          value={draft.codeFormat}
-          onChange={codeFormat => onChange({ codeFormat })}
-          inset={false}
-        />
-      </FieldGroup>
+      <CardPhotos draft={draft} onChange={onChange} session={attachments} />
       <TextField
         label="Cardholder"
         value={draft.holderName}
@@ -265,6 +270,127 @@ export function CardFields({ draft, onChange, errors }: FieldsProps<'card'>) {
         multiline
       />
     </>
+  );
+}
+
+type CardSide = 'frontImage' | 'backImage';
+
+const sideNames: Record<CardSide, string> = {
+  frontImage: 'front',
+  backImage: 'back',
+};
+
+function CardPhotos({
+  draft,
+  onChange,
+  session,
+}: {
+  draft: LoyaltyCard;
+  onChange: (patch: Partial<LoyaltyCard>) => void;
+  session: AttachmentSession;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const pick = async (side: CardSide) => {
+    const previous = draft[side];
+    setProblem(null);
+    setBusy(true);
+    try {
+      const result = await session.pick({
+        source: 'photos',
+        imagesOnly: true,
+        maxCount: 1,
+      });
+      if (!result) {
+        return;
+      }
+      const [photo] = result.imported;
+      if (photo) {
+        onChange({ [side]: photo });
+        if (previous) {
+          session.release([previous.id]);
+        }
+      }
+      if (result.failed.length > 0) {
+        setProblem(importFailureText(result.failed[0]));
+      }
+    } catch (e) {
+      setProblem(pickErrorText(toAttachmentError(e).code));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = (side: CardSide) => {
+    const previous = draft[side];
+    onChange({ [side]: null });
+    if (previous) {
+      session.release([previous.id]);
+    }
+  };
+
+  return (
+    <FieldGroup label="Card photos">
+      <View style={styles.row}>
+        {(['frontImage', 'backImage'] as const).map(side => {
+          const photo = draft[side];
+          const name = sideNames[side];
+          return (
+            <View key={side} style={styles.photoSlot}>
+              <Text variant="caption" color="textSecondary">
+                {name === 'front' ? 'Front' : 'Back'}
+              </Text>
+              {photo ? (
+                <>
+                  <AttachmentImage
+                    attachment={photo}
+                    label={`Photo of the ${name} of the card`}
+                  />
+                  <View style={styles.photoActions}>
+                    <Button
+                      label="Replace"
+                      accessibilityLabel={`Replace ${name} photo`}
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onPress={() => pick(side)}
+                    />
+                    <Button
+                      label="Remove"
+                      accessibilityLabel={`Remove ${name} photo`}
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onPress={() => remove(side)}
+                    />
+                  </View>
+                </>
+              ) : (
+                <Button
+                  label={`Add ${name}`}
+                  accessibilityLabel={`Add ${name} photo`}
+                  icon={ImagePlus}
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
+                  disabled={busy}
+                  onPress={() => pick(side)}
+                />
+              )}
+            </View>
+          );
+        })}
+      </View>
+      {problem && (
+        <Text variant="caption" color="danger">
+          {problem}
+        </Text>
+      )}
+      <Text variant="caption" color="textTertiary">
+        Optional. Photos are encrypted and stay on this device.
+      </Text>
+    </FieldGroup>
   );
 }
 
@@ -400,4 +526,6 @@ const styles = StyleSheet.create({
   amount: { flex: 2 },
   currency: { flex: 1 },
   group: { gap: spacing.sm },
+  photoSlot: { flex: 1, gap: spacing.xs },
+  photoActions: { flexDirection: 'row', justifyContent: 'space-between' },
 });

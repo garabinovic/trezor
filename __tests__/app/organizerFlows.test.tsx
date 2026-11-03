@@ -273,7 +273,7 @@ describe('create, edit, delete, pin', () => {
     await launch();
     await openTab(app, 'Cards');
     await pressLabel(app, 'New card');
-    await typeInto(app, 'Store or card name', 'No number');
+    await typeInto(app, 'Card name', 'No number');
     await pressText(app, 'Save');
     expect(hasText(app, 'Enter the card number.')).toBe(true);
     expect((await stored().listAll()).map(i => i.title)).not.toContain(
@@ -286,7 +286,7 @@ describe('create, edit, delete, pin', () => {
     await openTab(app, 'Cards');
     await pressText(app, 'Book Corner');
     await pressLabel(app, 'Edit');
-    await typeInto(app, 'Store or card name', 'Book Corner Plus');
+    await typeInto(app, 'Card name', 'Book Corner Plus');
     await typeInto(app, 'Card number', '11223344');
     await pressText(app, 'Save');
     expect(hasText(app, 'Book Corner Plus')).toBe(true);
@@ -404,7 +404,7 @@ describe('search', () => {
     expect(t).not.toContain('Pay rent');
 
     await pressText(app, 'Book Corner');
-    expect(hasText(app, 'Card number')).toBe(true);
+    expect(hasText(app, 'Card number · No barcode saved')).toBe(true);
     expect(hasText(app, '9988 1122')).toBe(true);
   });
 

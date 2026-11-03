@@ -17,8 +17,17 @@ export interface Spec extends TurboModule {
   /** Deletes these attachments' files (idempotent). Resolves with how many existed. */
   deleteFiles(ids: string[]): Promise<number>;
   /**
-   * Deletes files of attachments not in `knownIds` and unfinished imports.
-   * Startup only, with the database's complete list of attachment ids.
+   * Decrypts an attachment into a private, randomly named cache file after
+   * checking it against its record, and resolves with its `file://` URI.
+   * Rejects with MISSING, DAMAGED, KEY_UNAVAILABLE or IO_FAILED.
+   */
+  openView(id: string, sizeBytes: number, sha256: string): Promise<string>;
+  /** Deletes a file from `openView`. */
+  closeView(uri: string): Promise<void>;
+  /**
+   * Deletes files of attachments not in `knownIds`, unfinished imports and
+   * every view file. Startup only, with the database's complete list of
+   * attachment ids.
    */
   collectGarbage(knownIds: string[]): Promise<number>;
 }

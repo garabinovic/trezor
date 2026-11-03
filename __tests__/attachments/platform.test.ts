@@ -102,6 +102,32 @@ describe('nativeAttachmentPlatform', () => {
     ).rejects.toMatchObject({ code: 'UNKNOWN' });
   });
 
+  test('openView returns a closable copy and reports missing or damaged files', async () => {
+    const record = {
+      ...native(),
+      mimeType: 'image/jpeg' as const,
+      createdAt: NOW,
+    };
+    fakeAttachments.files.add(ID);
+    const uri = await nativeAttachmentPlatform.openView(record);
+    expect(fakeAttachments.views.get(uri)).toBe(ID);
+    await nativeAttachmentPlatform.closeView(uri);
+    expect(fakeAttachments.views.size).toBe(0);
+    await expect(nativeAttachmentPlatform.closeView(uri)).rejects.toMatchObject(
+      { code: 'INVALID_ARGUMENT' },
+    );
+
+    fakeAttachments.viewErrors.set(ID, 'DAMAGED');
+    await expect(
+      nativeAttachmentPlatform.openView(record),
+    ).rejects.toMatchObject({ name: 'AttachmentError', code: 'DAMAGED' });
+    fakeAttachments.files.delete(ID);
+    fakeAttachments.viewErrors.clear();
+    await expect(
+      nativeAttachmentPlatform.openView(record),
+    ).rejects.toMatchObject({ code: 'MISSING' });
+  });
+
   test('deleteFiles skips the native call for nothing', async () => {
     fakeAttachments.files.add(ID);
     await nativeAttachmentPlatform.deleteFiles([]);

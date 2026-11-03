@@ -15,6 +15,8 @@ interface ButtonProps {
   icon?: LucideIcon;
   disabled?: boolean;
   fullWidth?: boolean;
+  /** When the label alone is ambiguous, e.g. "Remove" next to several things. */
+  accessibilityLabel?: string;
 }
 
 const labelColor: Record<ButtonVariant, TextColor> = {
@@ -32,11 +34,13 @@ export function Button({
   icon,
   disabled = false,
   fullWidth = false,
+  accessibilityLabel,
 }: ButtonProps) {
   const styles = useStyles(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}

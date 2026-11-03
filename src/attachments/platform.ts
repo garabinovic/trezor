@@ -27,6 +27,10 @@ export type AttachmentErrorCode =
   | 'KEY_UNAVAILABLE'
   | 'INVALID_ARGUMENT'
   | 'IO_FAILED'
+  /** The encrypted file is gone. */
+  | 'MISSING'
+  /** The file is damaged or doesn't match its record. */
+  | 'DAMAGED'
   | 'UNKNOWN';
 
 const errorCodes = new Set<string>([
@@ -36,6 +40,8 @@ const errorCodes = new Set<string>([
   'KEY_UNAVAILABLE',
   'INVALID_ARGUMENT',
   'IO_FAILED',
+  'MISSING',
+  'DAMAGED',
 ]);
 
 const failureCodes = new Set<string>([
@@ -55,7 +61,7 @@ export class AttachmentError extends Error {
   }
 }
 
-function toAttachmentError(error: unknown): AttachmentError {
+export function toAttachmentError(error: unknown): AttachmentError {
   if (error instanceof AttachmentError) {
     return error;
   }
@@ -124,7 +130,13 @@ export interface AttachmentPlatform {
    * after the write that removed them has committed.
    */
   deleteFiles(ids: string[]): Promise<void>;
-  /** Startup only: removes files no database row refers to. */
+  /**
+   * A checked, decrypted copy in the app's private cache, for display only.
+   * Close it as soon as it is no longer shown.
+   */
+  openView(attachment: Attachment): Promise<string>;
+  closeView(uri: string): Promise<void>;
+  /** Startup only: removes files no database row refers to, and views. */
   collectGarbage(knownIds: string[]): Promise<number>;
 }
 
@@ -145,6 +157,22 @@ export const nativeAttachmentPlatform: AttachmentPlatform = {
     }
     try {
       await NativeTrezorAttachments.deleteFiles(ids);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async openView({ id, sizeBytes, sha256 }) {
+    try {
+      return await NativeTrezorAttachments.openView(id, sizeBytes, sha256);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async closeView(uri) {
+    try {
+      await NativeTrezorAttachments.closeView(uri);
     } catch (e) {
       throw toAttachmentError(e);
     }

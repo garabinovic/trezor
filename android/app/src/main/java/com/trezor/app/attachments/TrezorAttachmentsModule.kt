@@ -18,6 +18,7 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.UiThreadUtil
 import com.trezor.app.vault.KeyVault
 import com.trezor.app.vault.NativeTrezorAttachmentsSpec
+import com.trezor.app.vault.VaultException
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -48,6 +49,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
           hasFiles = { store.storedIds().isNotEmpty() },
       )
   private val importer = AttachmentImporter(store)
+  // Decrypted copies for display live only in the private cache, never in shared storage.
+  private val views = AttachmentViews(store, File(reactContext.cacheDir, "attachments/view"))
   /** One worker: imports, deletes and garbage collection never overlap. */
   private val worker: ExecutorService = Executors.newSingleThreadExecutor()
 
@@ -228,16 +231,60 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     }
   }
 
+  override fun openView(id: String, sizeBytes: Double, sha256: String, promise: Promise) {
+    worker.execute {
+      try {
+        promise.resolve(Uri.fromFile(views.open(id, sizeBytes.toLong(), sha256)).toString())
+      } catch (e: AttachmentStore.StoreException) {
+        promise.reject(viewErrorCode(e.code), "Attachment can't be shown")
+      } catch (e: VaultException) {
+        promise.reject("KEY_UNAVAILABLE", "Attachment key unavailable")
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Attachment can't be shown")
+      }
+    }
+  }
+
+  override fun closeView(uri: String, promise: Promise) {
+    val path = Uri.parse(uri).path
+    if (path == null) {
+      promise.reject("INVALID_ARGUMENT", "Not a view file")
+      return
+    }
+    worker.execute {
+      try {
+        views.close(path)
+        promise.resolve(null)
+      } catch (e: IllegalArgumentException) {
+        promise.reject("INVALID_ARGUMENT", "Not a view file")
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Could not delete view file")
+      }
+    }
+  }
+
   override fun collectGarbage(knownIds: ReadableArray, promise: Promise) {
     val known = (0 until knownIds.size()).mapNotNull { knownIds.getString(it) }.toSet()
     worker.execute {
       try {
+        views.purge()
         promise.resolve(store.collectGarbage(known).toDouble())
       } catch (e: Exception) {
         promise.reject("IO_FAILED", "Could not clean up attachment files")
       }
     }
   }
+
+  private fun viewErrorCode(code: AttachmentStore.StoreException.Code): String =
+      when (code) {
+        AttachmentStore.StoreException.Code.MISSING -> "MISSING"
+        AttachmentStore.StoreException.Code.CORRUPTED,
+        AttachmentStore.StoreException.Code.UNSUPPORTED,
+        AttachmentStore.StoreException.Code.KEY_MISMATCH,
+        AttachmentStore.StoreException.Code.INTEGRITY_MISMATCH -> "DAMAGED"
+        AttachmentStore.StoreException.Code.INVALID_ID -> "INVALID_ARGUMENT"
+        else -> "IO_FAILED"
+      }
 
   companion object {
     const val NAME = "TrezorAttachments"

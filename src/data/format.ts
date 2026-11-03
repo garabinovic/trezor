@@ -207,7 +207,8 @@ function reminderSummary(reminder: Reminder, now: Date): string {
 }
 
 function cardSummary(card: LoyaltyCard): string {
-  return maskCardNumber(card.cardNumber);
+  const number = maskCardNumber(card.cardNumber);
+  return card.issuer ? `${card.issuer} · ${number}` : number;
 }
 
 /** One-line supporting text for an item in any list. */

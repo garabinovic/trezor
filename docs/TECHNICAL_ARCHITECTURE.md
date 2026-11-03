@@ -578,6 +578,8 @@ The design keeps backup independent of this device's Keystore:
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
 | Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
+| Jest after Phase 4 step 4 (cards UI) | 301 tests in 18 suites: + 12 app-level card flows (plain number without code glyphs, issuer, photos shown and their copies deleted, missing or damaged photos, create with both photos across a restart, replace, remove, failed save keeps the stored file, discard deletes new picks, failed picks explained, stored code type kept, list summary), 4 editor-session tests, view open/close codes | **301/301 pass** |
+| JVM after Phase 4 step 4 | + `AttachmentViewsTest` 4 (verified copy under random names, no copy on mismatch or missing file, close refuses other paths, purge) | **36/36 pass** |
 | JVM after Phase 4 step 3 | + `AttachmentImportRulesTest` 6 (type by content, names, UUIDv7, key policy), `AttachmentImporterTest` 5 (real store: round trip, declared type ignored, size limit with and without a declared size, unreadable sources, cleaned names) | **32/32 pass** |
 | JVM after Phase 4 step 1 | `AttachmentFormatTest` 8, `AttachmentStoreTest` 9, `RecurrenceTest` 4 | **21/21 pass** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
@@ -924,8 +926,59 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
 - Files picked for a draft that is then discarded stay until the next startup.
 - If the process is killed while a picker is open, nothing is imported.
 
-### 14.4 Not verified yet
+### 14.4 Showing photos
 
-- The module itself (pickers, content URIs, Keystore key) has not run on a
-  device. It runs from the UI steps that follow. Instrumentation tests are
+- `openView(id, size, sha256)` decrypts the whole file into
+  `cacheDir/attachments/view/<32 random hex>.view` and checks it against the
+  database record. Only then does it return a `file://` URI for RN `Image`
+  (`resizeMethod="resize"`, so decoding happens at display size). The copy is
+  written as `.part` and renamed, so `Image` never reads a partial file.
+- `useAttachmentView` deletes the copy (`closeView`) when the screen showing
+  it unmounts or the attachment changes. `collectGarbage` at startup deletes
+  any left over. `closeView` refuses paths outside the view directory
+  **[verified: JVM]**.
+- Random names mean the image memory cache never reuses a copy. Fresco keeps
+  decoded bitmaps in memory only, and its disk cache is for network images,
+  not local files. This is from Fresco's design and has not been checked on a
+  device.
+- Missing or damaged files show "Photo file is missing" or "Photo file is
+  damaged" in the tile. The rest of the item keeps working **[verified: Jest]**.
+- HEIC/HEIF photos decode only on Android 9+ (the app's minimum is Android 7).
+  Older versions show "This photo can’t be shown on this device".
+
+### 14.5 Editor sessions
+
+`useAttachmentSession` (`src/screens/editor/attachmentSession.ts`) owns the
+files picked while one editor is open **[verified: Jest]**:
+
+| Event | Files |
+| --- | --- |
+| Pick | Imported now and owned by the session |
+| Replace or remove a photo picked in this session | Deleted at once (no row refers to it) |
+| Replace or remove a stored photo | Kept until the save that drops it commits, then deleted by `ItemsProvider` |
+| Save | The session's files that the item keeps now belong to it; the others are deleted |
+| Cancel, Discard, back | Every session file is deleted; stored files are untouched |
+| A pick that finishes after the editor closed | Deleted, not added |
+| The save's write fails | Stored files are kept; the session's new files become orphans for the startup cleanup |
+| App killed while editing | Orphans, removed at the next startup |
+
+### 14.6 Cards (Phase 4 step 4)
+
+- The editor has Card name, Issuer, Card number, Card photos (front and back,
+  each optional: add, replace, remove), Cardholder and Notes. Photos come from
+  the Photo Picker, images only, one at a time.
+- No barcode or QR graphic is shown anywhere. The detail screen shows the
+  number as text with "Card number · No barcode saved". The code type choice
+  and its detail row are gone. The stored `code_format` is kept unchanged on
+  edit, and new cards still get the default `barcode` **[verified: Jest]**.
+- The list shows "Issuer · •••• 1234" when an issuer is set.
+- Picker problems are explained under the photos: too large, not a supported
+  photo, unreadable, couldn't be saved, key unavailable, no picker. Nothing in
+  the draft changes.
+
+### 14.7 Not verified yet
+
+- The module (pickers, content URIs, Keystore key, view files) and the card
+  screens have not run on a device. Installing on the A53 would upgrade its
+  real data to schema v3, so it waits for approval. Instrumentation tests are
   deferred: running them would uninstall the app from the user's phone.

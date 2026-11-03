@@ -77,7 +77,7 @@ export function validate(
   const errors: FieldErrors = {};
   if (!item.title.trim()) {
     errors.title =
-      item.type === 'card' ? 'Enter the store or card name.' : 'Enter a title.';
+      item.type === 'card' ? 'Enter the card name.' : 'Enter a title.';
   }
   if (item.type === 'reminder' && !item.completed) {
     const retimed =

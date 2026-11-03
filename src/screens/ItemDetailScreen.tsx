@@ -2,13 +2,11 @@ import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
-  Barcode,
   Calendar,
   Paperclip,
   Pencil,
   Pin,
   PinOff,
-  QrCode,
   Repeat,
   Store,
   Trash2,
@@ -48,6 +46,7 @@ import {
   useItem,
   useItems,
 } from '../data';
+import { AttachmentImage } from '../attachments/AttachmentImage';
 import { RootStackParamList } from '../navigation/types';
 import { nextDue } from '../reminders/reminderSchedule';
 import { gutter, Theme, useStyles } from '../theme';
@@ -201,38 +200,46 @@ function ReminderBody({ reminder }: { reminder: Reminder }) {
 
 function CardBody({ card }: { card: LoyaltyCard }) {
   const styles = useStyles(createStyles);
-  const formatLabel = card.codeFormat === 'qr' ? 'QR code' : 'Barcode';
+  const photos = [
+    { photo: card.frontImage, side: 'Front', name: 'front' },
+    { photo: card.backImage, side: 'Back', name: 'back' },
+  ].filter(p => p.photo !== null);
 
   return (
     <View style={styles.body}>
-      <View style={styles.cardPanel}>
-        <View style={styles.codeArea}>
-          <Icon
-            icon={card.codeFormat === 'qr' ? QrCode : Barcode}
-            size="lg"
-            color="textTertiary"
-          />
-          <Text variant="caption" color="textTertiary" align="center">
-            {formatLabel} display is not available yet
-          </Text>
+      {photos.length > 0 && (
+        <View style={styles.photos}>
+          {photos.map(({ photo, side, name }) => (
+            <View key={side} style={styles.photo}>
+              <AttachmentImage
+                attachment={photo!}
+                label={`Photo of the ${name} of the card`}
+              />
+              <Text variant="caption" color="textTertiary" align="center">
+                {side}
+              </Text>
+            </View>
+          ))}
         </View>
+      )}
+      <View style={styles.cardPanel}>
         <Text variant="mono" align="center" selectable>
           {formatCardNumber(card.cardNumber)}
         </Text>
         <Text variant="caption" color="textTertiary" align="center">
-          Card number
+          Card number · No barcode saved
         </Text>
       </View>
-      <Section grouped>
-        {!!card.holderName && (
-          <ValueRow icon={User} label="Cardholder" value={card.holderName} />
-        )}
-        <ValueRow
-          icon={card.codeFormat === 'qr' ? QrCode : Barcode}
-          label="Code type"
-          value={formatLabel}
-        />
-      </Section>
+      {(!!card.issuer || !!card.holderName) && (
+        <Section grouped>
+          {!!card.issuer && (
+            <ValueRow icon={Store} label="Issuer" value={card.issuer} />
+          )}
+          {!!card.holderName && (
+            <ValueRow icon={User} label="Cardholder" value={card.holderName} />
+          )}
+        </Section>
+      )}
       <NotesBlock text={card.notes} />
     </View>
   );
@@ -329,16 +336,10 @@ const createStyles = ({ colors, radius, spacing }: Theme) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.border,
     },
-    codeArea: {
-      height: 120,
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderStyle: 'dashed',
-      borderColor: colors.borderStrong,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.sm,
+    photos: {
+      flexDirection: 'row',
+      gap: spacing.md,
       paddingHorizontal: spacing.lg,
-      marginBottom: spacing.md,
     },
+    photo: { flex: 1, gap: spacing.xs },
   });

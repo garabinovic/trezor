@@ -4,10 +4,11 @@ import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { X } from 'lucide-react-native';
 import { BarHeader, Button, Dialog, Screen } from '../components';
-import { categories, Item, useItem, useItems } from '../data';
+import { attachmentIdsOf, categories, Item, useItem, useItems } from '../data';
 import { RootStackParamList } from '../navigation/types';
 import { useReminders } from '../reminders/RemindersProvider';
 import { gutter, spacing } from '../theme';
+import { useAttachmentSession } from './editor/attachmentSession';
 import {
   createBlankItem,
   FieldErrors,
@@ -28,6 +29,8 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   const existing = useItem(id);
   const { saveItem } = useItems();
   const { requestPermissionIfNeeded, exactAlarmsAllowed } = useReminders();
+  // Files picked here are deleted unless the save keeps them.
+  const attachments = useAttachmentSession();
 
   const initial = useMemo(
     () => existing ?? createBlankItem(type),
@@ -66,7 +69,9 @@ export function ItemEditorScreen({ route, navigation }: Props) {
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
-    saveItem(normalize(draft));
+    const item = normalize(draft);
+    attachments.commit(attachmentIdsOf(item));
+    saveItem(item);
     if (draft.type === 'reminder' && !draft.completed) {
       // Explains and asks for notification permission the first time only.
       requestPermissionIfNeeded();
@@ -109,7 +114,9 @@ export function ItemEditorScreen({ route, navigation }: Props) {
             {...fieldProps}
           />
         )}
-        {draft.type === 'card' && <CardFields draft={draft} {...fieldProps} />}
+        {draft.type === 'card' && (
+          <CardFields draft={draft} attachments={attachments} {...fieldProps} />
+        )}
         {draft.type === 'document' && (
           <DocumentFields draft={draft} {...fieldProps} />
         )}
