@@ -633,12 +633,13 @@ or a physical device, and no instrumentation test was run.
   names were limited to 120 UTF-16 characters, so a long CJK name (e.g. 352
   bytes) exceeded the 255-byte limit. They are now limited to 200 UTF-8 bytes
   (section E).
-- **Open, Low: power loss can lose a just-renamed file.** `AttachmentStore.import`
-  syncs the file but not the directory after the rename. A power loss after
-  the database commit could leave a row whose file is missing (shown as "File
-  is missing"). The KDoc's "atomic within one directory" is also inaccurate
-  (`tmp/` is a subdirectory; the rename is still atomic on the same file
-  system).
+- **Fixed, Low: power loss could lose a just-renamed file.** The attachments
+  directory is now `fsync`ed after the rename (`DirectorySync`), and an import
+  whose sync fails is undone. Before the fix, `AttachmentStore.import` synced
+  only the file, so a power loss after the database commit could leave a row
+  whose file is missing. The KDoc's "atomic within one directory" was
+  inaccurate (`tmp/` is a subdirectory) and has been corrected. The Android
+  `Os.fsync` path is untested without a device.
 - **Open, Low (guard against future drift): dropped pick records leave
   files.** A
   pick record that fails `parsePickResult` validation is dropped silently, and

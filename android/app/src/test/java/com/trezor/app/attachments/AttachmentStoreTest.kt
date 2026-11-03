@@ -20,6 +20,50 @@ import org.junit.rules.TemporaryFolder
 class AttachmentStoreTest {
 
   @Test
+  fun theStoreDirectoryIsSyncedAfterTheFileIsInPlace() {
+    val synced = mutableListOf<Pair<File, Boolean>>()
+    val recording =
+        AttachmentStore(
+            root,
+            syncDirectory = { dir -> synced.add(dir to File(dir, "$a${AttachmentStore.SUFFIX}").isFile) },
+        ) {
+          keyBytes.copyOf()
+        }
+    recording.import(a, ByteArrayInputStream(bytes(70_000)), 1L shl 20)
+    // Once, on the directory that gained the entry, with the final file already there.
+    assertEquals(listOf(root to true), synced)
+  }
+
+  @Test
+  fun aFailedDirectorySyncUndoesTheImport() {
+    val failing =
+        AttachmentStore(root, syncDirectory = { throw IOException("fsync failed") }) { keyBytes.copyOf() }
+    try {
+      failing.import(a, ByteArrayInputStream(bytes(1_000)), 1L shl 20)
+      fail("an import that isn't durable must not be reported as stored")
+    } catch (e: AttachmentStore.StoreException) {
+      assertEquals(Code.IO_FAILED, e.code)
+    }
+    assertFalse(failing.exists(a))
+    assertTrue(failing.storedIds().isEmpty())
+    assertTrue(File(root, "tmp").listFiles().orEmpty().isEmpty())
+    // The same id can be imported again afterwards.
+    store.import(a, ByteArrayInputStream(bytes(1_000)), 1L shl 20)
+    assertTrue(store.exists(a))
+  }
+
+  @Test
+  fun theDefaultDirectorySyncWorksOnARealDirectoryAndReportsFailure() {
+    DirectorySync.sync(folder.root) // host file system, java.nio path
+    try {
+      DirectorySync.sync(File(folder.root, "does-not-exist"))
+      fail("syncing a missing directory must fail")
+    } catch (e: IOException) {
+      // expected
+    }
+  }
+
+  @Test
   fun hasAnyFileNeverGuessesNoWhenTheDirectoryCantBeRead() {
     assertFalse(store.hasAnyFile()) // no directory yet: a fresh install
     store.import(a, ByteArrayInputStream(bytes(10)), 1000)

@@ -774,7 +774,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
 | Long non-ASCII export names | **Fixed (`6786ceb`):** Share and Save a copy names were limited to 120 UTF-16 characters, so a long CJK name exceeded the 255-byte file-name limit and Share always failed. Now at most 200 UTF-8 bytes (§14.9) |
-| Second Phase 4 review, open (Low) | Not fixed: (1) the attachments directory isn't `fsync`ed after the import rename (§14.3); (2) records `parsePickResult` rejects are dropped silently and their `.tza` file stays until startup cleanup (§14.2); (3) after `invalidate()`, most `TrezorAttachmentsModule` calls would throw `RejectedExecutionException` and their promises never settle. Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
+| Second Phase 4 review, open (Low) | (1) **Fixed:** the attachments directory is now `fsync`ed after the import rename, and an import whose sync fails is undone (§14.3). Not fixed: (2) records `parsePickResult` rejects are dropped silently and their `.tza` file stays until startup cleanup (§14.2); (3) after `invalidate()`, most `TrezorAttachmentsModule` calls would throw `RejectedExecutionException` and their promises never settle. Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
 | Phase 4 review findings | Fixed in the review-fix commit (`06004a0`): a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
 | JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
@@ -1040,22 +1040,30 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
 
 - **Order of operations:**
   1. A file is encrypted to `tmp/<id>.part`, `fsync`ed, decrypted back and
-     checked, then renamed to `<id>.tza`, all **before** the row that refers
-     to it is saved.
+     checked, then renamed to `<id>.tza`. The attachments directory is then
+     `fsync`ed (`DirectorySync`: `android.system.Os.fsync` on the device).
+     All of this happens **before** the row that refers to it is saved.
+     - If the directory sync fails, the import is undone and reported
+       (`IO_FAILED`), so no row can refer to a file whose name isn't known to
+       be durable **[verified: JVM]**.
+     - `tmp/` isn't synced: a stale `.part` that reappears after a crash is
+       removed by the startup cleanup.
   2. The database transaction decides which item owns which attachment.
   3. Files are deleted only **after** the transaction removing their rows
      has committed.
 - **What can and can't go wrong:**
   - A crash or kill can leave an unreferenced file, which the startup cleanup
     removes.
-  - Database and file system are not one atomic unit, though. The directory
-    isn't `fsync`ed after the rename (`AttachmentStore.import` syncs only the
-    file). A power loss after the database commit but before the rename
-    reaches disk could, in principle, leave a row whose file is missing. The
+  - Database and file system are still not one atomic unit. The file and its
+    directory entry are durable before the row commits, so a power loss can
+    leave an unreferenced file, but not a row without its file, on storage
+    that honours `fsync`.
+  - Storage that loses synced data could still lose a file. The startup
+    cleanup removes unreferenced files but cannot recreate a missing one; the
     viewer then shows "File is missing".
-  - The startup cleanup removes unreferenced files but cannot recreate a
-    missing one.
-  - Not seen in practice or reproduced. See §12.
+  - The Android `Os.fsync` path has no automated test (it needs a device);
+    the JVM tests run the same logic against the host file system through
+    `java.nio`.
 - At startup, after the database opened and before any screen can pick a
   file, `openStorage` passes the database's attachment ids to
   `collectGarbage`. It removes unreferenced `.tza` files and unfinished

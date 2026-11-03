@@ -13,15 +13,25 @@ import java.io.OutputStream
  * - `<root>/<id>.tza`: one immutable file per attachment, named by its UUID. Nothing is
  *   ever rewritten in place; replacing an attachment means a new id.
  * - `<root>/tmp/<id>.part`: an import in progress. Written, synced and verified, then
- *   renamed into place (atomic within one directory), so `<id>.tza` is always complete.
+ *   renamed to `<root>/<id>.tza`. `tmp/` is a subdirectory on the same file system, so the
+ *   rename is atomic (a reader sees no file or the complete file), and `<root>` is then
+ *   synced so the new entry is durable before [import] returns. An import whose directory
+ *   sync fails is undone and reported, never returned as stored.
  *
  * Crash safety relies on the caller's order: files are imported before their database row
- * is committed, and deleted only after the row is gone. A crash can therefore leave an
- * orphan file, never a row without a file; [collectGarbage] removes orphans at startup.
+ * is committed, and deleted only after the row is gone. A crash can leave an orphan file,
+ * which [collectGarbage] removes at startup. A row without its file would need storage that
+ * loses a synced directory entry; the store can't recreate such a file (it shows as
+ * missing).
  *
  * [key] returns the 32-byte wrapping key (KeyVault "attachments"); it is zeroed after use.
  */
-class AttachmentStore(private val root: File, private val key: () -> ByteArray) {
+class AttachmentStore(
+    private val root: File,
+    /** Makes [root]'s entries durable after a rename; replaceable in tests. */
+    private val syncDirectory: (File) -> Unit = DirectorySync::sync,
+    private val key: () -> ByteArray,
+) {
 
   class StoreException(val code: Code, message: String, cause: Throwable? = null) :
       Exception(message, cause) {
@@ -106,6 +116,16 @@ class AttachmentStore(private val root: File, private val key: () -> ByteArray) 
       }
       if (!part.renameTo(target)) {
         throw StoreException(StoreException.Code.IO_FAILED, "Could not store attachment")
+      }
+      // The rename adds `<id>.tza` to root; sync root so that entry survives a power loss
+      // before the caller commits the row that refers to it. tmp/ isn't synced: a stale
+      // `.part` entry reappearing after a crash is removed by collectGarbage.
+      try {
+        syncDirectory(root)
+      } catch (e: Exception) {
+        // Not known to be durable: don't let a row refer to it.
+        target.delete()
+        throw StoreException(StoreException.Code.IO_FAILED, "Could not make attachment durable", e)
       }
       return written
     } catch (e: AttachmentFormat.FormatException) {
