@@ -13,6 +13,8 @@ export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList>;
   ItemDetail: { id: string };
   ItemEditor: { type: ItemType; id?: string };
+  /** A card's photos or a document's files, starting at `attachmentId`. */
+  AttachmentViewer: { itemId: string; attachmentId: string };
   Search: undefined;
   Settings: undefined;
 };

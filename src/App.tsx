@@ -1,5 +1,11 @@
-import React, { useCallback } from 'react';
-import { DevSettings, StyleSheet, useColorScheme, View } from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import {
+  AppState,
+  DevSettings,
+  StyleSheet,
+  useColorScheme,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { nativeAttachmentPlatform } from './attachments/platform';
 import { ItemsProvider } from './data';
@@ -48,6 +54,19 @@ function AppContent() {
 }
 
 function ReadyApp({ storage }: { storage: OpenedStorage }) {
+  // Decrypted view copies that no screen holds any more are removed whenever
+  // the app comes back to the foreground; startup removes all of them.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        nativeAttachmentPlatform
+          .purgeInactiveViews()
+          .catch(() => console.warn('[attachments] view cleanup failed'));
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const persistTheme = useCallback(
     (preference: ThemePreference) =>
       storage.settings

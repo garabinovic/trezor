@@ -51,8 +51,11 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   private val importer = AttachmentImporter(store)
   // Decrypted copies for display live only in the private cache, never in shared storage.
   private val views = AttachmentViews(store, File(reactContext.cacheDir, "attachments/view"))
+  private val pdfs = PdfViews(views)
   /** One worker: imports, deletes and garbage collection never overlap. */
   private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+  /** PDF pages render here, so scrolling isn't held up by an import. */
+  private val renderer: ExecutorService = Executors.newSingleThreadExecutor()
 
   private class PendingPick(
       val promise: Promise,
@@ -72,6 +75,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
 
   override fun invalidate() {
     reactContext.removeActivityEventListener(this)
+    renderer.execute { pdfs.closeAll() }
+    renderer.shutdown()
     worker.shutdown()
     super.invalidate()
   }
@@ -259,6 +264,58 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
         promise.reject("INVALID_ARGUMENT", "Not a view file")
       } catch (e: Exception) {
         promise.reject("IO_FAILED", "Could not delete view file")
+      }
+    }
+  }
+
+  override fun openPdf(id: String, sizeBytes: Double, sha256: String, promise: Promise) {
+    worker.execute {
+      try {
+        val opened = pdfs.open(id, sizeBytes.toLong(), sha256)
+        val pages = JSONArray()
+        opened.pageSizes.forEach { (w, h) -> pages.put(JSONArray().put(w).put(h)) }
+        promise.resolve(JSONObject().put("handle", opened.handle).put("pages", pages).toString())
+      } catch (e: PdfViews.PdfException) {
+        promise.reject(e.code, "PDF can't be shown")
+      } catch (e: AttachmentStore.StoreException) {
+        promise.reject(viewErrorCode(e.code), "Attachment can't be shown")
+      } catch (e: VaultException) {
+        promise.reject("KEY_UNAVAILABLE", "Attachment key unavailable")
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Attachment can't be shown")
+      }
+    }
+  }
+
+  override fun renderPdfPage(handle: String, index: Double, widthPx: Double, promise: Promise) {
+    renderer.execute {
+      try {
+        val page = pdfs.render(handle, index.toInt(), widthPx.toInt())
+        promise.resolve(Uri.fromFile(page).toString())
+      } catch (e: PdfViews.PdfException) {
+        promise.reject(e.code, "Page can't be shown")
+      } catch (e: IllegalArgumentException) {
+        promise.reject("INVALID_ARGUMENT", "PDF is not open")
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Page can't be shown")
+      }
+    }
+  }
+
+  override fun closePdf(handle: String, promise: Promise) {
+    // After any page still rendering, on the same thread.
+    renderer.execute {
+      pdfs.close(handle)
+      promise.resolve(null)
+    }
+  }
+
+  override fun purgeInactiveViews(promise: Promise) {
+    worker.execute {
+      try {
+        promise.resolve(views.purgeInactive().toDouble())
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Could not clean up view files")
       }
     }
   }

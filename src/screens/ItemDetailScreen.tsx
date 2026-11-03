@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   Calendar,
@@ -202,6 +203,7 @@ function ReminderBody({ reminder }: { reminder: Reminder }) {
 
 function CardBody({ card }: { card: LoyaltyCard }) {
   const styles = useStyles(createStyles);
+  const navigation = useNavigation();
   const photos = [
     { photo: card.frontImage, side: 'Front', name: 'front' },
     { photo: card.backImage, side: 'Back', name: 'back' },
@@ -212,7 +214,18 @@ function CardBody({ card }: { card: LoyaltyCard }) {
       {photos.length > 0 && (
         <View style={styles.photos}>
           {photos.map(({ photo, side, name }) => (
-            <View key={side} style={styles.photo}>
+            <Pressable
+              key={side}
+              style={styles.photo}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${name} photo`}
+              onPress={() =>
+                navigation.navigate('AttachmentViewer', {
+                  itemId: card.id,
+                  attachmentId: photo!.id,
+                })
+              }
+            >
               <AttachmentImage
                 attachment={photo!}
                 label={`Photo of the ${name} of the card`}
@@ -220,7 +233,7 @@ function CardBody({ card }: { card: LoyaltyCard }) {
               <Text variant="caption" color="textTertiary" align="center">
                 {side}
               </Text>
-            </View>
+            </Pressable>
           ))}
         </View>
       )}
@@ -249,6 +262,7 @@ function CardBody({ card }: { card: LoyaltyCard }) {
 
 function DocumentBody({ doc }: { doc: DocumentItem }) {
   const styles = useStyles(createStyles);
+  const navigation = useNavigation();
   const date = doc.date ? parseIsoDate(doc.date) : null;
   const expires = doc.expiresOn ? parseIsoDate(doc.expiresOn) : null;
   const expired = !!expires && expires < new Date();
@@ -266,6 +280,13 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
               icon={isImage(a) ? ImageIcon : FileText}
               title={a.fileName}
               subtitle={describeAttachment(a)}
+              chevron
+              onPress={() =>
+                navigation.navigate('AttachmentViewer', {
+                  itemId: doc.id,
+                  attachmentId: a.id,
+                })
+              }
             />
           ))}
         </Section>

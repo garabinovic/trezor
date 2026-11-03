@@ -10,6 +10,7 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useReminders } from '../reminders/RemindersProvider';
 import { useTheme } from '../theme';
+import { AttachmentViewerScreen } from '../screens/AttachmentViewerScreen';
 import { ItemDetailScreen } from '../screens/ItemDetailScreen';
 import { ItemEditorScreen } from '../screens/ItemEditorScreen';
 import { SearchScreen } from '../screens/SearchScreen';
@@ -90,6 +91,11 @@ export function RootNavigator() {
           name="ItemEditor"
           component={ItemEditorScreen}
           options={{ animation: 'slide_from_bottom' }}
+        />
+        <Stack.Screen
+          name="AttachmentViewer"
+          component={AttachmentViewerScreen}
+          options={{ animation: 'fade' }}
         />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

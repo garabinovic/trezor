@@ -22,8 +22,21 @@ export interface Spec extends TurboModule {
    * Rejects with MISSING, DAMAGED, KEY_UNAVAILABLE or IO_FAILED.
    */
   openView(id: string, sizeBytes: number, sha256: string): Promise<string>;
-  /** Deletes a file from `openView`. */
+  /** Deletes a file from `openView` or `renderPdfPage`. */
   closeView(uri: string): Promise<void>;
+  /**
+   * Checks and decrypts a PDF into the private cache and opens it with
+   * Android's PdfRenderer. Resolves with JSON `{ handle, pages: [[w, h]] }`
+   * (page sizes in points). Rejects like `openView`, or with PDF_PROTECTED /
+   * PDF_UNSUPPORTED.
+   */
+  openPdf(id: string, sizeBytes: number, sha256: string): Promise<string>;
+  /** Renders one page at `widthPx` into a private PNG; resolves with its URI. */
+  renderPdfPage(handle: string, index: number, widthPx: number): Promise<string>;
+  /** Closes the PDF and deletes its copy and every page rendered from it. */
+  closePdf(handle: string): Promise<void>;
+  /** Deletes view files no screen holds (when the app returns to the foreground). */
+  purgeInactiveViews(): Promise<number>;
   /**
    * Deletes files of attachments not in `knownIds`, unfinished imports and
    * every view file. Startup only, with the database's complete list of

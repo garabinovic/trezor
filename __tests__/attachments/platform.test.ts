@@ -113,9 +113,11 @@ describe('nativeAttachmentPlatform', () => {
     expect(fakeAttachments.views.get(uri)).toBe(ID);
     await nativeAttachmentPlatform.closeView(uri);
     expect(fakeAttachments.views.size).toBe(0);
-    await expect(nativeAttachmentPlatform.closeView(uri)).rejects.toMatchObject(
-      { code: 'INVALID_ARGUMENT' },
-    );
+    // Closing twice is harmless; paths outside the view directory are refused.
+    await nativeAttachmentPlatform.closeView(uri);
+    await expect(
+      nativeAttachmentPlatform.closeView('file:///data/attachments/x.tza'),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
 
     fakeAttachments.viewErrors.set(ID, 'DAMAGED');
     await expect(

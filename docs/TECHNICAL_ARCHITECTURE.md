@@ -578,6 +578,8 @@ The design keeps backup independent of this device's Keystore:
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
 | Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
+| Jest after Phase 4 step 6 (viewer) | 336 tests in 21 suites: + 8 app-level viewer flows (card front/back paging, copies closed on switch, close and back, missing/damaged/undecodable photo, PDF page count and on-demand rendering, mixed files closed one by one, protected/unsupported/damaged/key/missing PDFs, failing page, app closed mid-view, foreground cleanup), 5 zoom-math tests | **336/336 pass** |
+| JVM after Phase 4 step 6 | + `purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes`; `PdfViews` uses Android's `PdfRenderer` and has no JVM test (instrumentation deferred) | **37/37 pass** |
 | Jest after Phase 4 step 5 (documents UI) | 323 tests in 19 suites: + 14 app-level document flows (all four types with photos and PDFs across a restart, document without attachments unchanged, detail list with type and size, reorder, replace, remove, failed save keeps files, discard, partial imports, 10-file limit and picker counts, date validation unchanged), attachment limit validation, type and size labels | **323/323 pass** |
 | Jest after Phase 4 step 4 (cards UI) | 301 tests in 18 suites: + 12 app-level card flows (plain number without code glyphs, issuer, photos shown and their copies deleted, missing or damaged photos, create with both photos across a restart, replace, remove, failed save keeps the stored file, discard deletes new picks, failed picks explained, stored code type kept, list summary), 4 editor-session tests, view open/close codes | **301/301 pass** |
 | JVM after Phase 4 step 4 | + `AttachmentViewsTest` 4 (verified copy under random names, no copy on mismatch or missing file, close refuses other paths, purge) | **36/36 pass** |
@@ -999,9 +1001,43 @@ files picked while one editor is open **[verified: Jest]**:
 - Dates, expiry, merchant, amount, currency and notes and their validation
   are unchanged **[verified: Jest]**.
 
-### 14.8 Not verified yet
+### 14.8 Viewer (Phase 4 step 6)
 
-- The module (pickers, content URIs, Keystore key, view files) and the card
-  and document screens have not run on a device. Installing on the A53 would upgrade its
+`AttachmentViewer` (`src/screens/AttachmentViewerScreen.tsx`) opens from a
+card photo or a document's file row. It pages through the item's files with
+Previous/Next (a card's front and back; a document's files in order) and
+shows "2 of 3 · PDF · 1.2 MB · Page 1 of 4". Only the current file is open:
+switching or closing deletes its copy **[verified: Jest]**.
+
+- **Images**: `ZoomableImage` is built on RN `PanResponder` and `Animated`,
+  with no new dependency. Pinch zooms 1–4× around the fingers, one finger pans
+  only while zoomed and never past the edges, and double-tap toggles 2.5×. The
+  math is in `zoom.ts` **[verified: Jest]**. The image is laid out at twice
+  the view size and scaled down, so it is decoded sharp enough for zooming.
+  An image Android can't decode shows "Image can’t be shown".
+- **PDFs**: `PdfViews.kt` opens the checked, decrypted copy with
+  `android.graphics.pdf.PdfRenderer`. Pages are listed with their sizes and
+  rendered one at a time, on a dedicated thread, at the screen's pixel width
+  (at most 2048 px and 4 MP), into PNG view files on white. The vertical
+  `FlatList` renders only pages near the screen, and each page's file is
+  deleted when its row is recycled. Closing the viewer closes the renderer and
+  deletes the PDF copy and every page **[verified: Jest]**.
+  - A PDF that needs a password (`SecurityException`) shows "PDF is
+    password-protected". One the renderer rejects shows "PDF can’t be shown",
+    and one page that fails shows "This page can’t be shown" while the others
+    still show.
+- **Cleanup**: `AttachmentViews` tracks the files it handed out. When the app
+  returns to the foreground, `purgeInactiveViews` deletes view files nothing
+  holds, and the startup cleanup deletes all of them **[verified: JVM, Jest]**.
+- **Errors** are messages for a normal user: missing, damaged, key
+  unavailable, protected, unsupported or undisplayable. Nothing crashes, and
+  the item stays usable.
+- There is no external viewer, no `Intent` to other apps and no network. The
+  TZA format and the database are unchanged.
+
+### 14.9 Not verified yet
+
+- The module (pickers, content URIs, Keystore key, view files, PdfRenderer)
+  and the card, document and viewer screens have not run on a device. Installing on the A53 would upgrade its
   real data to schema v3, so it waits for approval. Instrumentation tests are
   deferred: running them would uninstall the app from the user's phone.

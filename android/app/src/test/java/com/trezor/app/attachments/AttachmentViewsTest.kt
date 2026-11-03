@@ -81,6 +81,26 @@ class AttachmentViewsTest {
   }
 
   @Test
+  fun purgeInactiveKeepsOpenFilesAndRemovesClosedOrStrayOnes() {
+    val open = views.open(id, stored.sizeBytes, stored.sha256)
+    val page = views.newFile().also { it.writeBytes(byteArrayOf(1, 2, 3)) }
+    val closed = views.open(id, stored.sizeBytes, stored.sha256)
+    views.close(closed.path)
+    // A file left by an earlier process, which this one never handed out.
+    val stray = File(dir, "${"ab".repeat(16)}.view").also { it.writeBytes(byteArrayOf(9)) }
+
+    assertEquals(1, views.purgeInactive())
+    assertTrue(open.exists())
+    assertTrue(page.exists())
+    assertFalse(stray.exists())
+
+    views.close(page.path)
+    assertEquals(0, views.purgeInactive())
+    assertFalse(page.exists())
+    assertTrue(open.exists())
+  }
+
+  @Test
   fun purgeRemovesEveryCopy() {
     views.open(id, stored.sizeBytes, stored.sha256)
     views.open(id, stored.sizeBytes, stored.sha256)

@@ -31,6 +31,10 @@ export type AttachmentErrorCode =
   | 'MISSING'
   /** The file is damaged or doesn't match its record. */
   | 'DAMAGED'
+  /** A PDF that needs a password. */
+  | 'PDF_PROTECTED'
+  /** A PDF Android's renderer can't read. */
+  | 'PDF_UNSUPPORTED'
   | 'UNKNOWN';
 
 const errorCodes = new Set<string>([
@@ -42,6 +46,8 @@ const errorCodes = new Set<string>([
   'IO_FAILED',
   'MISSING',
   'DAMAGED',
+  'PDF_PROTECTED',
+  'PDF_UNSUPPORTED',
 ]);
 
 const failureCodes = new Set<string>([
@@ -118,6 +124,12 @@ export function parsePickResult(json: string, createdAt: string): PickResult {
   return { imported, failed, skipped };
 }
 
+export interface OpenPdf {
+  handle: string;
+  /** Page sizes in points, in order. */
+  pages: { width: number; height: number }[];
+}
+
 /** Encrypted attachment files, as seen by the app. Faked in tests. */
 export interface AttachmentPlatform {
   pick(options: {
@@ -136,6 +148,18 @@ export interface AttachmentPlatform {
    */
   openView(attachment: Attachment): Promise<string>;
   closeView(uri: string): Promise<void>;
+  /** A checked, decrypted PDF opened with Android's renderer. */
+  openPdf(attachment: Attachment): Promise<OpenPdf>;
+  /** One page as a private PNG; close it with `closeView` when not shown. */
+  renderPdfPage(
+    handle: string,
+    index: number,
+    widthPx: number,
+  ): Promise<string>;
+  /** Deletes the PDF copy and every page rendered from it. */
+  closePdf(handle: string): Promise<void>;
+  /** Deletes view files nothing holds (app back in the foreground). */
+  purgeInactiveViews(): Promise<number>;
   /** Startup only: removes files no database row refers to, and views. */
   collectGarbage(knownIds: string[]): Promise<number>;
 }
@@ -173,6 +197,48 @@ export const nativeAttachmentPlatform: AttachmentPlatform = {
   async closeView(uri) {
     try {
       await NativeTrezorAttachments.closeView(uri);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async openPdf({ id, sizeBytes, sha256 }) {
+    let json: string;
+    try {
+      json = await NativeTrezorAttachments.openPdf(id, sizeBytes, sha256);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+    const raw = JSON.parse(json) as { handle: string; pages: number[][] };
+    return {
+      handle: raw.handle,
+      pages: raw.pages.map(([width, height]) => ({ width, height })),
+    };
+  },
+
+  async renderPdfPage(handle, index, widthPx) {
+    try {
+      return await NativeTrezorAttachments.renderPdfPage(
+        handle,
+        index,
+        widthPx,
+      );
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async closePdf(handle) {
+    try {
+      await NativeTrezorAttachments.closePdf(handle);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async purgeInactiveViews() {
+    try {
+      return await NativeTrezorAttachments.purgeInactiveViews();
     } catch (e) {
       throw toAttachmentError(e);
     }

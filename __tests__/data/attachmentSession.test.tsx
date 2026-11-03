@@ -33,6 +33,10 @@ function fakePlatform() {
     },
     openView: async () => 'file:///x',
     closeView: async () => {},
+    openPdf: async () => ({ handle: 'h', pages: [] }),
+    renderPdfPage: async () => 'file:///p',
+    closePdf: async () => {},
+    purgeInactiveViews: async () => 0,
     collectGarbage: async () => 0,
   };
   return {

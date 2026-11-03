@@ -25,8 +25,20 @@ export const fakeAttachments = {
   /** Open view URIs → attachment id. */
   views: new Map<string, string>(),
   viewCount: 0,
-  /** Make openView reject with this code for these ids. */
+  /** Make openView / openPdf reject with this code for these ids. */
   viewErrors: new Map<string, string>(),
+  /** Page sizes per PDF id; one A4 page by default. */
+  pdfPages: new Map<string, number[][]>(),
+  /** Open PDF handles → attachment id. */
+  pdfs: new Map<string, string>(),
+  /** Rendered page URIs → PDF handle. */
+  pageViews: new Map<string, string>(),
+  renders: [] as { index: number; widthPx: number }[],
+  /** Page indexes whose rendering fails. */
+  failingPages: new Set<number>(),
+  purges: 0,
+  /** Every URI passed to closeView. */
+  closed: [] as string[],
   nextPick: null as NextPick | null,
   failNextDelete: false,
   failNextGc: false,
@@ -39,6 +51,13 @@ export const fakeAttachments = {
     this.views = new Map();
     this.viewCount = 0;
     this.viewErrors = new Map();
+    this.pdfPages = new Map();
+    this.pdfs = new Map();
+    this.pageViews = new Map();
+    this.renders = [];
+    this.failingPages = new Set();
+    this.purges = 0;
+    this.closed = [];
     this.nextPick = null;
     this.failNextDelete = false;
     this.failNextGc = false;
@@ -87,11 +106,53 @@ export const fakeAttachments = {
       return uri;
     },
     async closeView(uri: string) {
-      if (!fakeAttachments.views.delete(uri)) {
+      fakeAttachments.closed.push(uri);
+      fakeAttachments.views.delete(uri);
+      fakeAttachments.pageViews.delete(uri);
+      // Like native: any file in the view directory (already gone is fine).
+      if (!uri.startsWith('file:///cache/attachments/view/')) {
         throw Object.assign(new Error('not a view'), {
           code: 'INVALID_ARGUMENT',
         });
       }
+    },
+    async openPdf(id: string, _sizeBytes: number, _sha256: string) {
+      const error =
+        fakeAttachments.viewErrors.get(id) ??
+        (fakeAttachments.files.has(id) ? null : 'MISSING');
+      if (error) {
+        throw Object.assign(new Error('pdf failed'), { code: error });
+      }
+      const handle = `pdf-${++fakeAttachments.viewCount}`;
+      fakeAttachments.pdfs.set(handle, id);
+      return JSON.stringify({
+        handle,
+        pages: fakeAttachments.pdfPages.get(id) ?? [[595, 842]],
+      });
+    },
+    async renderPdfPage(handle: string, index: number, widthPx: number) {
+      if (!fakeAttachments.pdfs.has(handle)) {
+        throw Object.assign(new Error('closed'), { code: 'INVALID_ARGUMENT' });
+      }
+      if (fakeAttachments.failingPages.has(index)) {
+        throw Object.assign(new Error('page'), { code: 'PDF_UNSUPPORTED' });
+      }
+      fakeAttachments.renders.push({ index, widthPx });
+      const uri = `file:///cache/attachments/view/${handle}-p${index}-${++fakeAttachments.viewCount}.view`;
+      fakeAttachments.pageViews.set(uri, handle);
+      return uri;
+    },
+    async closePdf(handle: string) {
+      fakeAttachments.pdfs.delete(handle);
+      for (const [uri, owner] of [...fakeAttachments.pageViews]) {
+        if (owner === handle) {
+          fakeAttachments.pageViews.delete(uri);
+        }
+      }
+    },
+    async purgeInactiveViews() {
+      fakeAttachments.purges++;
+      return 0;
     },
     async collectGarbage(knownIds: string[]) {
       fakeAttachments.views.clear();
