@@ -37,9 +37,12 @@ interface RemindersContextValue {
   setShowDetails: (value: boolean) => void;
   /** null until known. */
   notificationsEnabled: boolean | null;
+  /** Reminders arrive on time ("Alarms & reminders" allowed); null until known. */
+  exactAlarmsAllowed: boolean | null;
   /** Explains, then asks Android once; never re-prompts after that. */
   requestPermissionIfNeeded: () => void;
   openSystemSettings: () => void;
+  openExactAlarmSettings: () => void;
   /** The last attempt to update the notification schedule failed. */
   scheduleFailed: boolean;
 }
@@ -50,6 +53,7 @@ interface RemindersProviderProps {
   settings: SettingsRepository;
   initialShowDetails: boolean;
   initialPermissionRequested: boolean;
+  initialExactAlarmRequested?: boolean;
   platform?: ReminderPlatform;
   children: ReactNode;
 }
@@ -60,6 +64,7 @@ export function RemindersProvider({
   settings,
   initialShowDetails,
   initialPermissionRequested,
+  initialExactAlarmRequested = false,
   platform = nativeReminderPlatform,
   children,
 }: RemindersProviderProps) {
@@ -68,9 +73,14 @@ export function RemindersProvider({
   const [notificationsEnabled, setNotificationsEnabled] = useState<
     boolean | null
   >(null);
+  const [exactAlarmsAllowed, setExactAlarmsAllowed] = useState<
+    boolean | null
+  >(null);
   const [scheduleFailed, setScheduleFailed] = useState(false);
   const [explaining, setExplaining] = useState(false);
+  const [explainingExact, setExplainingExact] = useState(false);
   const permissionRequested = useRef(initialPermissionRequested);
+  const exactRequested = useRef(initialExactAlarmRequested);
   const showDetailsRef = useRef(initialShowDetails);
 
   const requestReconcile = useMemo(
@@ -102,6 +112,11 @@ export function RemindersProvider({
       setNotificationsEnabled(await platform.notificationsEnabled());
     } catch {
       setNotificationsEnabled(null);
+    }
+    try {
+      setExactAlarmsAllowed(await platform.exactAlarmsAllowed());
+    } catch {
+      setExactAlarmsAllowed(null);
     }
   }, [platform]);
 
@@ -145,6 +160,21 @@ export function RemindersProvider({
       .catch(() => console.warn('[reminders] could not save permission state'));
   }, [settings]);
 
+  // Once notifications are allowed: explain on-time delivery, once.
+  const explainExactIfNeeded = useCallback(async () => {
+    if (exactRequested.current) {
+      return;
+    }
+    const [enabled, exact] = await Promise.all([
+      platform.notificationsEnabled().catch(() => false),
+      platform.exactAlarmsAllowed().catch(() => true),
+    ]);
+    setExactAlarmsAllowed(exact);
+    if (enabled && !exact) {
+      setExplainingExact(true);
+    }
+  }, [platform]);
+
   const requestPermissionIfNeeded = useCallback(async () => {
     const enabled = await platform.notificationsEnabled().catch(() => false);
     setNotificationsEnabled(enabled);
@@ -157,8 +187,10 @@ export function RemindersProvider({
       })
     ) {
       setExplaining(true);
+    } else {
+      await explainExactIfNeeded();
     }
-  }, [platform]);
+  }, [platform, explainExactIfNeeded]);
 
   const askAndroid = useCallback(async () => {
     setExplaining(false);
@@ -171,16 +203,43 @@ export function RemindersProvider({
       await refreshPermission();
       requestReconcile();
     }
-  }, [markAsked, refreshPermission, requestReconcile]);
+    await explainExactIfNeeded();
+  }, [markAsked, refreshPermission, requestReconcile, explainExactIfNeeded]);
 
   const declineExplanation = useCallback(() => {
     setExplaining(false);
     markAsked();
   }, [markAsked]);
 
+  const markExactAsked = useCallback(() => {
+    exactRequested.current = true;
+    settings
+      .set('notifications.exactAlarmRequested', true)
+      .catch(() => console.warn('[reminders] could not save permission state'));
+  }, [settings]);
+
   const openSystemSettings = useCallback(() => {
     Linking.openSettings().catch(() => undefined);
   }, []);
+
+  // Granting is picked up natively (alarms re-armed) and here on return.
+  const openExactAlarmSettings = useCallback(() => {
+    platform
+      .openExactAlarmSettings()
+      .then(opened => (opened ? undefined : Linking.openSettings()))
+      .catch(() => undefined);
+  }, [platform]);
+
+  const confirmExact = useCallback(() => {
+    setExplainingExact(false);
+    markExactAsked();
+    openExactAlarmSettings();
+  }, [markExactAsked, openExactAlarmSettings]);
+
+  const declineExact = useCallback(() => {
+    setExplainingExact(false);
+    markExactAsked();
+  }, [markExactAsked]);
 
   const value = useMemo(
     () => ({
@@ -188,10 +247,12 @@ export function RemindersProvider({
       showDetails,
       setShowDetails,
       notificationsEnabled,
+      exactAlarmsAllowed,
       requestPermissionIfNeeded: () => {
         requestPermissionIfNeeded();
       },
       openSystemSettings,
+      openExactAlarmSettings,
       scheduleFailed,
     }),
     [
@@ -199,8 +260,10 @@ export function RemindersProvider({
       showDetails,
       setShowDetails,
       notificationsEnabled,
+      exactAlarmsAllowed,
       requestPermissionIfNeeded,
       openSystemSettings,
+      openExactAlarmSettings,
       scheduleFailed,
     ],
   );
@@ -216,6 +279,15 @@ export function RemindersProvider({
         cancelLabel="Not now"
         onConfirm={askAndroid}
         onCancel={declineExplanation}
+      />
+      <Dialog
+        visible={explainingExact}
+        title="Deliver reminders on time?"
+        message="Without this, Android may delay reminders to save battery, and some phones hold them until you open Trezor. Allow “Alarms & reminders” for Trezor on the next screen."
+        confirmLabel="Open settings"
+        cancelLabel="Not now"
+        onConfirm={confirmExact}
+        onCancel={declineExact}
       />
     </RemindersContext.Provider>
   );

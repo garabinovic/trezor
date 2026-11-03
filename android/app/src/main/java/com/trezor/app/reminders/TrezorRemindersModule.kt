@@ -1,5 +1,9 @@
 package com.trezor.app.reminders
 
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -54,6 +58,30 @@ class TrezorRemindersModule(private val reactContext: ReactApplicationContext) :
 
   override fun areNotificationsEnabled(promise: Promise) {
     promise.resolve(ReminderNotifications.enabled(reactContext))
+  }
+
+  override fun canScheduleExactAlarms(promise: Promise) {
+    promise.resolve(ReminderScheduler.exactAllowed(reactContext))
+  }
+
+  /** Android's "Alarms & reminders" page for Trezor (Android 12+). */
+  override fun openExactAlarmSettings(promise: Promise) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+      promise.resolve(false)
+      return
+    }
+    try {
+      val intent =
+          Intent(
+                  Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                  Uri.parse("package:${reactContext.packageName}"),
+              )
+              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      reactContext.startActivity(intent)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      promise.resolve(false)
+    }
   }
 
   companion object {

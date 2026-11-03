@@ -68,6 +68,7 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
           settings={storage.settings}
           initialShowDetails={storage.initialShowReminderDetails}
           initialPermissionRequested={storage.initialPermissionRequested}
+          initialExactAlarmRequested={storage.initialExactAlarmRequested}
         >
           <RootNavigator />
           <WriteErrorDialog />

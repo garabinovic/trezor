@@ -2,6 +2,7 @@ package com.trezor.app.reminders
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.app.AlarmManager
 import android.content.Intent
 
 /** Alarm fired (not exported: only our own PendingIntents reach it). */
@@ -22,7 +23,9 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
 }
 
 /**
- * Re-arms alarms after events that clear or shift them. Exported because the system
+ * Re-arms alarms after events that clear or shift them, and as exact alarms once the user
+ * allows "Alarms & reminders" (revoking it stops the app; it re-arms on next launch).
+ * Exported because the system
  * sends these; only the listed actions are honoured, and re-arming is idempotent.
  */
 class ReminderRestoreReceiver : BroadcastReceiver() {
@@ -42,6 +45,7 @@ class ReminderRestoreReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
         )
   }
 }

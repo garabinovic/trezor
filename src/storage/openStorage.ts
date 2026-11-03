@@ -17,6 +17,7 @@ export interface OpenedStorage {
   initialTheme: SettingValues['theme.preference'];
   initialShowReminderDetails: boolean;
   initialPermissionRequested: boolean;
+  initialExactAlarmRequested: boolean;
 }
 
 /** Opens the encrypted database and loads what the first screen needs. */
@@ -26,12 +27,13 @@ export async function openStorage(): Promise<OpenedStorage> {
   const db = serializeDatabase(opened.db);
   const items = new SqliteItemRepository(db);
   const settings = new SqliteSettingsRepository(db);
-  const [initialItems, theme, showDetails, permissionRequested] =
+  const [initialItems, theme, showDetails, permissionRequested, exactRequested] =
     await Promise.all([
       items.listAll(),
       settings.get('theme.preference'),
       settings.get('notifications.showDetails'),
       settings.get('notifications.permissionRequested'),
+      settings.get('notifications.exactAlarmRequested'),
     ]);
   return {
     items,
@@ -40,5 +42,6 @@ export async function openStorage(): Promise<OpenedStorage> {
     initialTheme: theme ?? 'system',
     initialShowReminderDetails: showDetails === true,
     initialPermissionRequested: permissionRequested === true,
+    initialExactAlarmRequested: exactRequested === true,
   };
 }

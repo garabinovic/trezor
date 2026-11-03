@@ -1,5 +1,5 @@
 import React from 'react';
-import { DeviceEventEmitter } from 'react-native';
+import { AppState, DeviceEventEmitter } from 'react-native';
 import ReactTestRenderer from 'react-test-renderer';
 import App from '../../App';
 import type { Item, Reminder } from '../../src/data/types';
@@ -14,6 +14,7 @@ import {
   pressLabel,
   pressText,
   settle,
+  texts,
   typeInto,
 } from '../../test-utils/appHarness';
 import { fakeReminders } from '../../test-utils/fakeReminders';
@@ -47,6 +48,8 @@ jest.mock('../../src/storage/openStorage', () => ({
         (await settings.get('notifications.showDetails')) === true,
       initialPermissionRequested:
         (await settings.get('notifications.permissionRequested')) === true,
+      initialExactAlarmRequested:
+        (await settings.get('notifications.exactAlarmRequested')) === true,
     };
   },
 }));
@@ -303,5 +306,116 @@ describe('notification privacy and permission', () => {
       ),
     ).toBe(true);
     expect(await storedReminder('x')).toBeDefined();
+  });
+});
+
+describe('on-time delivery (exact alarms)', () => {
+  const EXPLAIN = 'Deliver reminders on time?';
+  const LATE = 'Reminders may be late';
+
+  async function saveNewReminder(title: string) {
+    await openTab(app, 'Reminders');
+    await pressLabel(app, 'New reminder');
+    await typeInto(app, 'Title', title);
+    await pressText(app, 'Save');
+    await reconciled();
+  }
+
+  test('without exact alarms, saving explains once and opens Android settings', async () => {
+    fakeReminders.exact = false;
+    await launch();
+    await saveNewReminder('First');
+    expect(hasText(app, EXPLAIN)).toBe(true);
+    await pressText(app, 'Open settings');
+    expect(fakeReminders.exactSettingsOpened).toBe(1);
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    expect(
+      await new SqliteSettingsRepository(serializeDatabase(mockDb)).get(
+        'notifications.exactAlarmRequested',
+      ),
+    ).toBe(true);
+
+    // Never again, also after a restart.
+    await saveNewReminder('Second');
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    await restart();
+    await saveNewReminder('Third');
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    expect(fakeReminders.exactSettingsOpened).toBe(1);
+  });
+
+  test('"Not now" is remembered and opens nothing', async () => {
+    fakeReminders.exact = false;
+    await launch();
+    await saveNewReminder('First');
+    await pressText(app, 'Not now');
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    await saveNewReminder('Second');
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    expect(fakeReminders.exactSettingsOpened).toBe(0);
+  });
+
+  test('with notifications off there is nothing to explain yet', async () => {
+    fakeReminders.exact = false;
+    fakeReminders.enabled = false;
+    await launch();
+    await saveNewReminder('First');
+    expect(hasText(app, EXPLAIN)).toBe(false);
+  });
+
+  test('when allowed: no explanation, no late caption, no Settings warning', async () => {
+    await launch();
+    await openTab(app, 'Reminders');
+    await pressLabel(app, 'New reminder');
+    expect(hasText(app, 'Notifications may arrive late')).toBe(false);
+    await typeInto(app, 'Title', 'On time');
+    await pressText(app, 'Save');
+    await reconciled();
+    expect(hasText(app, EXPLAIN)).toBe(false);
+    await pressLabel(app, 'Settings');
+    expect(hasText(app, LATE)).toBe(false);
+  });
+
+  test('when not allowed, the editor and Settings say so and link to Android', async () => {
+    fakeReminders.exact = false;
+    await launch();
+    await openTab(app, 'Reminders');
+    await pressLabel(app, 'New reminder');
+    expect(
+      texts(app).some(t => t.startsWith('Notifications may arrive late')),
+    ).toBe(true);
+    await pressLabel(app, 'Cancel');
+    await settle();
+
+    await pressLabel(app, 'Settings');
+    expect(hasText(app, LATE)).toBe(true);
+    await pressText(app, LATE);
+    expect(fakeReminders.exactSettingsOpened).toBe(1);
+  });
+
+  test('allowing in Android settings is picked up on return to the app', async () => {
+    const listeners: Array<(state: string) => void> = [];
+    const spy = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockImplementation((_type, listener) => {
+        listeners.push(listener as (state: string) => void);
+        return { remove: () => undefined } as ReturnType<
+          typeof AppState.addEventListener
+        >;
+      });
+    try {
+      fakeReminders.exact = false;
+      await launch();
+      await pressLabel(app, 'Settings');
+      expect(hasText(app, LATE)).toBe(true);
+      fakeReminders.exact = true;
+      await ReactTestRenderer.act(async () => {
+        listeners.forEach(l => l('active'));
+      });
+      await reconciled();
+      expect(hasText(app, LATE)).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

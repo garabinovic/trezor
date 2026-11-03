@@ -27,7 +27,7 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   const { type, id } = route.params;
   const existing = useItem(id);
   const { saveItem } = useItems();
-  const { requestPermissionIfNeeded } = useReminders();
+  const { requestPermissionIfNeeded, exactAlarmsAllowed } = useReminders();
 
   const initial = useMemo(
     () => existing ?? createBlankItem(type),
@@ -103,7 +103,11 @@ export function ItemEditorScreen({ route, navigation }: Props) {
       <View style={styles.form}>
         {draft.type === 'note' && <NoteFields draft={draft} {...fieldProps} />}
         {draft.type === 'reminder' && (
-          <ReminderFields draft={draft} {...fieldProps} />
+          <ReminderFields
+            draft={draft}
+            onTime={exactAlarmsAllowed !== false}
+            {...fieldProps}
+          />
         )}
         {draft.type === 'card' && <CardFields draft={draft} {...fieldProps} />}
         {draft.type === 'document' && (

@@ -9,6 +9,8 @@ export const fakeReminders = {
   fired: [] as string[],
   pendingTap: null as string | null,
   enabled: true,
+  exact: true,
+  exactSettingsOpened: 0,
   failNextSync: false,
 
   reset() {
@@ -18,6 +20,8 @@ export const fakeReminders = {
     this.fired = [];
     this.pendingTap = null;
     this.enabled = true;
+    this.exact = true;
+    this.exactSettingsOpened = 0;
     this.failNextSync = false;
   },
 
@@ -48,6 +52,13 @@ export const fakeReminders = {
     },
     async areNotificationsEnabled() {
       return fakeReminders.enabled;
+    },
+    async canScheduleExactAlarms() {
+      return fakeReminders.exact;
+    },
+    async openExactAlarmSettings() {
+      fakeReminders.exactSettingsOpened++;
+      return true;
     },
   },
 };

@@ -121,7 +121,11 @@ export function ReminderFields({
   draft,
   onChange,
   errors,
-}: FieldsProps<'reminder'>) {
+  onTime = true,
+}: FieldsProps<'reminder'> & {
+  /** Exact alarms allowed; otherwise Android may deliver late. */
+  onTime?: boolean;
+}) {
   const due = new Date(draft.dueAt);
 
   // Date and time update the instant and the floating local start together.
@@ -201,10 +205,12 @@ export function ReminderFields({
         placeholder="Optional"
         multiline
       />
-      <Text variant="caption" color="textTertiary">
-        Notifications may arrive up to 10 minutes late, or up to an hour when
-        the phone is idle, as Android saves battery.
-      </Text>
+      {!onTime && (
+        <Text variant="caption" color="textTertiary">
+          Notifications may arrive late as Android saves battery. Allow
+          “Alarms & reminders” in Settings so they arrive on time.
+        </Text>
+      )}
     </>
   );
 }

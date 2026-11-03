@@ -340,6 +340,7 @@ tries to change an item's type is rejected **[verified]**.
 | `theme.preference` | Yes (settings table) **[verified across restart]** | `'system' \| 'light' \| 'dark'`; read before first render |
 | `notifications.showDetails` | Yes **[verified across restart]** | Boolean, default `false` (generic notification text) |
 | `notifications.permissionRequested` | Yes | Boolean; the Android 13+ permission is asked at most once |
+| `notifications.exactAlarmRequested` | Yes | Boolean; the "Deliver reminders on time?" explanation is shown at most once (§13.5) |
 | Show sample data | **No** — debug builds only, in memory | Not visible in release **[verified]** |
 | App lock, backup, restore, delete all | — | Shown as "Not available yet" (Phase 0 UI) |
 
@@ -532,8 +533,10 @@ The design keeps backup independent of this device's Keystore:
 | --- | --- | --- |
 | Jest (automated) | 136 tests in 11 suites. Phase 1/1.1 suites (66) unchanged. Phase 2 adds: repository CRUD of every field for each type, type separation, pinning, ordering, search coverage and order, deletes, database errors and invalid input, on both repository implementations (23 more in `itemRepository.test.ts`, now 40); search matching incl. non-ASCII case (7); organizer filters, sorts, Home overview, document summaries (13); editor validation and normalization (13); **app-level flows** (14) driving the real screens and navigation on the real SQLite repositories via `serializeDatabase` (Home with stored data, all tabs and filter chips, create/edit/delete/pin/complete, validation, failed write, search opens the right item, theme and data persist across a remount) | **136/136 pass** |
 | Jest after Phase 3 (automated) | 228 tests in 14 suites; Phase 1–2 tests kept (fixtures updated to the v2 reminder shape; organizer sort tests updated to next-occurrence order, an intended change) plus the Phase 3 tests in §13.9 | **228/228 pass** |
+| Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
+| Android instrumentation after the exact-alarm change | + `withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm` | **Not run** — emulator unusable; running it on the phone uninstalls the app |
 | Android instrumentation (automated, emulator) | `KeyVaultTest` (12) against the real Keystore; `DatabaseFilesTest` (9): present/absent, unreadable location is an error not "absent", no-replace rename, temp-only delete, path rejection | **21/21 pass** |
 | On-device self-test (debug, dev menu → "Run storage self-test") | 21 checks on real SQLCipher: active cipher; correct/wrong/missing key; native file guards; startup; foreign keys ON; failed migration leaves v1 with a verified snapshot; retry reuses it; migration keeps data; snapshot unreadable without key; invalid snapshot kept and a new one used; table rebuild keeps rows; violation rolls back; newer schema refused | **21/21 pass** |
 | Manual upgrade test (emulator) | Data created with the Phase 1 release build (`06b022c`), then the Phase 1.1 debug build installed over it: data, theme and envelope intact; no migration, no snapshot, `trezor.db` unchanged on open; new writes and theme change persisted across restart | As expected |
@@ -607,10 +610,10 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Database key passes through JS (§4.4) | No longer retained by op-sqlite after `open()`; still present until GC in immutable JS/Java/C++ strings that can't be zeroed; never logged |
 | No automatic restore from snapshots; snapshots and crashed-attempt temp files are never cleaned up (audit L7) | Manual-recovery artifacts only. Retention, cleanup and restore belong to the backup phase |
 | Search reads all items per query (debounced), then matches in JS | Fine at personal-organizer scale; a normalized search column or FTS would need a schema change if data grows large |
-| Reminder timing is approximate (no exact-alarm permission, by decision) | Up to 10 min late while awake, up to ~1 h in Doze; documented in the editor (§13.6) |
-| OEM battery managers ("app killers") and force-stop | Force-stop removes all alarms until the app is opened again; some OEMs behave like force-stop. Not fixable without exact/foreground mechanisms (§13.8) |
-| Phase 3 not tested on a physical device or on API 24–33 | Emulator API 37 only; see the manual checklist in the Phase 3 report |
-| Reboot re-arming not verified | Emulator could not complete it (§13.8). If Android drops `BOOT_COMPLETED` (as the overloaded emulator did), alarms stay unarmed until the app is next opened |
+| Without "Alarms & reminders" (default for new installs on Android 13+), timing is approximate | Up to 10 min late while awake, ~1 h in Doze, and indefinitely while Samsung Freecess keeps the app frozen (§13.6). Trezor explains once and links to the setting from the editor and Settings |
+| Force-stop and other OEM "app killers" | Force-stop removes all alarms until the app is opened again; some OEMs behave like force-stop (§13.8) |
+| Reminders tested on one physical device only (Galaxy A53, Android 16) and the API 37 emulator | Not tested on API 24–33; see the manual checklist |
+| Reboot re-arming verified with approximate alarms only | Repeat with exact alarms; if Android drops `BOOT_COMPLETED`, alarms stay unarmed until the app is next opened |
 | Shared connection is serialized; calling the outer database from inside a `transaction()` callback would deadlock | Repositories use only `tx`; documented in `serialDatabase.ts` |
 | StrongBox fallback only on `StrongBoxUnavailableException`; other StrongBox failures make the first launch fail, and software-backed keys are accepted silently (audit L4) | Untested on hardware; review with real devices |
 | op-sqlite enables `load_extension` on every Android connection (audit L6) | Not exploitable with static or parameterized SQL; needs an op-sqlite option or patch |
@@ -722,18 +725,39 @@ without opening the database (which needs JS).
 | --- | --- |
 | `POST_NOTIFICATIONS` | Required on Android 13+ to show notifications. Asked once, after the user saves an active reminder, behind an in-app explanation ("Allow reminder notifications?" — Continue / Not now). If denied, Settings shows "Notifications are off" and opens Android settings |
 | `RECEIVE_BOOT_COMPLETED` | Re-arm alarms after reboot (alarms don't survive it) |
+| `SCHEDULE_EXACT_ALARM` | On-time delivery (§13.6). Granted automatically on Android 12; on Android 13+ off by default for new installs and allowed by the user in Android's "Alarms & reminders" page. After the first saved active reminder with notifications allowed, Trezor explains once ("Deliver reminders on time?" — Open settings / Not now). While it is off, the editor and Settings ("Reminders may be late") say so and link to that page. Android 11 and older need no permission |
 
-Not requested: `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
-`FOREGROUND_SERVICE`, `WAKE_LOCK`, `INTERNET` (release). `ReminderRestoreReceiver`
-is exported (system broadcasts) and acts only on `BOOT_COMPLETED`,
-`MY_PACKAGE_REPLACED`, `TIME_SET`, `TIMEZONE_CHANGED`; re-arming is idempotent.
+Not requested: `USE_EXACT_ALARM` (Google Play reserves it for alarm-clock and
+calendar apps, and the user can't revoke it), `FOREGROUND_SERVICE`, `WAKE_LOCK`,
+`INTERNET` (release). `ReminderRestoreReceiver` is exported (system broadcasts)
+and acts only on `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, `TIME_SET`,
+`TIMEZONE_CHANGED` and `SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` (sent
+when the user allows exact alarms: everything is re-armed as exact);
+re-arming is idempotent. Revoking the access stops the app and cancels its
+exact alarms; the next launch re-arms them as approximate alarms.
 `ReminderAlarmReceiver` is not exported. The notification tap intent is
 explicit (`MainActivity`, immutable).
 
 ### 13.6 Delivery accuracy
 
-No exact-alarm permission (decision 2). Each occurrence is armed with two
-inexact alarms; whichever fires first delivers it and the other is ignored
+**With exact alarms allowed** (always on Android 11 and older; on Android 12+
+when "Alarms & reminders" is on), each occurrence is one
+`setExactAndAllowWhileIdle(RTC_WAKEUP, t)` alarm: on time, in Doze too. The
+second request code is cancelled, so an occurrence still has one alarm and one
+notification. If the access is revoked between the check and the call
+(`SecurityException`), the occurrence falls back to the approximate pair.
+
+This replaced approximate-only timing (Phase 3 decision 2) after testing on a
+Samsung Galaxy A53 (Android 16): Samsung's **Freecess** freezes an app that was
+recently in the foreground once it is cached, and **defers its inexact alarms
+until it is unfrozen** (`AlarmManager: Deferring alarm … due to freecess`). A
+09:40 daily and a 10:00 interval reminder were held until 10:10:08, when the
+user swiped Trezor from recents; nothing indicates the hold would have ended
+sooner. With an exact alarm the same frozen process was unfrozen for the alarm
+(`UFZ … reason: Alarm`) and notified at 11:15:00.07 for 11:15.
+
+**Without exact alarms**, timing is approximate. Each occurrence is armed with
+two inexact alarms; whichever fires first delivers it and the other is ignored
 (it carries the same occurrence, which is no longer the armed one):
 
 | Alarm | Behaviour |
@@ -742,8 +766,11 @@ inexact alarms; whichever fires first delivers it and the other is ignored
 | `setAndAllowWhileIdle(RTC_WAKEUP, t)` | Fires in Doze too, but Android allows delay of up to 75 % of the lead time, capped at 1 h |
 
 So a reminder arrives at its time or **up to ~10 minutes late** when the phone
-is in use, and **up to about an hour late** when it is idle. The editor says
-so. Observed on the emulator: 0:22, 2:26 and 1:02 min after the set time.
+is in use, and **up to about an hour late** when it is idle — on stock Android.
+Vendor freezers can hold them longer (above). While exact alarms are off, the
+editor says reminders may be late and Settings shows "Reminders may be late",
+both linking to "Alarms & reminders". Observed: emulator 0:22, 2:26, 1:02 min;
+A53 with the app not frozen 10:00 and 2:41 min; A53 frozen 30 min (Freecess).
 
 An occurrence that is due but not yet delivered (inside its window) **stays
 armed** across re-arming (clock sync, time-zone change, the app opening): the
@@ -773,13 +800,15 @@ after the process had been killed; affected any such restore since Phase 0).
 
 | Event | Behaviour |
 | --- | --- |
-| Reboot | `BOOT_COMPLETED` → `rearmAll` from the native record. **NOT VERIFIED — emulator instability**: on the first emulator reboot Android delivered `BOOT_COMPLETED` after 9 min and then killed the process with "start timeout" before it attached (system overload, load average ~57); the second reboot never completed (system processes crashing). `rearmAll` itself is covered by instrumentation. Must be verified on a physical device |
+| Reboot | `BOOT_COMPLETED` → `rearmAll` from the native record. **[verified: Galaxy A53, Android 16, approximate alarms]**: the process started for `ReminderRestoreReceiver` 2.5 min after boot without the app being opened; a 09:25 reminder missed during the reboot notified once at 09:28:56 (both alarms of its pair fired, one notification). Not yet repeated with exact alarms. (On the API 37 emulator it could not be verified: system overload) |
 | App update | `MY_PACKAGE_REPLACED` → `rearmAll` **[verified: emulator upgrade]** |
 | Clock / zone change | `TIME_SET` / `TIMEZONE_CHANGED` → `rearmAll`; calendar modes follow the new zone **[verified: emulator, Belgrade ↔ New York]** |
 | App launch, return to foreground | Full reconciliation from the database |
 | Process killed by the system | Alarms survive; receivers start the process without UI |
 | Force-stop (Settings → Force stop) | Android removes the app's alarms and blocks its receivers until the user opens it; opening the app re-arms everything. Not avoidable |
-| OEM battery restrictions | Some vendors defer or drop alarms of restricted apps. Users may need to exempt Trezor; not testable on the emulator |
+| OEM battery restrictions | Samsung Freecess defers inexact alarms of a frozen app until it is unfrozen; exact alarms unfreeze it **[verified: Galaxy A53, Android 16]**. Other vendors' "app killers" untested |
+| "Alarms & reminders" allowed | `SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED` → `rearmAll` as exact alarms, without opening the app **[verified: A53, three reminders switched from pairs to one exact alarm each]** |
+| "Alarms & reminders" revoked | Per Android, the app is stopped and its exact alarms are cancelled; the next launch re-arms approximate pairs. Not verified on a device |
 | Notifications disabled / denied | Alarms still fire, Android drops the notification; Settings shows "Notifications are off" |
 | Keystore or record unreadable in a receiver | Nothing shown; the next reconciliation rebuilds the record |
 | Sample data (debug) | Never scheduled (only the real repository is reconciled) |
@@ -790,7 +819,7 @@ after the process had been killed; affected any such restore since Phase 0).
 | --- | --- | --- |
 | Jest | Recurrence fixtures in an `Intl` zone (Belgrade, New York, London), schedule helpers, entry building, privacy of entries, reconciliation (idempotence, fired ONCE completion, deleted reminders), queue, permission policy, migration v2 (preservation, constraints, rollback), repository fields × 6 modes, settings, editor validation, Home sorting, 17 app-level reminder flows | See §9 |
 | JVM unit (`./gradlew :app:testDebugUnitTest`) | `RecurrenceTest`: shared fixtures, day numbers, invalid intervals, parsing | 4/4 |
-| Instrumentation | `ReminderSchedulerTest` (15) on real AlarmManager, NotificationManager, Keystore | See §9 |
+| Instrumentation | `ReminderSchedulerTest` (15 + 1 exact-alarm test) on real AlarmManager, NotificationManager, Keystore | 15 passed on the emulator before the exact-alarm change; the new test compiles but has not run (the emulator is unusable, and the run uninstalls the app from the phone) |
+| Jest | 6 app-level exact-alarm flows: one-time explanation (Open settings / Not now, persisted across restart), none with notifications off, editor caption and Settings row only when not allowed, pick-up on return to the app | Pass |
 | Emulator (manual) | Upgrade Phase 2 release → Phase 3 with data; delivery generic and detailed; taps from background and killed process; zone change | As expected (see the Phase 3 report) |
-| Emulator (manual) | Reboot re-arming | **NOT VERIFIED — emulator instability** |
-| Physical device | — | **Not performed** |
+| Physical device (Galaxy A53, Android 16, release build) | Reboot re-arming without opening the app; missed occurrence once after boot; no duplicates from the alarm pair; cold-start tap; daily and interval re-arm; Freecess delay of approximate alarms; update in place keeps data; "Alarms & reminders" grant re-arms as exact; exact alarm on time while frozen | As expected, apart from the Freecess delay that led to exact alarms |

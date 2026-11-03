@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Switch, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  AlarmClockOff,
   Bell,
   BellOff,
   Download,
@@ -47,7 +48,9 @@ export function SettingsScreen({ navigation }: Props) {
     showDetails,
     setShowDetails,
     notificationsEnabled,
+    exactAlarmsAllowed,
     openSystemSettings,
+    openExactAlarmSettings,
     scheduleFailed,
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
@@ -100,6 +103,16 @@ export function SettingsScreen({ navigation }: Props) {
               subtitleLines={2}
               chevron
               onPress={openSystemSettings}
+            />
+          )}
+          {notificationsEnabled !== false && exactAlarmsAllowed === false && (
+            <ListItem
+              icon={AlarmClockOff}
+              title="Reminders may be late"
+              subtitle="Allow “Alarms & reminders” in Android settings so reminders arrive on time."
+              subtitleLines={3}
+              chevron
+              onPress={openExactAlarmSettings}
             />
           )}
         </Section>

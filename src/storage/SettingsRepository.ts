@@ -8,6 +8,8 @@ export interface SettingValues {
   'notifications.showDetails': boolean;
   /** The notification permission prompt was already shown once. */
   'notifications.permissionRequested': boolean;
+  /** The on-time delivery ("Alarms & reminders") explanation was shown once. */
+  'notifications.exactAlarmRequested': boolean;
 }
 
 export type SettingKey = keyof SettingValues;

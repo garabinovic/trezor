@@ -1,9 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Reminders: show notifications (runtime permission on Android 13+) and re-arm
-         alarms after a reboot. No exact-alarm permission: timing is approximate. -->
+    <!-- Reminders: show notifications (runtime permission on Android 13+), re-arm alarms
+         after a reboot, and deliver them on time once the user allows "Alarms & reminders"
+         (Android 12+; without it timing is approximate). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
 
     <application
@@ -33,7 +35,8 @@
       <receiver
         android:name=".reminders.ReminderAlarmReceiver"
         android:exported="false" />
-      <!-- Re-arms reminders after reboot, app update, clock or time-zone change. -->
+      <!-- Re-arms reminders after reboot, app update, clock or time-zone change, and when
+           exact alarms are allowed. -->
       <receiver
         android:name=".reminders.ReminderRestoreReceiver"
         android:exported="true">
@@ -42,6 +45,7 @@
             <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             <action android:name="android.intent.action.TIME_SET" />
             <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
         </intent-filter>
       </receiver>
     </application>

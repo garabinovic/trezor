@@ -18,6 +18,10 @@ export interface Spec extends TurboModule {
   /** Reminder id from a tapped notification, consumed on read. */
   consumePendingTap(): string | null;
   areNotificationsEnabled(): Promise<boolean>;
+  /** Exact alarms allowed: always below Android 12, then "Alarms & reminders". */
+  canScheduleExactAlarms(): Promise<boolean>;
+  /** Opens Android's "Alarms & reminders" page; false if there is none. */
+  openExactAlarmSettings(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('TrezorReminders');

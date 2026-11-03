@@ -14,6 +14,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -265,5 +266,26 @@ class ReminderSchedulerTest {
     assertNull(ReminderTaps.consume())
     ReminderTaps.handle(Intent("other.action").putExtra(ReminderScheduler.EXTRA_ID, "y"))
     assertNull(ReminderTaps.consume())
+  }
+
+  @Test
+  fun withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm() {
+    if (Build.VERSION.SDK_INT >= 31) {
+      // Granting is safe mid-test; revoking would stop the app (and this test).
+      InstrumentationRegistry.getInstrumentation()
+          .uiAutomation
+          .executeShellCommand("appops set ${context.packageName} SCHEDULE_EXACT_ALARM allow")
+          .close()
+      Thread.sleep(500)
+    }
+    assumeTrue(ReminderScheduler.exactAllowed(context))
+    val now = System.currentTimeMillis()
+    ReminderScheduler.sync(context, listOf(entry("e", Recurrence.Mode.DAILY, now + hour)), false)
+    assertEquals(listOf(0), ReminderScheduler.armedRequestCodes(context, "e"))
+    // Re-arming (e.g. after the permission broadcast) keeps exactly one alarm.
+    ReminderScheduler.rearmAll(context)
+    assertEquals(listOf(0), ReminderScheduler.armedRequestCodes(context, "e"))
+    ReminderScheduler.sync(context, emptyList(), false)
+    assertEquals(emptyList<Int>(), ReminderScheduler.armedRequestCodes(context, "e"))
   }
 }

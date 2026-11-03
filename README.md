@@ -82,6 +82,8 @@ docs/           design, architecture, spike results
 - All data is encrypted at rest (SQLCipher). The database key is wrapped by a
   non-exportable Android Keystore key and stored in `noBackupFilesDir`.
 - App data is excluded from Android cloud backup and device-to-device transfer.
-- Release permissions: `POST_NOTIFICATIONS` and `RECEIVE_BOOT_COMPLETED` only
-  (reminders). No exact-alarm permission: reminders may arrive up to ~10 minutes
-  late, or up to about an hour when the phone is idle.
+- Release permissions: `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED` and
+  `SCHEDULE_EXACT_ALARM` only (reminders). With "Alarms & reminders" allowed,
+  reminders arrive on time; without it Android may deliver them late (up to
+  ~10 minutes, about an hour when idle, and longer on phones that freeze
+  background apps, such as Samsung).

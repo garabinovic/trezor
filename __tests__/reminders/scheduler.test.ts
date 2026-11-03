@@ -61,6 +61,8 @@ function fakePlatform(fired: string[] = []) {
     consumePendingTap: () => null,
     onTap: () => () => undefined,
     notificationsEnabled: async () => state.enabled,
+    exactAlarmsAllowed: async () => true,
+    openExactAlarmSettings: async () => true,
   };
   return { platform, state, last: () => state.syncs[state.syncs.length - 1] };
 }

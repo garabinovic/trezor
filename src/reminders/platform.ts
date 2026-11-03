@@ -24,6 +24,9 @@ export interface ReminderPlatform {
   /** Called when a notification is tapped while the app is running. */
   onTap(listener: () => void): () => void;
   notificationsEnabled(): Promise<boolean>;
+  /** Reminders can be delivered on time (exact alarms allowed). */
+  exactAlarmsAllowed(): Promise<boolean>;
+  openExactAlarmSettings(): Promise<boolean>;
 }
 
 export const TAP_EVENT = 'trezorReminderTap';
@@ -38,4 +41,6 @@ export const nativeReminderPlatform: ReminderPlatform = {
     return () => subscription.remove();
   },
   notificationsEnabled: () => NativeTrezorReminders.areNotificationsEnabled(),
+  exactAlarmsAllowed: () => NativeTrezorReminders.canScheduleExactAlarms(),
+  openExactAlarmSettings: () => NativeTrezorReminders.openExactAlarmSettings(),
 };

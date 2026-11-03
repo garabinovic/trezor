@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import java.util.TimeZone
 
 /**
@@ -12,13 +13,19 @@ import java.util.TimeZone
  * each reminder has a fixed pair of PendingIntents (data URI = reminder id, request codes
  * 0 and 1), so re-arming replaces them and duplicates are impossible.
  *
- * Timing is approximate on purpose (no exact-alarm permission). Each occurrence is armed
- * twice and whichever fires first wins; the other is ignored because it carries the same
- * occurrence time, which is no longer the one armed:
+ * With exact alarms allowed (Android 11 and older always; Android 12+ when the user grants
+ * "Alarms & reminders"), each occurrence is one setExactAndAllowWhileIdle() alarm: on time,
+ * in Doze too.
+ *
+ * Without it, timing is approximate. Each occurrence is armed twice and whichever fires
+ * first wins; the other is ignored because it carries the same occurrence time, which is
+ * no longer the one armed:
  * - setWindow(…, 10 min): within 10 minutes while the device is awake (Android's minimum
  *   window), but deferred while the device is in Doze;
  * - setAndAllowWhileIdle(): fires in Doze too, but Android may deliver it up to 75 % of the
  *   lead time late, capped at one hour.
+ * Some vendors defer inexact alarms of a frozen background app further (Samsung's
+ * Freecess holds them until the app is unfrozen).
  */
 object ReminderScheduler {
 
@@ -32,6 +39,10 @@ object ReminderScheduler {
 
   private fun alarms(context: Context) =
       context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+  /** Whether alarms can be exact: always before Android 12, then the user's choice. */
+  fun exactAllowed(context: Context): Boolean =
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms(context).canScheduleExactAlarms()
 
   fun reminderUri(id: String): Uri = Uri.parse("trezor-reminder:${Uri.encode(id)}")
 
@@ -54,14 +65,20 @@ object ReminderScheduler {
     return PendingIntent.getBroadcast(context, requestCode, intent, flags)
   }
 
+  /** Request codes armed for [id]: [0] when exact, [0, 1] when approximate (tests). */
+  internal fun armedRequestCodes(context: Context, id: String): List<Int> =
+      listOf(REQUEST_WINDOWED, REQUEST_WHILE_IDLE).filter {
+        firePendingIntent(context, id, it, null) != null
+      }
+
   /** True if an alarm is currently armed for [id] (used by tests and diagnostics). */
   fun isArmed(context: Context, id: String): Boolean =
       listOf(REQUEST_WINDOWED, REQUEST_WHILE_IDLE).any {
         firePendingIntent(context, id, it, null) != null
       }
 
-  private fun cancel(context: Context, id: String) {
-    for (code in listOf(REQUEST_WINDOWED, REQUEST_WHILE_IDLE)) {
+  private fun cancel(context: Context, id: String, vararg codes: Int) {
+    for (code in if (codes.isEmpty()) intArrayOf(REQUEST_WINDOWED, REQUEST_WHILE_IDLE) else codes) {
       firePendingIntent(context, id, code, null)?.let {
         alarms(context).cancel(it)
         it.cancel()
@@ -95,6 +112,19 @@ object ReminderScheduler {
       return null
     }
     val manager = alarms(context)
+    if (exactAllowed(context)) {
+      try {
+        manager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            next,
+            firePendingIntent(context, entry.id, REQUEST_WINDOWED, next)!!,
+        )
+        cancel(context, entry.id, REQUEST_WHILE_IDLE)
+        return next
+      } catch (e: SecurityException) {
+        // Access revoked just now: fall back to the approximate pair below.
+      }
+    }
     manager.setWindow(
         AlarmManager.RTC_WAKEUP,
         next,
