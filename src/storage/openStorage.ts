@@ -1,3 +1,7 @@
+import {
+  AttachmentPlatform,
+  nativeAttachmentPlatform,
+} from '../attachments/platform';
 import type { Item } from '../data/types';
 import { openTrezorDatabase } from './database';
 import { ItemRepository } from './ItemRepository';
@@ -20,21 +24,40 @@ export interface OpenedStorage {
   initialExactAlarmRequested: boolean;
 }
 
-/** Opens the encrypted database and loads what the first screen needs. */
-export async function openStorage(): Promise<OpenedStorage> {
+/**
+ * Opens the encrypted database and loads what the first screen needs. Then
+ * removes attachment files no row refers to (left by a crash between writing
+ * a file and saving its item, or after deleting an item); this runs before
+ * the UI can pick new files, and never touches a file the database knows.
+ */
+export async function openStorage(
+  attachments: AttachmentPlatform = nativeAttachmentPlatform,
+): Promise<OpenedStorage> {
   const opened = await openTrezorDatabase();
   // Every read and write on the shared connection goes through one queue.
   const db = serializeDatabase(opened.db);
   const items = new SqliteItemRepository(db);
   const settings = new SqliteSettingsRepository(db);
-  const [initialItems, theme, showDetails, permissionRequested, exactRequested] =
-    await Promise.all([
-      items.listAll(),
-      settings.get('theme.preference'),
-      settings.get('notifications.showDetails'),
-      settings.get('notifications.permissionRequested'),
-      settings.get('notifications.exactAlarmRequested'),
-    ]);
+  const [
+    initialItems,
+    theme,
+    showDetails,
+    permissionRequested,
+    exactRequested,
+  ] = await Promise.all([
+    items.listAll(),
+    settings.get('theme.preference'),
+    settings.get('notifications.showDetails'),
+    settings.get('notifications.permissionRequested'),
+    settings.get('notifications.exactAlarmRequested'),
+  ]);
+  try {
+    await attachments.collectGarbage(await items.listAttachmentIds());
+  } catch (e) {
+    // Orphans only cost space; try again next launch. Code only, never names.
+    const code = (e as { code?: unknown } | null)?.code;
+    console.warn(`[attachments] cleanup failed: ${String(code ?? 'UNKNOWN')}`);
+  }
   return {
     items,
     settings,

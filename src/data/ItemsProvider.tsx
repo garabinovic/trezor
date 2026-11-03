@@ -50,12 +50,18 @@ interface ItemsProviderProps {
   repository: ItemRepository;
   /** Items already loaded from `repository`, so the first render is complete. */
   initialItems: Item[];
+  /**
+   * Deletes encrypted files of attachments that a committed write removed
+   * from `repository`. A failure leaves orphans for the startup cleanup.
+   */
+  deleteAttachmentFiles?: (ids: string[]) => Promise<void>;
   children: ReactNode;
 }
 
 export function ItemsProvider({
   repository,
   initialItems,
+  deleteAttachmentFiles,
   children,
 }: ItemsProviderProps) {
   const [items, setItemsState] = useState<Item[]>(initialItems);
@@ -72,14 +78,27 @@ export function ItemsProvider({
     setItemsState(next);
   }, []);
 
-  /** Applies a change locally, then persists it after any earlier writes. */
+  /**
+   * Applies a change locally, then persists it after any earlier writes.
+   * `write` resolves with the attachment ids it removed from storage.
+   */
   const commit = useCallback(
-    (next: Item[], write: (repo: ItemRepository) => Promise<unknown>) => {
+    (next: Item[], write: (repo: ItemRepository) => Promise<string[]>) => {
       const repo = activeRepo.current;
       setItems(next);
       writeQueue.current = writeQueue.current
         .then(async () => {
-          await write(repo);
+          const removed = await write(repo);
+          // Only the user's storage has files; sample data never does.
+          if (
+            removed.length > 0 &&
+            repo === repository &&
+            deleteAttachmentFiles
+          ) {
+            deleteAttachmentFiles(removed).catch(() =>
+              console.warn('[attachments] could not delete removed files'),
+            );
+          }
         })
         .catch(async () => {
           setWriteError(true);
@@ -94,7 +113,7 @@ export function ItemsProvider({
           }
         });
     },
-    [setItems],
+    [setItems, repository, deleteAttachmentFiles],
   );
 
   const setSampleDataEnabled = useCallback(

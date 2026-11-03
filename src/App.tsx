@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { DevSettings, StyleSheet, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { nativeAttachmentPlatform } from './attachments/platform';
 import { ItemsProvider } from './data';
 import { RootNavigator } from './navigation/RootNavigator';
 import { RemindersProvider } from './reminders/RemindersProvider';
@@ -63,6 +64,7 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
       <ItemsProvider
         repository={storage.items}
         initialItems={storage.initialItems}
+        deleteAttachmentFiles={nativeAttachmentPlatform.deleteFiles}
       >
         <RemindersProvider
           settings={storage.settings}

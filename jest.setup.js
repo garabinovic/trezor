@@ -17,3 +17,9 @@ jest.mock('./src/native/NativeTrezorReminders', () => ({
   __esModule: true,
   default: require('./test-utils/fakeReminders').fakeReminders.module,
 }));
+
+// Encrypted attachment files are native-only; tests use an in-memory fake.
+jest.mock('./src/native/NativeTrezorAttachments', () => ({
+  __esModule: true,
+  default: require('./test-utils/fakeAttachments').fakeAttachments.module,
+}));

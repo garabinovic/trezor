@@ -27,6 +27,13 @@ describe('uuidv7', () => {
     expect(uuidv7(1, random(1))).not.toBe(uuidv7(1, random(2)));
   });
 
+  test('matches the native attachment id generator', () => {
+    // Same vector as AttachmentImportRulesTest.uuidv7MatchesTheJavaScriptLayout.
+    expect(uuidv7(0x019200000000, new Uint8Array(10).fill(0xff))).toBe(
+      '01920000-0000-7fff-bfff-ffffffffffff',
+    );
+  });
+
   test('rejects too little randomness', () => {
     expect(() => uuidv7(1, new Uint8Array(9))).toThrow();
   });

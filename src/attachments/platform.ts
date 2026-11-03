@@ -1,0 +1,160 @@
+import { attachmentRecordProblem } from '../data/attachments';
+import type { Attachment } from '../data/types';
+import NativeTrezorAttachments from '../native/NativeTrezorAttachments';
+
+/** 'photos': Android's Photo Picker; 'files': the system document picker. */
+export type PickSource = 'photos' | 'files';
+
+/** Why one picked file was not added (mirrors AttachmentImporter.Code). */
+export type ImportFailureCode =
+  | 'TOO_LARGE'
+  | 'UNSUPPORTED_TYPE'
+  | 'READ_FAILED'
+  | 'IMPORT_FAILED';
+
+export interface PickResult {
+  /** Encrypted and stored; not yet referenced by any saved item. */
+  imported: Attachment[];
+  failed: { fileName: string; code: ImportFailureCode }[];
+  /** Picked beyond `maxCount`, and not imported. */
+  skipped: number;
+}
+
+export type AttachmentErrorCode =
+  | 'BUSY'
+  | 'NO_ACTIVITY'
+  | 'PICKER_UNAVAILABLE'
+  | 'KEY_UNAVAILABLE'
+  | 'INVALID_ARGUMENT'
+  | 'IO_FAILED'
+  | 'UNKNOWN';
+
+const errorCodes = new Set<string>([
+  'BUSY',
+  'NO_ACTIVITY',
+  'PICKER_UNAVAILABLE',
+  'KEY_UNAVAILABLE',
+  'INVALID_ARGUMENT',
+  'IO_FAILED',
+]);
+
+const failureCodes = new Set<string>([
+  'TOO_LARGE',
+  'UNSUPPORTED_TYPE',
+  'READ_FAILED',
+  'IMPORT_FAILED',
+]);
+
+export class AttachmentError extends Error {
+  readonly code: AttachmentErrorCode;
+
+  constructor(code: AttachmentErrorCode, message: string) {
+    super(message);
+    this.name = 'AttachmentError';
+    this.code = code;
+  }
+}
+
+function toAttachmentError(error: unknown): AttachmentError {
+  if (error instanceof AttachmentError) {
+    return error;
+  }
+  const code = (error as { code?: unknown } | null)?.code;
+  return new AttachmentError(
+    typeof code === 'string' && errorCodes.has(code)
+      ? (code as AttachmentErrorCode)
+      : 'UNKNOWN',
+    error instanceof Error ? error.message : 'Attachment error',
+  );
+}
+
+/**
+ * Reads the native pick result. Files that came back malformed are left out
+ * (their files become orphans, removed at the next startup).
+ */
+export function parsePickResult(json: string, createdAt: string): PickResult {
+  let raw: {
+    imported?: unknown[];
+    failed?: unknown[];
+    skipped?: unknown;
+  };
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    throw new AttachmentError('UNKNOWN', 'Malformed pick result');
+  }
+  const imported: Attachment[] = [];
+  for (const entry of raw.imported ?? []) {
+    const a = { ...(entry as Omit<Attachment, 'createdAt'>), createdAt };
+    if (attachmentRecordProblem(a) === null) {
+      imported.push({
+        id: a.id,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        sizeBytes: a.sizeBytes,
+        sha256: a.sha256,
+        formatVersion: a.formatVersion,
+        createdAt,
+      });
+    }
+  }
+  const failed = (raw.failed ?? []).map(entry => {
+    const f = entry as { fileName?: unknown; code?: unknown };
+    return {
+      fileName: typeof f.fileName === 'string' ? f.fileName : 'File',
+      code: (typeof f.code === 'string' && failureCodes.has(f.code)
+        ? f.code
+        : 'IMPORT_FAILED') as ImportFailureCode,
+    };
+  });
+  const skipped =
+    typeof raw.skipped === 'number' && raw.skipped > 0 ? raw.skipped : 0;
+  return { imported, failed, skipped };
+}
+
+/** Encrypted attachment files, as seen by the app. Faked in tests. */
+export interface AttachmentPlatform {
+  pick(options: {
+    source: PickSource;
+    imagesOnly: boolean;
+    maxCount: number;
+  }): Promise<PickResult>;
+  /**
+   * Deletes files of attachments whose database rows are gone. Call only
+   * after the write that removed them has committed.
+   */
+  deleteFiles(ids: string[]): Promise<void>;
+  /** Startup only: removes files no database row refers to. */
+  collectGarbage(knownIds: string[]): Promise<number>;
+}
+
+export const nativeAttachmentPlatform: AttachmentPlatform = {
+  async pick({ source, imagesOnly, maxCount }) {
+    let json: string;
+    try {
+      json = await NativeTrezorAttachments.pick(source, imagesOnly, maxCount);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+    return parsePickResult(json, new Date().toISOString());
+  },
+
+  async deleteFiles(ids) {
+    if (ids.length === 0) {
+      return;
+    }
+    try {
+      await NativeTrezorAttachments.deleteFiles(ids);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async collectGarbage(knownIds) {
+    try {
+      return await NativeTrezorAttachments.collectGarbage(knownIds);
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+};

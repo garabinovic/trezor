@@ -133,8 +133,10 @@ this app installation can unwrap.
 ```
 Android Keystore  "trezor.master.v1"  AES-256-GCM, non-exportable,
 │                                    StrongBox if available, else TEE/software
-└── wraps → database key (32 random bytes, SecureRandom)
-              → SQLCipher raw key  x'<64 hex>'
+├── wraps → database key (32 random bytes, SecureRandom)
+│             → SQLCipher raw key  x'<64 hex>'
+└── wraps → attachments key (32 random bytes; native only, never in JS)
+              → wraps a random key per attachment file (§14)
 ```
 
 ### 4.2 Master key
@@ -353,8 +355,9 @@ cards       + issuer TEXT NOT NULL DEFAULT ''
   backups don't depend on this device's paths (§8).
 - `SqliteItemRepository.save` replaces an item's attachment rows in the item's
   transaction and returns the ids it no longer has; `delete` returns the
-  deleted item's ids. The caller deletes those files only after the write
-  committed (wired in a later step). An id that belongs to another item fails on
+  deleted item's ids. `ItemsProvider` deletes those files only after the write
+  committed, and only for the user's repository, never sample data
+  **[verified: Jest]**. An id that belongs to another item fails on
   the primary key and rolls the whole save back **[verified: Jest]**.
 - Migration 2 → 3 keeps every existing row exactly (cards gain `issuer = ''`);
   a failure part-way rolls back to the intact v2 database **[verified: Jest]**.
@@ -574,6 +577,8 @@ The design keeps backup independent of this device's Keystore:
 | Jest after Phase 3 (automated) | 228 tests in 14 suites; Phase 1–2 tests kept (fixtures updated to the v2 reminder shape; organizer sort tests updated to next-occurrence order, an intended change) plus the Phase 3 tests in §13.9 | **228/228 pass** |
 | Jest after the exact-alarm change (automated) | 234 tests in 14 suites (228 + 6 exact-alarm flows, §13.9) | **234/234 pass** |
 | Jest after Phase 4 step 2 (schema v3) | 270 tests in 14 suites: + v3 migration (additive, constraints, cascade, rollback) and attachment records for both repositories (order, card sides, removed ids, limits, ownership, rollback, search) | **270/270 pass** |
+| Jest after Phase 4 step 3 (attachments module) | 284 tests in 16 suites: + pick-result parsing and error codes, startup cleanup (only unreferenced files; failure doesn't block startup; nothing when the database can't open), file deletion after committed writes only (not on failure, never for sample data), shared UUIDv7 vector | **284/284 pass** |
+| JVM after Phase 4 step 3 | + `AttachmentImportRulesTest` 6 (type by content, names, UUIDv7, key policy), `AttachmentImporterTest` 5 (real store: round trip, declared type ignored, size limit with and without a declared size, unreadable sources, cleaned names) | **32/32 pass** |
 | JVM after Phase 4 step 1 | `AttachmentFormatTest` 8, `AttachmentStoreTest` 9, `RecurrenceTest` 4 | **21/21 pass** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
@@ -864,3 +869,63 @@ after the process had been killed; affected any such restore since Phase 0).
 | Jest | 6 app-level exact-alarm flows: one-time explanation (Open settings / Not now, persisted across restart), none with notifications off, editor caption and Settings row only when not allowed, pick-up on return to the app | Pass |
 | Emulator (manual) | Upgrade Phase 2 release → Phase 3 with data; delivery generic and detailed; taps from background and killed process; zone change | As expected (see the Phase 3 report) |
 | Physical device (Galaxy A53, Android 16, release build) | Reboot re-arming without opening the app; missed occurrence once after boot; no duplicates from the alarm pair; cold-start tap; daily and interval re-arm; Freecess delay of approximate alarms; update in place keeps data; "Alarms & reminders" grant re-arms as exact; exact alarm on time while frozen | As expected, apart from the Freecess delay that led to exact alarms |
+
+## 14. Attachments (Phase 4)
+
+Encrypted files for card photos and document attachments. The metadata is in
+SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
+
+### 14.1 Files and keys
+
+- `noBackupFilesDir/attachments/<id>.tza`, one immutable file per attachment
+  (`AttachmentStore`). Imports are written to `tmp/<id>.part`, synced, decrypted
+  back and checked, then renamed into place.
+- Format TZA v1 (`AttachmentFormat`): a random 256-bit key per file, wrapped by
+  the KeyVault `attachments` key; content in 64 KiB AES-256-GCM chunks whose
+  nonces carry the chunk index and a last-chunk flag, so truncation,
+  reordering and moving a file to another id are detected.
+- The `attachments` key is created only while no attachment file exists. If it
+  is missing while files exist, nothing is created or deleted, and picking
+  fails with `KEY_UNAVAILABLE` (`AttachmentKeys`) **[verified: JVM]**.
+
+### 14.2 Native module `TrezorAttachments`
+
+- `pick(source, imagesOnly, maxCount)`: `photos` opens the Photo Picker
+  (`PickVisualMedia`, images only); `files` opens the system document picker
+  (`ACTION_OPEN_DOCUMENT` with the supported types). Neither needs a storage
+  permission; the picked URIs are read once and not kept.
+- Each file is imported on one background worker. The type is taken from the
+  first bytes (JPEG, PNG, WebP, HEIC/HEIF, PDF). The name and type the
+  providing app declares do not decide it, so a renamed file can't pass as
+  another type. Over 25 MB is refused while reading, even if the declared size
+  is wrong. Names are reduced to their last segment, without control or
+  bidirectional characters, at most 120 characters, and get an extension if
+  they have none **[verified: JVM]**.
+- The result is JSON metadata only (`{ imported, failed, skipped }`); file
+  bytes never reach JavaScript. Per-file failures: `TOO_LARGE`,
+  `UNSUPPORTED_TYPE`, `READ_FAILED`, `IMPORT_FAILED`. Whole-call rejections:
+  `BUSY`, `NO_ACTIVITY`, `PICKER_UNAVAILABLE`, `KEY_UNAVAILABLE`,
+  `INVALID_ARGUMENT`. JS drops any record that fails `attachmentRecordProblem`
+  **[verified: Jest]**.
+- `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)`.
+- Nothing is logged except error codes.
+
+### 14.3 Crash safety and cleanup
+
+- Files are imported before the row that refers to them is saved, and deleted
+  only after the row is gone. A crash can leave an unreferenced file, never a
+  row without its file.
+- At startup, after the database opened and before any screen can pick a
+  file, `openStorage` passes the database's attachment ids to
+  `collectGarbage`. It removes unreferenced `.tza` files and unfinished
+  imports, and leaves other files alone. A failure is logged as a code and
+  retried next launch. If the database cannot be opened, nothing is removed
+  **[verified: Jest]**.
+- Files picked for a draft that is then discarded stay until the next startup.
+- If the process is killed while a picker is open, nothing is imported.
+
+### 14.4 Not verified yet
+
+- The module itself (pickers, content URIs, Keystore key) has not run on a
+  device. It runs from the UI steps that follow. Instrumentation tests are
+  deferred: running them would uninstall the app from the user's phone.

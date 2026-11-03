@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { createId, ItemsProvider, useItems } from '../src/data/ItemsProvider';
-import type { Item, Note } from '../src/data/types';
+import type { Attachment, DocumentItem, Item, Note } from '../src/data/types';
 import { InMemoryItemRepository } from '../src/storage/ItemRepository';
 
 type Ctx = ReturnType<typeof useItems>;
@@ -16,7 +16,38 @@ const note = (id: string, title = id): Note => ({
   updatedAt: '2026-10-01T00:00:00.000Z',
 });
 
-async function mount(repo: InMemoryItemRepository, initial: Item[] = []) {
+const file = (n: number): Attachment => ({
+  id: `01a1a0dd-991f-783c-9531-3fab9ef479${String(n).padStart(2, '0')}`,
+  fileName: `scan-${n}.pdf`,
+  mimeType: 'application/pdf',
+  sizeBytes: 1000,
+  sha256: 'a'.repeat(64),
+  formatVersion: 1,
+  createdAt: '2026-11-03T00:00:00.000Z',
+});
+
+const doc = (id: string, attachments: Attachment[]): DocumentItem => ({
+  id,
+  type: 'document',
+  title: id,
+  kind: 'receipt',
+  merchant: '',
+  date: null,
+  expiresOn: null,
+  amount: null,
+  currency: '',
+  notes: '',
+  attachments,
+  pinned: false,
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-01T00:00:00.000Z',
+});
+
+async function mount(
+  repo: InMemoryItemRepository,
+  initial: Item[] = [],
+  deleteAttachmentFiles?: (ids: string[]) => Promise<void>,
+) {
   let ctx!: Ctx;
   function Probe() {
     ctx = useItems();
@@ -24,7 +55,11 @@ async function mount(repo: InMemoryItemRepository, initial: Item[] = []) {
   }
   await ReactTestRenderer.act(async () => {
     ReactTestRenderer.create(
-      <ItemsProvider repository={repo} initialItems={initial}>
+      <ItemsProvider
+        repository={repo}
+        initialItems={initial}
+        deleteAttachmentFiles={deleteAttachmentFiles}
+      >
         <Probe />
       </ItemsProvider>,
     );
@@ -83,6 +118,78 @@ describe('ItemsProvider', () => {
     await p.act(c => c.setSampleDataEnabled(false));
     expect(p.get().items.map(i => i.id)).toEqual(['real']);
     expect((await repo.listAll()).map(i => i.id)).toEqual(['real']);
+  });
+
+  describe('attachment files', () => {
+    test('are deleted after the write that removed them commits', async () => {
+      const repo = new InMemoryItemRepository([
+        doc('d', [file(1), file(2), file(3)]),
+        doc('e', [file(4)]),
+      ]);
+      const deleted: string[][] = [];
+      const p = await mount(repo, await repo.listAll(), async ids => {
+        // Deleting files happens only once the rows are gone.
+        expect(await repo.listAttachmentIds()).not.toContain(ids[0]);
+        deleted.push(ids);
+      });
+
+      await p.act(c => c.saveItem(doc('d', [file(2)])));
+      await p.act(c => c.togglePinned('d'));
+      await p.act(c => c.deleteItem('e'));
+
+      expect(deleted).toEqual([[file(1).id, file(3).id], [file(4).id]]);
+      expect(await repo.listAttachmentIds()).toEqual([file(2).id]);
+    });
+
+    test('are kept when the write fails', async () => {
+      const repo = new InMemoryItemRepository([doc('d', [file(1)])]);
+      const remove = jest.fn(async (_ids: string[]) => {});
+      const p = await mount(repo, await repo.listAll(), remove);
+      jest.spyOn(repo, 'delete').mockRejectedValueOnce(new Error('disk full'));
+
+      await p.act(c => c.deleteItem('d'));
+
+      expect(p.get().writeError).toBe(true);
+      expect(remove).not.toHaveBeenCalled();
+      expect(await repo.listAttachmentIds()).toEqual([file(1).id]);
+    });
+
+    test('a failed file deletion is not a write error', async () => {
+      const repo = new InMemoryItemRepository([doc('d', [file(1)])]);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      const p = await mount(repo, await repo.listAll(), async () => {
+        throw new Error('io');
+      });
+
+      await p.act(c => c.deleteItem('d'));
+
+      expect(p.get().writeError).toBe(false);
+      expect(p.get().items).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        '[attachments] could not delete removed files',
+      );
+      warn.mockRestore();
+    });
+
+    test('are never deleted for sample data', async () => {
+      const repo = new InMemoryItemRepository([note('real')]);
+      const remove = jest.fn(async (_ids: string[]) => {});
+      const p = await mount(repo, await repo.listAll(), remove);
+
+      await p.act(c => c.setSampleDataEnabled(true));
+      const sampleWithFiles = p
+        .get()
+        .items.filter(
+          (i): i is DocumentItem =>
+            i.type === 'document' && i.attachments.length > 0,
+        );
+      expect(sampleWithFiles.length).toBeGreaterThan(0);
+      for (const d of sampleWithFiles) {
+        await p.act(c => c.deleteItem(d.id));
+      }
+
+      expect(remove).not.toHaveBeenCalled();
+    });
   });
 
   test('createId returns UUIDv7 values', () => {

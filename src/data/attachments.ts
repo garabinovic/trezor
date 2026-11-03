@@ -51,6 +51,33 @@ export const attachmentIdsOf = (item: Item) =>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
+/** Why one attachment record is invalid, or null if it is valid. */
+export function attachmentRecordProblem(a: Attachment): string | null {
+  if (!UUID.test(a.id)) {
+    return 'Invalid attachment id';
+  }
+  if (!ATTACHMENT_MIME_TYPES.includes(a.mimeType)) {
+    return 'Unsupported attachment type';
+  }
+  if (
+    !Number.isInteger(a.sizeBytes) ||
+    a.sizeBytes < 0 ||
+    a.sizeBytes > MAX_ATTACHMENT_BYTES
+  ) {
+    return 'Attachment too large';
+  }
+  if (!Number.isInteger(a.formatVersion) || a.formatVersion < 1) {
+    return 'Invalid attachment format';
+  }
+  if (!SHA256.test(a.sha256)) {
+    return 'Invalid attachment checksum';
+  }
+  if (typeof a.fileName !== 'string' || !a.fileName.trim()) {
+    return 'Attachment needs a file name';
+  }
+  return null;
+}
+
 /** Why an item's attachments can't be stored, or null if they can. */
 export function attachmentProblem(item: Item): string | null {
   if (
@@ -61,34 +88,16 @@ export function attachmentProblem(item: Item): string | null {
   }
   const seen = new Set<string>();
   for (const { attachment: a, role } of placedAttachments(item)) {
-    if (!UUID.test(a.id)) {
-      return 'Invalid attachment id';
+    const problem = attachmentRecordProblem(a);
+    if (problem) {
+      return problem;
     }
     if (seen.has(a.id)) {
       return 'Duplicate attachment';
     }
     seen.add(a.id);
-    if (!ATTACHMENT_MIME_TYPES.includes(a.mimeType)) {
-      return 'Unsupported attachment type';
-    }
     if (role !== 'document' && !isImage(a)) {
       return 'Card images must be images';
-    }
-    if (
-      !Number.isInteger(a.sizeBytes) ||
-      a.sizeBytes < 0 ||
-      a.sizeBytes > MAX_ATTACHMENT_BYTES
-    ) {
-      return 'Attachment too large';
-    }
-    if (!Number.isInteger(a.formatVersion) || a.formatVersion < 1) {
-      return 'Invalid attachment format';
-    }
-    if (!SHA256.test(a.sha256)) {
-      return 'Invalid attachment checksum';
-    }
-    if (!a.fileName.trim()) {
-      return 'Attachment needs a file name';
     }
   }
   return null;
