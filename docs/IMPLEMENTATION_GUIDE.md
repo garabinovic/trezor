@@ -640,8 +640,10 @@ or a physical device, and no instrumentation test was run.
   whose file is missing. The KDoc's "atomic within one directory" was
   inaccurate (`tmp/` is a subdirectory) and has been corrected. The Android
   `Os.fsync` path is untested without a device.
-- **Open, Low (guard against future drift): dropped pick records leave
-  files.** A
+- **Fixed, Low (guard against future drift): dropped pick records left
+  files.** They are now reported as `IMPORT_FAILED`, and their files are
+  deleted at once (only well-formed ids that no accepted record shares). If
+  the delete fails, the file is left for startup cleanup. Before the fix: A
   pick record that fails `parsePickResult` validation is dropped silently, and
   its `.tza` file stays until startup cleanup. Today Kotlin and TS agree, so
   this can't happen yet.

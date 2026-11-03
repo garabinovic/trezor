@@ -34,6 +34,7 @@ describe('parsePickResult', () => {
       imported: [{ ...native(), createdAt: NOW }],
       failed: [{ fileName: 'movie.mp4', code: 'UNSUPPORTED_TYPE' }],
       skipped: 2,
+      rejectedIds: [],
     });
   });
 
@@ -56,10 +57,49 @@ describe('parsePickResult', () => {
       NOW,
     );
     expect(result.imported).toEqual([{ ...native(), createdAt: NOW }]);
+    // Every refused record is reported, then the native failures.
     expect(result.failed).toEqual([
+      ...[
+        'scan.pdf',
+        'scan.pdf',
+        'scan.pdf',
+        'scan.pdf',
+        'File',
+        'scan.pdf',
+        'File',
+      ].map(fileName => ({ fileName, code: 'IMPORT_FAILED' })),
       { fileName: 'File', code: 'IMPORT_FAILED' },
     ]);
+    // All share the accepted record's id or have none: nothing may be deleted.
+    expect(result.rejectedIds).toEqual([]);
     expect(result.skipped).toBe(0);
+  });
+
+  test('only well-formed, unshared ids of refused records are returned for deletion', () => {
+    const other = '01a1a0dd-991f-783c-9531-3fab9ef47902';
+    const twice = '01a1a0dd-991f-783c-9531-3fab9ef47903';
+    const result = parsePickResult(
+      JSON.stringify({
+        imported: [
+          native(),
+          native({ id: other, mimeType: 'text/html', fileName: 'page.html' }),
+          native({ id: '../../files/attachments/x', mimeType: 'text/html' }),
+          native({ id: 'ABC', fileName: 'upper.pdf', sha256: 'no' }),
+          native({ id: twice, sizeBytes: -1 }),
+          native({ id: twice, fileName: 'again.pdf' }),
+        ],
+      }),
+      NOW,
+    );
+    expect(result.imported.map(a => a.id)).toEqual([ID, twice]);
+    // `twice` is also an accepted record: never deleted.
+    expect(result.rejectedIds).toEqual([other]);
+    expect(result.failed.map(f => f.fileName)).toEqual([
+      'page.html',
+      'scan.pdf',
+      'upper.pdf',
+      'scan.pdf',
+    ]);
   });
 
   test('rejects output that is not JSON', () => {
@@ -68,6 +108,59 @@ describe('parsePickResult', () => {
 });
 
 describe('nativeAttachmentPlatform', () => {
+  test('pick deletes refused files at once and reports them; valid ones stay', async () => {
+    const bad = '01a1a0dd-991f-783c-9531-3fab9ef47909';
+    const saved = '01a1a0dd-991f-783c-9531-3fab9ef47999';
+    fakeAttachments.files.add(saved); // a stored attachment of another item
+    fakeAttachments.nextPick = {
+      imported: [
+        native(),
+        native({ id: bad, mimeType: 'text/html', fileName: 'page.html' }),
+        native({ id: '../../files/x', mimeType: 'text/html' }),
+      ],
+    };
+    const result = await nativeAttachmentPlatform.pick({
+      source: 'files',
+      imagesOnly: false,
+      maxCount: 10,
+    });
+    expect(result.imported.map(a => a.id)).toEqual([ID]);
+    expect(result.failed).toEqual([
+      { fileName: 'page.html', code: 'IMPORT_FAILED' },
+      { fileName: 'scan.pdf', code: 'IMPORT_FAILED' },
+    ]);
+    expect(result).not.toHaveProperty('rejectedIds');
+    expect(fakeAttachments.deleted).toEqual([bad]);
+    expect(fakeAttachments.files.has(ID)).toBe(true);
+    expect(fakeAttachments.files.has(saved)).toBe(true);
+  });
+
+  test('a failed cleanup of refused files still reports them', async () => {
+    const bad = '01a1a0dd-991f-783c-9531-3fab9ef47909';
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    fakeAttachments.failNextDelete = true;
+    fakeAttachments.nextPick = {
+      imported: [
+        native({ id: bad, mimeType: 'text/html', fileName: 'p.html' }),
+      ],
+    };
+    const result = await nativeAttachmentPlatform.pick({
+      source: 'files',
+      imagesOnly: false,
+      maxCount: 10,
+    });
+    expect(result.failed).toEqual([
+      { fileName: 'p.html', code: 'IMPORT_FAILED' },
+    ]);
+    expect(result.imported).toEqual([]);
+    // Left for the startup cleanup.
+    expect(fakeAttachments.files.has(bad)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      '[attachments] could not delete rejected import files',
+    );
+    warn.mockRestore();
+  });
+
   test('pick passes the request through and stamps createdAt', async () => {
     fakeAttachments.nextPick = { imported: [native()] };
     const result = await nativeAttachmentPlatform.pick({

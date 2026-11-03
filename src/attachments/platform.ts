@@ -1,4 +1,4 @@
-import { attachmentRecordProblem } from '../data/attachments';
+import { attachmentRecordProblem, isAttachmentId } from '../data/attachments';
 import type { Attachment } from '../data/types';
 import NativeTrezorAttachments from '../native/NativeTrezorAttachments';
 
@@ -95,11 +95,23 @@ export function toAttachmentError(error: unknown): AttachmentError {
   );
 }
 
+/** A parsed pick, plus the files of records JS refused (to delete at once). */
+export interface ParsedPick extends PickResult {
+  rejectedIds: string[];
+}
+
 /**
- * Reads the native pick result. Files that came back malformed are left out
- * (their files become orphans, removed at the next startup).
+ * Reads the native pick result. A record that fails `attachmentRecordProblem`
+ * is not added: it is reported as that file's `IMPORT_FAILED`, and its id is
+ * returned in `rejectedIds` so its encrypted file can be deleted.
+ *
+ * Only ids that can safely be deleted are returned: well-formed attachment ids
+ * (so nothing else can be named), not also used by an accepted record or
+ * another record of this result. Native import never overwrites an existing
+ * file, so such an id names a file this pick created, never a saved
+ * attachment or another draft's file.
  */
-export function parsePickResult(json: string, createdAt: string): PickResult {
+export function parsePickResult(json: string, createdAt: string): ParsedPick {
   let raw: {
     imported?: unknown[];
     failed?: unknown[];
@@ -111,9 +123,15 @@ export function parsePickResult(json: string, createdAt: string): PickResult {
     throw new AttachmentError('UNKNOWN', 'Malformed pick result');
   }
   const imported: Attachment[] = [];
+  const rejected: { id: unknown; fileName: string }[] = [];
+  const seen = new Map<string, number>();
   for (const entry of raw.imported ?? []) {
     const a = { ...(entry as Omit<Attachment, 'createdAt'>), createdAt };
-    if (attachmentRecordProblem(a) === null) {
+    if (isAttachmentId(a.id)) {
+      seen.set(a.id, (seen.get(a.id) ?? 0) + 1);
+    }
+    const duplicate = imported.some(i => i.id === a.id);
+    if (!duplicate && attachmentRecordProblem(a) === null) {
       imported.push({
         id: a.id,
         fileName: a.fileName,
@@ -123,20 +141,40 @@ export function parsePickResult(json: string, createdAt: string): PickResult {
         formatVersion: a.formatVersion,
         createdAt,
       });
+    } else {
+      rejected.push({ id: a.id, fileName: displayName(a.fileName) });
     }
   }
-  const failed = (raw.failed ?? []).map(entry => {
-    const f = entry as { fileName?: unknown; code?: unknown };
-    return {
-      fileName: typeof f.fileName === 'string' ? f.fileName : 'File',
-      code: (typeof f.code === 'string' && failureCodes.has(f.code)
-        ? f.code
-        : 'IMPORT_FAILED') as ImportFailureCode,
-    };
-  });
+  const accepted = new Set(imported.map(a => a.id));
+  const rejectedIds = rejected
+    .map(r => r.id)
+    .filter(
+      (id): id is string =>
+        isAttachmentId(id) && !accepted.has(id) && seen.get(id) === 1,
+    );
+  const failed = [
+    ...rejected.map(r => ({
+      fileName: r.fileName,
+      code: 'IMPORT_FAILED' as ImportFailureCode,
+    })),
+    ...(raw.failed ?? []).map(entry => {
+      const f = entry as { fileName?: unknown; code?: unknown };
+      return {
+        fileName: displayName(f.fileName),
+        code: (typeof f.code === 'string' && failureCodes.has(f.code)
+          ? f.code
+          : 'IMPORT_FAILED') as ImportFailureCode,
+      };
+    }),
+  ];
   const skipped =
     typeof raw.skipped === 'number' && raw.skipped > 0 ? raw.skipped : 0;
-  return { imported, failed, skipped };
+  return { imported, failed, skipped, rejectedIds };
+}
+
+/** A name to show in a message; never used to find a file. */
+function displayName(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : 'File';
 }
 
 export interface OpenPdf {
@@ -196,7 +234,18 @@ export const nativeAttachmentPlatform: AttachmentPlatform = {
     } catch (e) {
       throw toAttachmentError(e);
     }
-    return parsePickResult(json, new Date().toISOString());
+    const { rejectedIds, ...result } = parsePickResult(
+      json,
+      new Date().toISOString(),
+    );
+    if (rejectedIds.length > 0) {
+      // A failed delete leaves them for the startup cleanup; the user has
+      // already been told those files weren't added.
+      await NativeTrezorAttachments.deleteFiles(rejectedIds).catch(() =>
+        console.warn('[attachments] could not delete rejected import files'),
+      );
+    }
+    return result;
   },
 
   async deleteFiles(ids) {

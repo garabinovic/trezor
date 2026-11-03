@@ -774,7 +774,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
 | Long non-ASCII export names | **Fixed (`6786ceb`):** Share and Save a copy names were limited to 120 UTF-16 characters, so a long CJK name exceeded the 255-byte file-name limit and Share always failed. Now at most 200 UTF-8 bytes (§14.9) |
-| Second Phase 4 review, open (Low) | (1) **Fixed:** the attachments directory is now `fsync`ed after the import rename, and an import whose sync fails is undone (§14.3). Not fixed: (2) records `parsePickResult` rejects are dropped silently and their `.tza` file stays until startup cleanup (§14.2); (3) after `invalidate()`, most `TrezorAttachmentsModule` calls would throw `RejectedExecutionException` and their promises never settle. Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
+| Second Phase 4 review, open (Low) | (1) **Fixed:** the attachments directory is now `fsync`ed after the import rename, and an import whose sync fails is undone (§14.3). (2) **Fixed:** records `parsePickResult` rejects are reported as `IMPORT_FAILED` and their files deleted at once (§14.2). Not fixed: (3) after `invalidate()`, most `TrezorAttachmentsModule` calls would throw `RejectedExecutionException` and their promises never settle. Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
 | Phase 4 review findings | Fixed in the review-fix commit (`06004a0`): a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
 | JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
@@ -1023,13 +1023,18 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   `UNSUPPORTED_TYPE`, `READ_FAILED`, `IMPORT_FAILED`. Whole-call rejections:
   `BUSY`, `NO_ACTIVITY`, `PICKER_UNAVAILABLE`, `KEY_UNAVAILABLE`,
   `INVALID_ARGUMENT`.
-- **Records JS rejects:** `parsePickResult` drops any record that fails
-  `attachmentRecordProblem` **[verified: Jest]**. A dropped record is not
-  added to `failed`, so the user isn't told, and its `.tza` file (already
-  imported by native code) isn't deleted. That file is unreferenced and stays
-  until the next startup cleanup. Kotlin and TS apply the same limits today,
-  so a valid import is never dropped; this is a guard against future drift
-  (§12).
+- **Records JS rejects:** a record that fails `attachmentRecordProblem`, or
+  repeats an accepted id, is not added to the draft. `parsePickResult`
+  reports it as that file's `IMPORT_FAILED` (shown like any other failed
+  file), and `pick` deletes its encrypted file at once **[verified: Jest]**.
+  - Only a well-formed attachment id that no accepted or other record of the
+    same result uses is deleted. A malformed value can't name another file.
+  - Native import never overwrites an existing file, so such an id is a file
+    this pick created, never a saved attachment or another draft's file.
+  - If the delete fails, a code is logged and the file is left for the
+    startup cleanup. The user has already been told the file wasn't added.
+  - Kotlin and TS apply the same limits today, so a valid import is never
+    refused; this guards against future drift.
 - `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)` (§14.3), plus
   `openView`/`closeView`, `openPdf`/`renderPdfPage`/`closePdf`,
   `purgeInactiveViews` (§14.4, §14.8), `saveCopy`, `share` and

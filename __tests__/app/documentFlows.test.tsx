@@ -400,6 +400,28 @@ describe('document editor', () => {
     expect(await storedDoc('doc-r')).toEqual(receipt);
   });
 
+  test('a refused record is reported and deleted; valid files and saved ones stay', async () => {
+    await launch();
+    await editDoc('Washing machine');
+    const good = picked('invoice.pdf');
+    const bad = { ...picked('page.html'), mimeType: 'text/html' as never };
+    await pick('Add files', { imported: [good, bad] });
+
+    expect(hasText(app, 'invoice.pdf')).toBe(true);
+    expect(hasText(app, 'page.html')).toBe(false);
+    expect(hasText(app, '“page.html” couldn’t be saved. Try again.')).toBe(
+      true,
+    );
+    expect(fakeAttachments.deleted).toEqual([bad.id]);
+
+    await pressText(app, 'Save');
+    await settle();
+    expect(await storedIds('doc-w')).toEqual([manual.id, photo.id, good.id]);
+    expect(fakeAttachments.deleted).toEqual([bad.id]);
+    expect(fakeAttachments.files.has(manual.id)).toBe(true);
+    expect(fakeAttachments.files.has(photo.id)).toBe(true);
+  });
+
   test('at most 10 files: the picker is limited and extra picks are reported', async () => {
     const pages = Array.from({ length: 7 }, (_, i) =>
       stamped(picked(`page-${i + 1}.pdf`)),

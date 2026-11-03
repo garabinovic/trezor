@@ -49,6 +49,10 @@ export const attachmentIdsOf = (item: Item) =>
   placedAttachments(item).map(p => p.attachment.id);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** An attachment id: a lowercase UUID, which is also all a file name can be. */
+export const isAttachmentId = (id: unknown): id is string =>
+  typeof id === 'string' && UUID.test(id);
 const SHA256 = /^[0-9a-f]{64}$/;
 
 /** Why one attachment record is invalid, or null if it is valid. */
