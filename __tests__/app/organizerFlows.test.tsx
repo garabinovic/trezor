@@ -231,6 +231,9 @@ describe('category tabs', () => {
     await openTab(app, 'Cards');
     expect(hasText(app, 'Book Corner')).toBe(true);
 
+    // The tab is labelled "Docs" (fits a fifth of the screen); screen readers
+    // and the screen title keep "Documents".
+    expect(hasText(app, 'Docs')).toBe(true);
     await openTab(app, 'Documents');
     expect(hasText(app, 'Fridge')).toBe(true);
     expect(hasText(app, 'Passport')).toBe(true);
