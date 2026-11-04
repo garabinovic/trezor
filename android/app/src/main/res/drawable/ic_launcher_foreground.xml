@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon foreground ("Okvir"): two interlocking corner forms around an empty
+     centre. Drawn on the 108 dp adaptive canvas; everything lies inside the 66 dp safe
+     zone (farthest corner 32.5 dp from the centre). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#1C1B19"
+        android:pathData="M31,31 H63 V43 H43 V63 H31 Z" />
+    <path
+        android:fillColor="#2E6A5C"
+        android:pathData="M77,77 H45 V65 H65 V45 H77 Z" />
+</vector>

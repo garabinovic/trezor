@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer (Android 13+): the same two forms in one colour; the launcher
+     replaces the colour with the user's theme tint. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M31,31 H63 V43 H43 V63 H31 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M77,77 H45 V65 H65 V45 H77 Z" />
+</vector>
