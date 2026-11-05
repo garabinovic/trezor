@@ -18,8 +18,10 @@ import { Item, ItemOfType, ItemType } from './types';
 
 /**
  * The UI's single source of items. Updates are applied to state immediately
- * and written to the repository in order; if a write fails, state is reloaded
- * from storage and `writeError` is set so the UI can tell the user.
+ * and written to the repository in order; if a write fails, `writeError` is
+ * set so the UI can tell the user, and state is reloaded from storage once
+ * every write queued until then has settled (an earlier reload would miss
+ * them, and a later save could write that stale copy back).
  */
 interface ItemsContextValue {
   items: Item[];
@@ -44,6 +46,29 @@ interface ItemsContextValue {
 }
 
 const ItemsContext = createContext<ItemsContextValue | null>(null);
+
+/**
+ * The item write queue of one repository. A second React root (a recreated
+ * Activity while the JS runtime lives on) gets the same repository from
+ * openStorage, so it shares this queue: its writes and reads stay ordered
+ * after those the first root still has queued.
+ */
+interface WriteQueue {
+  tail: Promise<void>;
+  /** Item writes queued and not settled yet, from any provider. */
+  pending: number;
+}
+
+const queues = new WeakMap<ItemRepository, WriteQueue>();
+
+function queueFor(repository: ItemRepository): WriteQueue {
+  let queue = queues.get(repository);
+  if (!queue) {
+    queue = { tail: Promise.resolve(), pending: 0 };
+    queues.set(repository, queue);
+  }
+  return queue;
+}
 
 interface ItemsProviderProps {
   /** Persistent storage for the user's items. */
@@ -71,12 +96,50 @@ export function ItemsProvider({
   // Refs give callbacks the latest values without re-creating them.
   const itemsRef = useRef(items);
   const activeRepo = useRef<ItemRepository>(repository);
-  const writeQueue = useRef<Promise<void>>(Promise.resolve());
+  const queue = useMemo(() => queueFor(repository), [repository]);
+  /** Bumped by every local change: a read older than that must not replace it. */
+  const generation = useRef(0);
+  /** State may differ from storage; reload once no item write is pending. */
+  const stale = useRef(false);
 
   const setItems = useCallback((next: Item[]) => {
     itemsRef.current = next;
     setItemsState(next);
   }, []);
+
+  /**
+   * Runs as a step of the queue, never awaits it. Reloads only when nothing
+   * else is pending (a later write's step reloads instead) and applies the
+   * result only if no local change was made meanwhile; that change's own
+   * step reloads again. A failed reload keeps the current state.
+   */
+  const reloadIfDrained = useCallback(
+    async (repo: ItemRepository) => {
+      if (!stale.current || queue.pending > 0) {
+        return;
+      }
+      const seen = generation.current;
+      try {
+        const stored = await repo.listAll();
+        if (activeRepo.current === repo && generation.current === seen) {
+          stale.current = false;
+          setItems(stored);
+        }
+      } catch {
+        // Keep current state; the error dialog is already showing.
+      }
+    },
+    [queue, setItems],
+  );
+
+  // Writes of another root were still queued when this root's items were
+  // loaded: show what is stored once they have settled.
+  useEffect(() => {
+    if (queue.pending > 0) {
+      stale.current = true;
+      queue.tail = queue.tail.then(() => reloadIfDrained(repository));
+    }
+  }, [queue, repository, reloadIfDrained]);
 
   /**
    * Applies a change locally, then persists it after any earlier writes.
@@ -86,7 +149,9 @@ export function ItemsProvider({
     (next: Item[], write: (repo: ItemRepository) => Promise<string[]>) => {
       const repo = activeRepo.current;
       setItems(next);
-      writeQueue.current = writeQueue.current
+      generation.current += 1;
+      queue.pending += 1;
+      queue.tail = queue.tail
         .then(async () => {
           const removed = await write(repo);
           // Only the user's storage has files; sample data never does.
@@ -100,20 +165,17 @@ export function ItemsProvider({
             );
           }
         })
-        .catch(async () => {
+        .catch(() => {
           setWriteError(true);
-          // Fall back to what is actually stored.
-          try {
-            const stored = await repo.listAll();
-            if (activeRepo.current === repo) {
-              setItems(stored);
-            }
-          } catch {
-            // Keep current state; the error dialog is already showing.
-          }
+          // Fall back to what is actually stored, after the writes behind it.
+          stale.current = true;
+        })
+        .then(() => {
+          queue.pending -= 1;
+          return reloadIfDrained(repo);
         });
     },
-    [setItems, repository, deleteAttachmentFiles],
+    [setItems, repository, deleteAttachmentFiles, queue, reloadIfDrained],
   );
 
   const setSampleDataEnabled = useCallback(
@@ -131,7 +193,7 @@ export function ItemsProvider({
         ? new InMemoryItemRepository(createSampleItems())
         : repository;
       activeRepo.current = repo;
-      writeQueue.current = writeQueue.current
+      queue.tail = queue.tail
         .then(() => repo.listAll())
         .then(loaded => {
           if (activeRepo.current === repo) {
@@ -140,7 +202,7 @@ export function ItemsProvider({
         })
         .catch(() => setWriteError(true));
     },
-    [repository, setItems],
+    [repository, setItems, queue],
   );
 
   const saveItem = useCallback(
@@ -206,14 +268,14 @@ export function ItemsProvider({
   /** Runs after every queued write, on the real repository. */
   const onStored = useCallback(
     <R,>(op: (repo: ItemRepository) => Promise<R>): Promise<R> => {
-      const result = writeQueue.current.then(() => op(repository));
-      writeQueue.current = result.then(
+      const result = queue.tail.then(() => op(repository));
+      queue.tail = result.then(
         () => undefined,
         () => undefined,
       );
       return result;
     },
-    [repository],
+    [repository, queue],
   );
 
   const readStored = useCallback(
@@ -225,6 +287,7 @@ export function ItemsProvider({
     async (ids: string[]) => {
       const wanted = new Set(ids);
       const updatedAt = new Date().toISOString();
+      const seen = generation.current;
       await onStored(async repo => {
         for (const item of await repo.listAll()) {
           if (
@@ -235,12 +298,20 @@ export function ItemsProvider({
             await repo.save({ ...item, completed: true, updatedAt });
           }
         }
+        // Read and applied inside the queue. A local change made since this
+        // was queued has its write behind it, so this read can't include it:
+        // that write's step reloads instead.
+        const stored = await repo.listAll();
+        if (activeRepo.current === repository) {
+          if (generation.current === seen) {
+            setItems(stored);
+          } else {
+            stale.current = true;
+          }
+        }
       });
-      if (activeRepo.current === repository) {
-        setItems(await readStored());
-      }
     },
-    [onStored, readStored, repository, setItems],
+    [onStored, repository, setItems],
   );
 
   const value = useMemo(

@@ -582,6 +582,18 @@ Follows SQLite's documented procedure for schema changes:
     uninstall.
 - **Writes:** `ItemsProvider` applies a change to state immediately, then
   queues the repository write (writes run strictly in order).
+  - **After a failed write** (audit V3) state is reloaded from storage only
+    once every write queued behind it has settled, and the result is applied
+    only if no local change was made while it read; otherwise that change's
+    own step reloads. An earlier reload missed those writes, so a later save
+    could write the stale copy back (a deleted document returning without its
+    files). A failed reload keeps the state shown. Reminder completion (V4)
+    reads and applies its result inside the queue under the same rule
+    **[verified: Jest, gated repository]**.
+  - **One queue per repository**, shared by every provider: a second React
+    root orders its writes after those the first still has queued, and
+    reloads once they settle if any were pending when it mounted
+    **[verified: Jest]**.
   - Below that, **every statement and transaction on the shared connection
     goes through one FIFO** (`serializeDatabase`, wrapped in `openStorage`).
   - op-sqlite only serializes `transaction()` calls with each other. A plain
