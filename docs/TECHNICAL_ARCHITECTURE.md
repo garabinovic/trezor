@@ -582,6 +582,13 @@ Follows SQLite's documented procedure for schema changes:
     uninstall.
 - **Writes:** `ItemsProvider` applies a change to state immediately, then
   queues the repository write (writes run strictly in order).
+  - **The editor leaves only once its item is stored** (audit V5).
+    `saveItem` resolves with true when the write committed and false when it
+    failed (never rejects). While it runs, Save is disabled, a second press is
+    ignored and leaving is blocked. On failure the editor stays open with
+    every value, *Couldn’t save your change* is shown, and the files added in
+    this session belong to the editor again (Discard deletes them; a retry
+    saves them) **[verified: Jest, app-level flows]**.
   - **After a failed write** (audit V3) state is reloaded from storage only
     once every write queued behind it has settled, and the result is applied
     only if no local change was made while it read; otherwise that change's
@@ -1169,6 +1176,16 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   it unmounts or the attachment changes. `collectGarbage` at startup deletes
   any left over. `closeView` refuses paths outside the view directory
   **[verified: JVM]**.
+- **Without the database too** (audit L2): the module's first task on its
+  worker, queued when the module is created, removes view copies, PDF copies
+  and rendered pages an earlier process left (`AttachmentCleanup.atModuleStart`,
+  once per process). JS creates the module when its bundle loads, before the
+  database opens, so this runs even when opening fails (a missing key, a
+  damaged file), and before any view of this process exists. It deletes only
+  files in the view directory that no screen holds (`purgeInactive`, so a copy
+  being written is kept), never `.tza` files or share copies; a directory that
+  can't be listed removes nothing **[verified: JVM; the module glue and the
+  creation time are not verified on a device]**.
 - Random names mean the image memory cache never reuses a copy. Fresco keeps
   decoded bitmaps in memory only, and its disk cache is for network images,
   not local files. This is from Fresco's design and has not been checked on a

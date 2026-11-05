@@ -79,6 +79,10 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
 
   init {
     reactContext.addActivityEventListener(this)
+    // The first task on WORKER, before any call from JS: decrypted views of an earlier
+    // process go even if the database never opens. Nothing to settle; failures are
+    // ignored (the startup and foreground cleanups try again).
+    tasks.submit(WORKER, { _, _ -> }) { cleanup.atModuleStart() }
   }
 
   override fun getName(): String = NAME

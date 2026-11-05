@@ -29,10 +29,13 @@ export interface AttachmentSession {
    */
   release(ids: string[]): void;
   /**
-   * Called when saving: the draft keeps `keptIds`. Session files not kept are
-   * deleted; the kept ones now belong to the saved item.
+   * Called when saving starts: the draft keeps `keptIds`. Session files not
+   * kept are deleted; the kept ones now belong to the item being saved, so
+   * closing the editor meanwhile doesn't delete them. Returns `reopen`, for a
+   * save that failed: the kept session files belong to the session again
+   * (deleted at once if the editor has closed).
    */
-  commit(keptIds: string[]): void;
+  commit(keptIds: string[]): () => void;
 }
 
 /**
@@ -99,8 +102,18 @@ export function useAttachmentSession(
       commit(keptIds) {
         committed.current = true;
         const kept = new Set(keptIds);
-        remove([...owned.current].filter(id => !kept.has(id)));
+        const mine = [...owned.current];
+        remove(mine.filter(id => !kept.has(id)));
         owned.current.clear();
+        const keptMine = mine.filter(id => kept.has(id));
+        return () => {
+          committed.current = false;
+          if (open.current) {
+            keptMine.forEach(id => owned.current.add(id));
+          } else {
+            remove(keptMine);
+          }
+        };
       },
     }),
     [platform, remove, running],

@@ -5,10 +5,12 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -31,8 +33,20 @@ class AttachmentCleanupTest {
   private fun stored(n: Int): String =
       id(n).also { store.import(it, ByteArrayInputStream(ByteArray(1_000) { n.toByte() }), 1L shl 20) }
 
-  /** A cleanup as one process sees it; a new [AtomicBoolean] is a new process. */
-  private fun process(done: AtomicBoolean = AtomicBoolean(false)) = AttachmentCleanup(store, views, shares, done)
+  /** A cleanup as one process sees it; new [AtomicBoolean]s are a new process. */
+  private fun process(
+      done: AtomicBoolean = AtomicBoolean(false),
+      viewsDone: AtomicBoolean = AtomicBoolean(false),
+  ) = AttachmentCleanup(store, views, shares, done, viewsDone)
+
+  private val viewDir get() = File(folder.root, "cache/attachments/view")
+
+  /** A decrypted copy an earlier (killed) process left behind. */
+  private fun leftoverView(name: String = "ab".repeat(16)) =
+      File(viewDir, "$name.view").also {
+        it.parentFile!!.mkdirs()
+        it.writeText("plaintext")
+      }
 
   @Before
   fun setUp() {
@@ -227,5 +241,116 @@ class AttachmentCleanupTest {
     process().beforeDatabaseCreated()
     // AttachmentKeys must never create a new key while these files exist.
     assertTrue(store.hasAnyFile())
+  }
+
+  // --- L2: decrypted views go at module start, without the database ----------------------
+
+  @Test
+  fun l2_viewsOfAnEarlierProcessAreRemovedAtModuleStart() {
+    val whole = leftoverView()
+    val page = leftoverView("cd".repeat(16))
+    val part = File(viewDir, "${"ef".repeat(16)}.view.part").also { it.writeText("partial") }
+
+    assertEquals(3, process().atModuleStart())
+
+    assertTrue(!whole.exists() && !page.exists() && !part.exists())
+  }
+
+  @Test
+  fun l2_itNeedsNoDatabaseNorKey() {
+    // The database can't be opened and the key is unavailable: nothing here asks for them.
+    val tza = stored(1)
+    val leftover = leftoverView()
+    val noKey = AttachmentStore(root) { throw IllegalStateException("no key") }
+    val cleanup =
+        AttachmentCleanup(noKey, AttachmentViews(noKey, viewDir), shares, AtomicBoolean(false), AtomicBoolean(false))
+
+    assertEquals(1, cleanup.atModuleStart())
+
+    assertTrue(!leftover.exists())
+    assertEquals(setOf(tza), store.storedIds())
+  }
+
+  @Test
+  fun l2_encryptedFilesSharesAndOpenViewsAreKept() {
+    val a = stored(1)
+    val sha = store.verify(a).sha256
+    val active = shares.prepare(a, 1_000, sha, "active.pdf", MediaTypes.PDF)
+    val recent = shares.prepare(a, 1_000, sha, "recent.pdf", MediaTypes.PDF).also(shares::release)
+    val open = views.open(a, 1_000, sha)
+    val page = views.newFile().also { it.writeBytes(byteArrayOf(1)) }
+    val leftover = leftoverView()
+    val tzaBytes = File(root, "$a${AttachmentStore.SUFFIX}").readBytes()
+
+    assertEquals(1, process().atModuleStart())
+
+    assertTrue(!leftover.exists())
+    assertTrue("files this process handed out stay", open.exists() && page.exists())
+    assertTrue(active.exists() && recent.exists())
+    assertArrayEquals(tzaBytes, File(root, "$a${AttachmentStore.SUFFIX}").readBytes())
+  }
+
+  @Test
+  fun l2_aViewBeingCreatedAtTheSameTimeIsNotLost() {
+    val a = stored(1)
+    val sha = store.verify(a).sha256
+    leftoverView()
+    // The open is held while it decrypts into its .part file.
+    val decrypting = CountDownLatch(1)
+    val finish = CountDownLatch(1)
+    val slowStore =
+        AttachmentStore(root) {
+          decrypting.countDown()
+          finish.await()
+          key.copyOf()
+        }
+    val shared = AttachmentViews(slowStore, viewDir)
+    var opened: File? = null
+    val viewer = Thread { opened = shared.open(a, 1_000, sha) }
+    viewer.start()
+    assertTrue(decrypting.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    val part = viewDir.listFiles()!!.single { it.name.endsWith(".part") }
+
+    val cleanup = AttachmentCleanup(slowStore, shared, shares, AtomicBoolean(false), AtomicBoolean(false))
+    assertEquals(1, cleanup.atModuleStart())
+    assertTrue("the open's partial copy stays", part.exists())
+
+    finish.countDown()
+    viewer.join(5_000)
+    assertTrue(opened!!.exists())
+    assertEquals(1_000L, opened!!.length())
+  }
+
+  @Test
+  fun l2_aCacheDirectoryThatCantBeListedRemovesNothing() {
+    assumeFalse("root can list anything", System.getProperty("user.name") == "root")
+    val a = stored(1)
+    val leftover = leftoverView()
+    val share = shares.prepare(a, 1_000, store.verify(a).sha256, "s.pdf", MediaTypes.PDF)
+    assertTrue(viewDir.setReadable(false))
+    try {
+      assertEquals(0, process().atModuleStart())
+    } finally {
+      viewDir.setReadable(true)
+    }
+    assertTrue(leftover.exists() && share.exists())
+    assertEquals(setOf(a), store.storedIds())
+
+    // Not a directory at all: nothing to list, nothing removed, no exception.
+    viewDir.deleteRecursively()
+    viewDir.writeText("not a directory")
+    assertEquals(0, process().atModuleStart())
+    assertTrue(viewDir.isFile)
+  }
+
+  @Test
+  fun l2_itRunsOncePerProcess() {
+    val viewsDone = AtomicBoolean(false)
+    leftoverView()
+    assertEquals(1, process(viewsDone = viewsDone).atModuleStart())
+    val later = leftoverView("cd".repeat(16))
+    // A second module instance (a React reload) in the same process removes nothing.
+    assertNull(process(viewsDone = viewsDone).atModuleStart())
+    assertTrue(later.exists())
   }
 }

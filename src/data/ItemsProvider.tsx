@@ -28,7 +28,12 @@ interface ItemsContextValue {
   /** Development builds only: show in-memory sample data instead of saved items. */
   sampleDataEnabled: boolean;
   setSampleDataEnabled: (enabled: boolean) => void;
-  saveItem: (item: Item) => void;
+  /**
+   * Saves an item. Resolves with true once it is stored, or false if the
+   * write failed (`writeError` is raised and state reloaded, as for any failed
+   * write). Never rejects.
+   */
+  saveItem: (item: Item) => Promise<boolean>;
   deleteItem: (id: string) => void;
   togglePinned: (id: string) => void;
   setReminderCompleted: (id: string, completed: boolean) => void;
@@ -143,11 +148,17 @@ export function ItemsProvider({
 
   /**
    * Applies a change locally, then persists it after any earlier writes.
-   * `write` resolves with the attachment ids it removed from storage.
+   * `write` resolves with the attachment ids it removed from storage. Resolves
+   * with true once stored, false if the write failed; never rejects.
    */
   const commit = useCallback(
-    (next: Item[], write: (repo: ItemRepository) => Promise<string[]>) => {
+    (
+      next: Item[],
+      write: (repo: ItemRepository) => Promise<string[]>,
+    ): Promise<boolean> => {
       const repo = activeRepo.current;
+      let outcome!: (stored: boolean) => void;
+      const settled = new Promise<boolean>(resolve => (outcome = resolve));
       setItems(next);
       generation.current += 1;
       queue.pending += 1;
@@ -164,16 +175,19 @@ export function ItemsProvider({
               console.warn('[attachments] could not delete removed files'),
             );
           }
+          outcome(true);
         })
         .catch(() => {
           setWriteError(true);
           // Fall back to what is actually stored, after the writes behind it.
           stale.current = true;
+          outcome(false);
         })
         .then(() => {
           queue.pending -= 1;
           return reloadIfDrained(repo);
         });
+      return settled;
     },
     [setItems, repository, deleteAttachmentFiles, queue, reloadIfDrained],
   );
@@ -209,7 +223,7 @@ export function ItemsProvider({
     (item: Item) => {
       const current = itemsRef.current;
       const exists = current.some(i => i.id === item.id);
-      commit(
+      return commit(
         exists
           ? current.map(i => (i.id === item.id ? item : i))
           : [item, ...current],

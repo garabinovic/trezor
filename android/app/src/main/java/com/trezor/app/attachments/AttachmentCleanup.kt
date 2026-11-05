@@ -11,6 +11,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   [AttachmentStore.keepUnreferenced] **before** the new database exists. A crash
  *   afterwards can't expose those files to a later [atStartup]. On a genuine first launch
  *   there are no files and nothing is written.
+ * - [atModuleStart]: removes decrypted view copies (whole attachments, PDF copies, rendered
+ *   pages) left by an earlier process, **without the database**, at most once per process
+ *   ([viewsDone]). The module runs it as its first task, so no view of this process can
+ *   exist yet; files handed out are kept anyway ([AttachmentViews.purgeInactive]). It runs
+ *   even when the database can't be opened, so a killed process's plaintext copies don't
+ *   wait for a launch that succeeds. Encrypted files and share copies are not touched.
  * - [atStartup]: removes view copies, expired shares, unfinished imports and `.tza` files
  *   no database row refers to (except kept ones), **at most once per process** ([done] is
  *   process-wide in production). Removing files without a row is only safe while no import
@@ -24,7 +30,14 @@ class AttachmentCleanup(
     private val views: AttachmentViews,
     private val shares: ShareFiles,
     private val done: AtomicBoolean = PROCESS_DONE,
+    private val viewsDone: AtomicBoolean = PROCESS_VIEWS_DONE,
 ) {
+
+  /** View files removed, or null when this already ran in this process. */
+  fun atModuleStart(): Int? {
+    if (!viewsDone.compareAndSet(false, true)) return null
+    return views.purgeInactive()
+  }
 
   /** Returns how many ids are kept. Throws [AttachmentStore.StoreException]. */
   fun beforeDatabaseCreated(): Int = store.keepUnreferenced(emptySet())
@@ -41,5 +54,6 @@ class AttachmentCleanup(
 
   companion object {
     private val PROCESS_DONE = AtomicBoolean(false)
+    private val PROCESS_VIEWS_DONE = AtomicBoolean(false)
   }
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -42,11 +42,18 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const [saved, setSaved] = useState(false);
+  // The write is running: no second Save, and the editor stays open.
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
   const noun = categories[type].singular.toLowerCase();
 
-  usePreventRemove(dirty && !saved, ({ data }) => {
+  usePreventRemove(saving || (dirty && !saved), ({ data }) => {
+    if (savingRef.current) {
+      // Leaving now could lose the draft if the write fails.
+      return;
+    }
     setPendingLeave(() => () => navigation.dispatch(data.action));
   });
 
@@ -63,9 +70,9 @@ export function ItemEditorScreen({ route, navigation }: Props) {
     }
   };
 
-  const save = () => {
+  const save = async () => {
     // Files are still being added: saving now would leave them out.
-    if (attachments.busy) {
+    if (attachments.busy || savingRef.current) {
       return;
     }
     const nextErrors = validate(draft, existing);
@@ -74,12 +81,23 @@ export function ItemEditorScreen({ route, navigation }: Props) {
       return;
     }
     const item = normalize(draft);
-    attachments.commit(attachmentIdsOf(item));
-    saveItem(item);
+    savingRef.current = true;
+    setSaving(true);
+    const reopen = attachments.commit(attachmentIdsOf(item));
+    if (!(await saveItem(item))) {
+      // Not stored (WriteErrorDialog says so): the draft and its new files
+      // stay, and Save can be tried again.
+      reopen();
+      savingRef.current = false;
+      setSaving(false);
+      return;
+    }
     if (draft.type === 'reminder' && !draft.completed) {
       // Explains and asks for notification permission the first time only.
       requestPermissionIfNeeded();
     }
+    savingRef.current = false;
+    setSaving(false);
     setSaved(true);
   };
 
@@ -107,7 +125,7 @@ export function ItemEditorScreen({ route, navigation }: Props) {
                 label="Save"
                 size="sm"
                 onPress={save}
-                disabled={attachments.busy}
+                disabled={attachments.busy || saving}
               />
             </View>
           }
