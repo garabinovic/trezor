@@ -1,4 +1,13 @@
-import { SqlDatabase, SqlExecutor, SqlValue } from './sql';
+import { SqlDatabase, SqlExecutor, SqlValue, TransactionOptions } from './sql';
+
+export interface SerialDatabase extends SqlDatabase {
+  /**
+   * Closes the connection once every operation queued before this call has
+   * settled (op-sqlite's close() interrupts a running statement). Operations
+   * queued later fail as on any closed connection.
+   */
+  closeWhenIdle(): Promise<void>;
+}
 
 /**
  * Runs every operation on a shared connection strictly one after another.
@@ -15,7 +24,7 @@ import { SqlDatabase, SqlExecutor, SqlValue } from './sql';
  * Errors are delivered to the caller; a failed operation does not block the
  * ones queued after it.
  */
-export function serializeDatabase(db: SqlDatabase): SqlDatabase {
+export function serializeDatabase(db: SqlDatabase): SerialDatabase {
   let tail: Promise<unknown> = Promise.resolve();
 
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -27,8 +36,11 @@ export function serializeDatabase(db: SqlDatabase): SqlDatabase {
   return {
     execute: (sql: string, params?: SqlValue[]) =>
       enqueue(() => db.execute(sql, params)),
-    transaction: <T>(fn: (tx: SqlExecutor) => Promise<T>) =>
-      enqueue(() => db.transaction(fn)),
+    transaction: <T>(
+      fn: (tx: SqlExecutor) => Promise<T>,
+      options?: TransactionOptions,
+    ) => enqueue(() => db.transaction(fn, options)),
     close: () => db.close(),
+    closeWhenIdle: () => enqueue(async () => db.close()),
   };
 }

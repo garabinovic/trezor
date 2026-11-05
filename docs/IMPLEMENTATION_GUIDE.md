@@ -684,8 +684,11 @@ or a physical device, and no instrumentation test was run.
     replaced by behaviour tests against recording fakes. The one-line glue
     inside the React Native modules remains untested (instrumentation).
   - **Docs (L1, L2):** HEIF brand reading and the tab bar status corrected.
-  - **Observed, not changed:** a second React root also opens a second
-    database connection; the first is never closed.
+  - **Fixed separately (F9):** a second React root also opened a second
+    database connection, never closing the first. Now one initialization
+    and connection per process, closed after its queued statements if
+    initialization fails; migrations use `BEGIN IMMEDIATE` and re-read the
+    version, so a step is never run twice.
 - **Informational:**
   - one worker serializes imports with viewing, export and share preparation,
     so the viewer waits during large imports;

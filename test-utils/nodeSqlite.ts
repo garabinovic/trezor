@@ -5,11 +5,13 @@ import type {
   SqlExecutor,
   SqlRow,
   SqlValue,
+  TransactionOptions,
 } from '../src/storage/sql';
 
-export function createNodeSqliteDatabase(): SqlDatabase {
+/** In memory, or a file shared by several connections (no busy timeout). */
+export function createNodeSqliteDatabase(file = ':memory:'): SqlDatabase {
   const { DatabaseSync } = require('node:sqlite');
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(file);
   db.exec('PRAGMA foreign_keys = ON');
 
   const exec: SqlExecutor = {
@@ -21,8 +23,11 @@ export function createNodeSqliteDatabase(): SqlDatabase {
 
   return {
     ...exec,
-    async transaction<T>(fn: (tx: SqlExecutor) => Promise<T>) {
-      db.exec('BEGIN');
+    async transaction<T>(
+      fn: (tx: SqlExecutor) => Promise<T>,
+      options?: TransactionOptions,
+    ) {
+      db.exec(options?.immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
       try {
         const result = await fn(exec);
         db.exec('COMMIT');

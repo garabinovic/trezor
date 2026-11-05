@@ -87,8 +87,11 @@ class FakeDb {
     return { rows: this.run(sql, params) };
   }
 
-  async transaction(fn: (tx: { execute: FakeDb['execute'] }) => Promise<void>) {
-    this.run('BEGIN', []);
+  async transaction(
+    fn: (tx: { execute: FakeDb['execute'] }) => Promise<void>,
+    options?: { immediate?: boolean },
+  ) {
+    this.run(options?.immediate ? 'BEGIN IMMEDIATE' : 'BEGIN', []);
     try {
       await fn({ execute: (s, p) => this.execute(s, p) });
       this.run('COMMIT', []);

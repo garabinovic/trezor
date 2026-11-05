@@ -7,6 +7,7 @@ import {
   pendingMigrations,
   runMigrations,
 } from '../../src/storage/migrations';
+import type { SqlDatabase } from '../../src/storage/sql';
 import { createNodeSqliteDatabase } from '../../test-utils/nodeSqlite';
 
 const tableNames = async (db: ReturnType<typeof createNodeSqliteDatabase>) =>
@@ -570,5 +571,151 @@ describe('v3: attachments and card issuer migration', () => {
     expect((await db.execute('PRAGMA foreign_keys'))[0].foreign_keys).toBe(1);
     // The real v3 then succeeds.
     expect(await runMigrations(db)).toEqual({ from: 2, to: 3 });
+  });
+});
+
+describe('concurrent migration attempts (F9)', () => {
+  // Two real connections to one file, as two opens of the database would be.
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  let dir: string;
+  let open: SqlDatabase[];
+  const connect = () => {
+    const db = createNodeSqliteDatabase(path.join(dir, 'trezor.db'));
+    open.push(db);
+    return db;
+  };
+  const v1Only = migrations.filter(m => m.version === 1);
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trezor-mig-'));
+    open = [];
+  });
+  afterEach(() => {
+    open.forEach(db => db.close());
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The real migrations, recording which `up` steps ran. */
+  function recorded(ran: number[]): Migration[] {
+    return migrations.map(m => ({
+      ...m,
+      up: async tx => {
+        ran.push(m.version);
+        await m.up(tx);
+      },
+    }));
+  }
+
+  function gate() {
+    let release!: () => void;
+    const until = new Promise<void>(resolve => (release = resolve));
+    return { until, release };
+  }
+
+  const schema = (db: SqlDatabase) =>
+    db.execute('SELECT type, name, sql FROM sqlite_master ORDER BY name');
+  const reminders = (db: SqlDatabase) =>
+    db.execute('SELECT * FROM reminders ORDER BY item_id');
+
+  test('a step another connection completed after this one read the version is skipped', async () => {
+    const a = connect();
+    const b = connect();
+    await runMigrations(a, v1Only);
+
+    // b reads v1, and is held before its first migration transaction.
+    const held = gate();
+    const ranByB: number[] = [];
+    const late: SqlDatabase = {
+      execute: (sql, params) => b.execute(sql, params),
+      transaction: async (fn, options) => {
+        await held.until;
+        return b.transaction(fn, options);
+      },
+      close: () => b.close(),
+    };
+    const bRun = runMigrations(late, recorded(ranByB));
+
+    // Meanwhile a migrates to the latest version, and the user saves a
+    // reminder with an interval (a v2 column).
+    await runMigrations(a);
+    await a.execute("INSERT INTO items VALUES ('x', 'reminder', 't', 0, 1, 1)");
+    await a.execute(
+      "INSERT INTO reminders (item_id, due_at, local_start, repeat, interval_minutes) VALUES ('x', 1, '2026-11-02T08:00', 'interval', 240)",
+    );
+    const schemaBefore = await schema(a);
+    const remindersBefore = await reminders(a);
+    expect(remindersBefore[0]).toMatchObject({ interval_minutes: 240 });
+
+    held.release();
+
+    expect(await bRun).toEqual({ from: 1, to: LATEST_SCHEMA_VERSION });
+    expect(ranByB).toEqual([]);
+    expect(await schema(a)).toEqual(schemaBefore);
+    expect(await reminders(a)).toEqual(remindersBefore);
+  });
+
+  test('control: a deferred transaction still reads the old version while another connection migrates', async () => {
+    const a = connect();
+    const b = connect();
+    await runMigrations(a, v1Only);
+    const inside = gate();
+    const done = gate();
+    const aRun = a.transaction(async tx => {
+      await tx.execute('PRAGMA user_version = 2');
+      inside.release();
+      await done.until;
+    });
+    await inside.until;
+
+    // Without the write lock, b sees v1 and would run v2 again after a commits.
+    const seen = await b.transaction(async tx => getUserVersion(tx));
+    expect(seen).toBe(1);
+
+    done.release();
+    await aRun;
+  });
+
+  test('while another connection runs a step, this one fails without changing anything', async () => {
+    const a = connect();
+    const b = connect();
+    await runMigrations(a, v1Only);
+
+    // a holds its v2 transaction open, part-way through.
+    const inside = gate();
+    const finish = gate();
+    const slowV2: Migration[] = migrations.map(m =>
+      m.version === 2
+        ? {
+            ...m,
+            up: async tx => {
+              await m.up(tx);
+              inside.release();
+              await finish.until;
+            },
+          }
+        : m,
+    );
+    const aRun = runMigrations(a, slowV2);
+    await inside.until;
+
+    const ranByB: number[] = [];
+    const failure = await runMigrations(b, recorded(ranByB)).catch(e => e);
+    expect(failure).toBeInstanceOf(StorageError);
+    expect(failure).toMatchObject({ code: 'MIGRATION_FAILED' });
+    expect(String(failure.message)).toMatch(/locked/);
+    // The lock is taken before the version is read: b never started a step.
+    expect(ranByB).toEqual([]);
+
+    finish.release();
+    expect(await aRun).toEqual({ from: 1, to: LATEST_SCHEMA_VERSION });
+    // b retrying later finds nothing to do.
+    expect(await runMigrations(b, recorded(ranByB))).toEqual({
+      from: LATEST_SCHEMA_VERSION,
+      to: LATEST_SCHEMA_VERSION,
+    });
+    expect(ranByB).toEqual([]);
+    expect(await tableNames(b)).toEqual(await tableNames(a));
   });
 });

@@ -24,22 +24,65 @@ export interface OpenedStorage {
   initialExactAlarmRequested: boolean;
 }
 
+type InitialData = Omit<OpenedStorage, 'items' | 'settings'>;
+
+interface Initialized {
+  items: ItemRepository;
+  settings: SettingsRepository;
+  /** Loaded during initialization, for the caller that started it. */
+  first: InitialData;
+}
+
 /**
- * Opens the encrypted database and loads what the first screen needs. Then
- * removes attachment files no row refers to (left by a crash between writing
- * a file and saving its item, or after deleting an item); this runs before
- * the UI can pick new files, and never touches a file the database knows.
+ * The process's storage, once initialization has started. Every React root
+ * (a recreated Activity mounts another while the JS runtime lives on) shares
+ * this one connection, its operation queue and its repositories, so a second
+ * root never opens, migrates or cleans up on its own.
+ */
+let shared: Promise<Initialized> | null = null;
+
+/**
+ * Opens the encrypted database once per process and loads what the first
+ * screen needs. Initialization also removes attachment files no row refers
+ * to (left by a crash between writing a file and saving its item, or after
+ * deleting an item); this runs before the UI can pick new files, and never
+ * touches a file the database knows.
  *
  * If the database has to be created while attachment files exist (its file
  * is missing, but the key is not), those files may be all that is left of the
  * original, so they are recorded as kept before the new database exists and
  * are never collected. Native code also runs the cleanup at most once per
- * process, so a second React root (the Activity recreated) can't remove a file
- * the first one is still saving.
+ * process.
+ *
+ * A caller that arrives while initialization runs waits for it; one that
+ * arrives later loads its own initial data from the shared connection. If
+ * initialization fails, its connection is closed and the next call (Retry)
+ * starts afresh.
  */
 export async function openStorage(
   attachments: AttachmentPlatform = nativeAttachmentPlatform,
 ): Promise<OpenedStorage> {
+  let attempt = shared;
+  const started = attempt === null;
+  if (attempt === null) {
+    const mine = initialize(attachments);
+    shared = attempt = mine;
+    // Frees the slot for a Retry; a newer attempt is never cleared.
+    mine.catch(() => {
+      if (shared === mine) {
+        shared = null;
+      }
+    });
+  }
+  const { items, settings, first } = await attempt;
+  // A later root must not start from data the first one has changed since.
+  const initial = started ? first : await loadInitial(items, settings);
+  return { items, settings, ...initial };
+}
+
+async function initialize(
+  attachments: AttachmentPlatform,
+): Promise<Initialized> {
   const opened = await openTrezorDatabase({
     beforeCreate: async () => {
       await attachments.keepUnreferenced();
@@ -47,8 +90,32 @@ export async function openStorage(
   });
   // Every read and write on the shared connection goes through one queue.
   const db = serializeDatabase(opened.db);
-  const items = new SqliteItemRepository(db);
-  const settings = new SqliteSettingsRepository(db);
+  try {
+    const items = new SqliteItemRepository(db);
+    const settings = new SqliteSettingsRepository(db);
+    const first = await loadInitial(items, settings);
+    try {
+      await attachments.collectGarbage(await items.listAttachmentIds());
+    } catch (e) {
+      // Orphans only cost space; try again next launch. Code only, never names.
+      const code = (e as { code?: unknown } | null)?.code;
+      console.warn(
+        `[attachments] cleanup failed: ${String(code ?? 'UNKNOWN')}`,
+      );
+    }
+    return { items, settings, first };
+  } catch (e) {
+    // No connection is left without an owner: statements already queued
+    // settle first, then it closes. The original error is reported.
+    await db.closeWhenIdle().catch(() => undefined);
+    throw e;
+  }
+}
+
+async function loadInitial(
+  items: ItemRepository,
+  settings: SettingsRepository,
+): Promise<InitialData> {
   const [
     initialItems,
     theme,
@@ -62,16 +129,7 @@ export async function openStorage(
     settings.get('notifications.permissionRequested'),
     settings.get('notifications.exactAlarmRequested'),
   ]);
-  try {
-    await attachments.collectGarbage(await items.listAttachmentIds());
-  } catch (e) {
-    // Orphans only cost space; try again next launch. Code only, never names.
-    const code = (e as { code?: unknown } | null)?.code;
-    console.warn(`[attachments] cleanup failed: ${String(code ?? 'UNKNOWN')}`);
-  }
   return {
-    items,
-    settings,
     initialItems,
     initialTheme: theme ?? 'system',
     initialShowReminderDetails: showDetails === true,

@@ -194,7 +194,10 @@ export async function enableForeignKeys(db: SqlExecutor): Promise<void> {
  *    fire ON DELETE CASCADE and wipe dependent rows.
  * 2. Each migration in its own transaction: `up`, then `PRAGMA
  *    foreign_key_check`; any violation rolls the whole step back.
- * 3. `user_version` bumped inside the same transaction.
+ * 3. `user_version` bumped inside the same transaction. The transaction is
+ *    BEGIN IMMEDIATE and first re-reads `user_version`: a step another
+ *    connection already committed is skipped, and one it is running makes
+ *    this one fail ("database is locked") instead of running it twice.
  * 4. Foreign keys back ON on every path (success and failure), verified.
  *
  * With nothing pending, only step 4 runs. A failure leaves the database at the
@@ -220,19 +223,29 @@ export async function runMigrations(
     try {
       for (const migration of pending) {
         try {
-          await db.transaction(async tx => {
-            await migration.up(tx);
-            const violations = await tx.execute('PRAGMA foreign_key_check');
-            if (violations.length > 0) {
-              throw new Error(
-                `${violations.length} foreign key violation(s); rolled back`,
+          await db.transaction(
+            async tx => {
+              // `from` was read before this transaction, so another
+              // connection may have run this step since. BEGIN IMMEDIATE
+              // holds the write lock from the start: the version read here
+              // can't change before this transaction commits.
+              if ((await getUserVersion(tx)) >= migration.version) {
+                return;
+              }
+              await migration.up(tx);
+              const violations = await tx.execute('PRAGMA foreign_key_check');
+              if (violations.length > 0) {
+                throw new Error(
+                  `${violations.length} foreign key violation(s); rolled back`,
+                );
+              }
+              // PRAGMA cannot take bound parameters; version is a trusted integer.
+              await tx.execute(
+                `PRAGMA user_version = ${Math.trunc(migration.version)}`,
               );
-            }
-            // PRAGMA cannot take bound parameters; version is a trusted integer.
-            await tx.execute(
-              `PRAGMA user_version = ${Math.trunc(migration.version)}`,
-            );
-          });
+            },
+            { immediate: true },
+          );
         } catch (e) {
           throw new StorageError(
             'MIGRATION_FAILED',

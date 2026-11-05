@@ -108,4 +108,56 @@ describe('serialized writes (L3)', () => {
     expect(value).toBe(1);
     expect(await db.execute('SELECT v FROM t')).toEqual([{ v: 'a' }]);
   });
+
+  test('closeWhenIdle closes only after every operation queued before it settles', async () => {
+    const raw = createNodeSqliteDatabase();
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const recording: SqlDatabase = {
+      execute: async (sql, params) => {
+        if (sql === 'SELECT 1') {
+          await held;
+        }
+        const rows = await raw.execute(sql, params);
+        order.push(sql);
+        return rows;
+      },
+      transaction: (fn, options) => raw.transaction(fn, options),
+      close: () => {
+        order.push('close');
+        raw.close();
+      },
+    };
+    const db = serializeDatabase(recording);
+    const slow = db.execute('SELECT 1');
+    const queued = db.execute('SELECT 2');
+    const closing = db.closeWhenIdle();
+    const after = db.execute('SELECT 3');
+
+    await new Promise<void>(resolve => setTimeout(() => resolve(), 10));
+    expect(order).toEqual([]);
+    release();
+    await closing;
+
+    await expect(slow).resolves.toEqual([{ 1: 1 }]);
+    await expect(queued).resolves.toEqual([{ 2: 2 }]);
+    expect(order).toEqual(['SELECT 1', 'SELECT 2', 'close']);
+    // Queued after the close: fails like any statement on a closed connection.
+    await expect(after).rejects.toThrow();
+  });
+
+  test('transaction options reach the connection', async () => {
+    const seen: unknown[] = [];
+    const raw = createNodeSqliteDatabase();
+    const db = serializeDatabase({
+      ...raw,
+      transaction: (fn, options) => {
+        seen.push(options);
+        return raw.transaction(fn, options);
+      },
+    });
+    await db.transaction(async () => undefined, { immediate: true });
+    expect(seen).toEqual([{ immediate: true }]);
+  });
 });
