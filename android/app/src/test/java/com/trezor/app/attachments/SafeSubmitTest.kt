@@ -1,18 +1,16 @@
 package com.trezor.app.attachments
 
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/** Promise settlement around executor shutdown (TrezorAttachmentsModule after invalidate). */
+/** Promise settlement around executor shutdown (ModuleTasks after invalidate). */
 class SafeSubmitTest {
 
   /** Stands in for a promise: counts how often it was settled, and how. */
@@ -96,20 +94,5 @@ class SafeSubmitTest {
       // expected
     }
     assertEquals(0, settled.total)
-  }
-
-  @Test
-  fun theModuleSubmitsEveryTaskThroughTheHelper() {
-    // Gradle runs unit tests from the app module directory.
-    val module =
-        File("src/main/java/com/trezor/app/attachments/TrezorAttachmentsModule.kt").readText()
-    // No direct execute() left: a refused one would throw and strand its promise.
-    assertFalse(module.contains(".execute("))
-    assertFalse(module.contains(".execute {"))
-    assertEquals(13, Regex("\\n\\s+submit\\((worker|renderer), (promise|pick\\.promise|job\\.promise)\\)").findAll(module).count())
-    // invalidate() runs once.
-    val invalidate = module.substringAfter("override fun invalidate()").substringBefore("\n  }\n")
-    assertTrue(invalidate.contains("if (!invalidated.compareAndSet(false, true)) return"))
-    assertFalse(invalidate.contains("shutdownNow"))
   }
 }

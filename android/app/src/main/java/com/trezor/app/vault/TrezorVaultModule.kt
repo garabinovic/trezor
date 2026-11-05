@@ -2,30 +2,29 @@ package com.trezor.app.vault
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.trezor.app.vault.JsVault.Companion.toHexAndZero
 import java.io.File
 
 /**
  * JS bridge for [KeyVault]. Keys are returned to JS as lowercase hex because op-sqlite
  * only accepts the SQLCipher key from JavaScript (see docs/TECHNICAL_ARCHITECTURE.md §4.4).
- * Every key operation is limited to the database key ([JsKeyAccess]); other keys stay
- * native-only.
+ * Every key operation is limited to the database key ([JsKeyAccess], applied by
+ * [JsVault]); other keys stay native-only.
  */
 class TrezorVaultModule(reactContext: ReactApplicationContext) :
     NativeTrezorVaultSpec(reactContext) {
 
   // noBackupFilesDir is excluded from Auto Backup and device-to-device transfer.
   private val vault = KeyVault(File(reactContext.noBackupFilesDir, "keys"))
+  private val js = JsVault(vault)
 
   override fun getName(): String = NAME
 
-  override fun hasKey(keyId: String, promise: Promise) =
-      run(promise) { vault.hasKey(JsKeyAccess.check(keyId)) }
+  override fun hasKey(keyId: String, promise: Promise) = run(promise) { js.hasKey(keyId) }
 
-  override fun createKey(keyId: String, promise: Promise) =
-      run(promise) { vault.createKey(JsKeyAccess.check(keyId)).toHexAndZero() }
+  override fun createKey(keyId: String, promise: Promise) = run(promise) { js.createKeyHex(keyId) }
 
-  override fun getKey(keyId: String, promise: Promise) =
-      run(promise) { vault.getKey(JsKeyAccess.check(keyId)).toHexAndZero() }
+  override fun getKey(keyId: String, promise: Promise) = run(promise) { js.getKeyHex(keyId) }
 
   override fun randomBytesHex(length: Double): String =
       vault.randomBytes(length.toInt()).toHexAndZero()
@@ -45,19 +44,7 @@ class TrezorVaultModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  private fun ByteArray.toHexAndZero(): String {
-    val out = CharArray(size * 2)
-    for (i in indices) {
-      val v = this[i].toInt() and 0xff
-      out[i * 2] = HEX[v ushr 4]
-      out[i * 2 + 1] = HEX[v and 0x0f]
-    }
-    fill(0)
-    return String(out).also { out.fill('\u0000') }
-  }
-
   companion object {
     const val NAME = "TrezorVault"
-    private val HEX = "0123456789abcdef".toCharArray()
   }
 }

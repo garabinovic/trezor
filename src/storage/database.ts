@@ -31,6 +31,11 @@ export interface OpenedDatabase {
 interface OpenOptions {
   name?: string;
   migrationList?: Migration[];
+  /**
+   * Runs when the database file is absent, before the key or the file is
+   * created. If it fails, nothing is created (STORAGE_ERROR).
+   */
+  beforeCreate?: () => Promise<void>;
 }
 
 /**
@@ -60,6 +65,17 @@ export async function openTrezorDatabase(
       'KEY_MISSING_FOR_DATABASE',
       'A database exists but its key is missing',
     );
+  }
+
+  if (!exists && options.beforeCreate) {
+    try {
+      await options.beforeCreate();
+    } catch {
+      throw new StorageError(
+        'STORAGE_ERROR',
+        'Could not prepare for creating the database',
+      );
+    }
   }
 
   const keyHex = hasKey

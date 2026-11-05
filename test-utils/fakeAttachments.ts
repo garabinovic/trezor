@@ -22,6 +22,10 @@ export const fakeAttachments = {
   picks: [] as { source: string; imagesOnly: boolean; maxCount: number }[],
   deleted: [] as string[],
   gcRuns: [] as string[][],
+  /** Ids recorded by keepUnreferenced: never collected. */
+  kept: new Set<string>(),
+  keepRuns: 0,
+  failNextKeep: false,
   /** Open view URIs → attachment id. */
   views: new Map<string, string>(),
   viewCount: 0,
@@ -67,6 +71,9 @@ export const fakeAttachments = {
     this.picks = [];
     this.deleted = [];
     this.gcRuns = [];
+    this.kept = new Set();
+    this.keepRuns = 0;
+    this.failNextKeep = false;
     this.views = new Map();
     this.viewCount = 0;
     this.viewErrors = new Map();
@@ -235,6 +242,15 @@ export const fakeAttachments = {
       fakeAttachments.purges++;
       return 0;
     },
+    async keepUnreferenced() {
+      fakeAttachments.keepRuns++;
+      if (fakeAttachments.failNextKeep) {
+        fakeAttachments.failNextKeep = false;
+        throw Object.assign(new Error('failed'), { code: 'IO_FAILED' });
+      }
+      fakeAttachments.files.forEach(id => fakeAttachments.kept.add(id));
+      return fakeAttachments.kept.size;
+    },
     async collectGarbage(knownIds: string[]) {
       fakeAttachments.views.clear();
       if (fakeAttachments.failNextGc) {
@@ -245,7 +261,7 @@ export const fakeAttachments = {
       const known = new Set(knownIds);
       let removed = 0;
       for (const id of [...fakeAttachments.files]) {
-        if (!known.has(id)) {
+        if (!known.has(id) && !fakeAttachments.kept.has(id)) {
           fakeAttachments.files.delete(id);
           removed++;
         }

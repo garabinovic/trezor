@@ -12,6 +12,7 @@ import java.security.MessageDigest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -47,6 +48,22 @@ class AttachmentImporterTest {
       MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
   private fun failure(outcome: Outcome): Code = (outcome as Outcome.Failed).code
+
+  @Test
+  fun anErrorEndsThePickAndRemovesTheFilesItAlreadyImported() {
+    // L3: the caller gets no outcomes after an Error (simulated out of memory), so no row
+    // will ever refer to the files imported before it: they must not stay behind.
+    val sources: List<() -> Source> =
+        listOf({ source(jpeg, "first") }, { throw OutOfMemoryError("simulated") }, { source(pdf, "third") })
+    try {
+      importer().importAll(sources, imagesOnly = false)
+      fail("the Error must propagate")
+    } catch (e: OutOfMemoryError) {
+      // expected
+    }
+    assertEquals(emptySet<String>(), store.storedIds())
+    assertTrue(File(root, "tmp").listFiles().orEmpty().isEmpty())
+  }
 
   @Test
   fun importsAFileWithItsContentTypeAndChecksum() {

@@ -67,6 +67,22 @@ class AttachmentViewsTest {
   }
 
   @Test
+  fun anErrorWhileDecryptingLeavesNoCopy() {
+    // L3: a store that fails with an Error (simulated out of memory) mid-open.
+    val failing = AttachmentStore(File(folder.root, "attachments")) { throw OutOfMemoryError("simulated") }
+    val broken = AttachmentViews(failing, dir)
+    try {
+      broken.open(id, stored.sizeBytes, stored.sha256)
+      fail("the Error must propagate")
+    } catch (e: OutOfMemoryError) {
+      // expected
+    }
+    // No plaintext part and no copy; opening with a working store still succeeds.
+    assertTrue(dir.listFiles().orEmpty().isEmpty())
+    assertArrayEquals(content, views.open(id, stored.sizeBytes, stored.sha256).readBytes())
+  }
+
+  @Test
   fun closeRefusesFilesOutsideTheViewDirectory() {
     val outside = File(folder.root, "attachments/$id${AttachmentStore.SUFFIX}")
     for (path in listOf(outside.path, "${dir.path}/../../attachments/x.view", "${dir.path}/notes.txt")) {

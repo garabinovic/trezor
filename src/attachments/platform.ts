@@ -222,7 +222,12 @@ export interface AttachmentPlatform {
   share(attachment: Attachment): Promise<void>;
   /** Deletes share copies older than 24 hours (startup and foreground). */
   purgeExpiredShares(): Promise<number>;
-  /** Startup only: removes files no database row refers to, and views. */
+  /** Before a missing database is created: keeps every existing file. */
+  keepUnreferenced(): Promise<number>;
+  /**
+   * Startup only: removes files no database row refers to (except kept
+   * ones), and views. Once per process; -1 when it already ran.
+   */
   collectGarbage(knownIds: string[]): Promise<number>;
 }
 
@@ -349,6 +354,14 @@ export const nativeAttachmentPlatform: AttachmentPlatform = {
   async purgeInactiveViews() {
     try {
       return await NativeTrezorAttachments.purgeInactiveViews();
+    } catch (e) {
+      throw toAttachmentError(e);
+    }
+  },
+
+  async keepUnreferenced() {
+    try {
+      return await NativeTrezorAttachments.keepUnreferenced();
     } catch (e) {
       throw toAttachmentError(e);
     }

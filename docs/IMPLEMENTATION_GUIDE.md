@@ -314,7 +314,8 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
 2. **Validate** (`AttachmentImporter`, `MediaTypes`).
    - The type comes from the first 64 bytes, never from the name or the
      declared type.
-   - HEIF uses the whole `ftyp` brand list; AVIF is refused.
+   - HEIF uses the major brand and up to 12 compatible brands (what fits in
+     64 bytes); AVIF is refused when `avif`/`avis` is among them.
    - 25 MB is enforced while reading.
    - Names are cleaned: last path segment, no control or bidi characters,
      120 characters max, an extension added if missing. This is the
@@ -343,6 +344,11 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
      `collectGarbage(listAttachmentIds())`. It removes `.tza` files without
      a row and all `.part` files, purges view copies and expired share
      copies, and never touches files the DB knows.
+   - Once per process (`AttachmentCleanup`): a second React root (Activity
+     recreated) only purges expired shares.
+   - If `trezor.db` is missing and gets created again, `beforeCreate` first
+     records every existing file in `attachments/kept-ids`; kept files are
+     never collected (TA §14.3).
    - If the DB can't open, nothing is removed.
    - A failure is logged as a code and retried next launch.
 7. **View** (`AttachmentViewerScreen`, from detail rows and card tiles).
@@ -494,10 +500,12 @@ Share sit at the bottom.
   "PDF is password-protected", "“x.docx” isn’t supported…").
 - Unavailable features are labelled honestly; nothing pretends to work.
 
-**Unresolved UI issues** (found on the Galaxy A53):
-- the tab bar overlaps the Android navigation buttons;
-- the keyboard doesn't open for an auto-focused field (e.g. the editor
-  Title).
+**UI issues found on the Galaxy A53:**
+- the tab bar overlapped the Android navigation buttons: fixed in `8d728c3`
+  (system inset included, "Docs" label), installed on the A53, not yet
+  confirmed there;
+- unresolved: the keyboard doesn't open for an auto-focused field (e.g. the
+  editor Title).
 
 ---
 
@@ -609,8 +617,8 @@ or a physical device, and no instrumentation test was run.
 - Release signing still uses the template debug key; R8 is off.
 - OpenSSL 3.3.2 comes from a third-party Maven artifact, and there is no
   Gradle dependency verification (TA §12).
-- The tab bar overlaps the navigation buttons, and the keyboard doesn't open
-  for auto-focused fields.
+- The keyboard doesn't open for auto-focused fields. (The tab bar overlap is
+  fixed in `8d728c3`; confirmation on the A53 is pending.)
 
 **Accepted or documented limitations:**
 - PDF password protection is unsupported.
@@ -648,12 +656,32 @@ or a physical device, and no instrumentation test was run.
   its `.tza` file stays until startup cleanup. Today Kotlin and TS agree, so
   this can't happen yet.
 - **Fixed, Low: calls after the module shuts down.** All submissions go
-  through `SafeSubmit`. A refused one rejects with `IO_FAILED`, accepted work
-  still settles, and `invalidate()` is idempotent. Not covered: a picker or
-  Save a copy result that never arrives because the module was torn down
-  while the system UI was open. Before the fix: After `invalidate()` (JS reload
-  or host teardown), most `TrezorAttachmentsModule` methods would throw
+  through `SafeSubmit` (inside `ModuleTasks` since the third review). A
+  refused one rejects with `IO_FAILED`, accepted work still settles, and
+  `invalidate()` is idempotent. Not covered: a picker or Save a copy result
+  that never arrives because the module was torn down while the system UI
+  was open. Before the fix: After `invalidate()` (JS reload or host
+  teardown), most `TrezorAttachmentsModule` methods would throw
   `RejectedExecutionException`, and their promises would never settle.
+- **Third, independent review (corrective commit after `8d728c3`):**
+  - **Fixed, Medium (M1):** startup cleanup deleted every `.tza` file when
+    the database had to be created because its file was missing. Existing
+    files are now recorded as kept (`attachments/kept-ids`) before the key
+    or the database is created, and are never collected.
+  - **Fixed, Medium (M2):** startup cleanup ran on every React root mount,
+    so a recreated Activity could remove a file the first tree was still
+    saving. It now runs once per process.
+  - **Fixed, Low (L3):** an `Error` such as `OutOfMemoryError` in a native
+    task now rejects its promise with `IO_FAILED` (`ModuleTasks`), instead
+    of killing the process with the promise unsettled; partial plaintext
+    copies, PDF pages and descriptors are cleaned up on an `Error` too, and
+    an interrupted pick removes the files it already imported.
+  - **Fixed, Low (L4):** tests that only matched Kotlin source text were
+    replaced by behaviour tests against recording fakes. The one-line glue
+    inside the React Native modules remains untested (instrumentation).
+  - **Docs (L1, L2):** HEIF brand reading and the tab bar status corrected.
+  - **Observed, not changed:** a second React root also opens a second
+    database connection; the first is never closed.
 - **Informational:**
   - one worker serializes imports with viewing, export and share preparation,
     so the viewer waits during large imports;
@@ -693,7 +721,8 @@ or a physical device, and no instrumentation test was run.
 7. **Order of operations:**
    - import files **before** their row commits;
    - delete files only **after** the transaction removing their row commits;
-   - garbage collection only at startup, with the DB's complete id list.
+   - garbage collection only at startup, once per process, with the DB's
+    complete id list, and never for files recorded as kept.
 8. **Migrations** are append-only and transactional; keep them additive
    where possible.
    - Never edit a shipped migration.
@@ -729,8 +758,9 @@ or a physical device, and no instrumentation test was run.
     - don't use `git checkout <file>` to undo experiments on files with
       uncommitted work; copy the file first.
 16. **Keep platform-free logic testable.** Put Kotlin rules in plain classes
-    (as `AttachmentImporter`, `ShareFiles`, `AttachmentExport` do) and keep
-    Android glue thin. Put TS rules in pure functions.
+    (as `AttachmentImporter`, `ShareFiles`, `AttachmentExport`,
+    `AttachmentCleanup`, `ModuleTasks` and `JsVault` do) and keep Android glue
+    thin. Test behaviour, not source text. Put TS rules in pure functions.
 17. **Honest UI.** No fake barcodes or decorative codes. Unavailable features
     are labelled. Errors are plain sentences, never silent.
 

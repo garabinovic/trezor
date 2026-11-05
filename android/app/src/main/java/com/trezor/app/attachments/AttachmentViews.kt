@@ -33,7 +33,8 @@ class AttachmentViews(private val store: AttachmentStore, private val dir: File)
             AttachmentStore.StoreException.Code.IO_FAILED, "Could not prepare view")
       }
       return target
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Errors too: the reserved name is released, and the plaintext part goes in finally.
       release(target)
       when (e) {
         is AttachmentStore.StoreException -> throw e

@@ -48,14 +48,25 @@ class AttachmentImporter(
    * Imports each source in turn. One file's failure, whatever it is, becomes that file's
    * outcome and never stops the others, so the caller always gets one outcome per source.
    */
-  fun importAll(sources: List<() -> Source>, imagesOnly: Boolean): List<Outcome> =
-      sources.map { source ->
-        try {
-          import(source(), imagesOnly)
-        } catch (e: Exception) {
-          Outcome.Failed("File", Code.IMPORT_FAILED)
-        }
+  fun importAll(sources: List<() -> Source>, imagesOnly: Boolean): List<Outcome> {
+    val outcomes = ArrayList<Outcome>(sources.size)
+    try {
+      for (source in sources) {
+        outcomes +=
+            try {
+              import(source(), imagesOnly)
+            } catch (e: Exception) {
+              Outcome.Failed("File", Code.IMPORT_FAILED)
+            }
       }
+    } catch (e: Throwable) {
+      // An Error (such as out of memory) ends the whole pick and the caller gets no
+      // outcomes, so nothing will refer to the files already imported: remove them now.
+      outcomes.filterIsInstance<Outcome.Imported>().forEach { runCatching { store.delete(it.id) } }
+      throw e
+    }
+    return outcomes
+  }
 
   fun import(source: Source, imagesOnly: Boolean): Outcome {
     val reported = cleanName(source.displayName)

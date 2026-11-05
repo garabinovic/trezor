@@ -144,17 +144,4 @@ class ExportFileNamesTest {
     assertEquals(forExport(raw, pdf), file.name)
     assertSafe(file.name)
   }
-
-  @Test
-  fun shareAndSaveACopyUseTheSameHelper() {
-    // Gradle runs unit tests from the app module directory.
-    val dir = "src/main/java/com/trezor/app/attachments"
-    val share = File("$dir/ShareFiles.kt").readText()
-    assertTrue(share.contains("File(folder, ExportFileNames.forExport(fileName, mimeType))"))
-    val module = File("$dir/TrezorAttachmentsModule.kt").readText()
-    val saveCopy = module.substringAfter("override fun saveCopy(").substringBefore("override fun")
-    assertTrue(saveCopy.contains("createIntent(activity, ExportFileNames.forExport(fileName, mimeType))"))
-    // No other export path builds names on its own.
-    assertEquals(1, Regex("ExportFileNames\\.forExport").findAll(module).count())
-  }
 }

@@ -61,7 +61,9 @@ class AttachmentExport(private val store: AttachmentStore) {
         store.decryptTo(id, buffered, expectedSize, expectedSha256)
         buffered.flush()
       }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Errors too (out of memory while decrypting): a partial plaintext copy outside the
+      // app is removed if the provider allows it, and the user is told otherwise.
       val removed =
           try {
             destination.delete()
@@ -81,6 +83,9 @@ class AttachmentExport(private val store: AttachmentStore) {
       }
 
   companion object {
+    /** The name suggested in the save-to picker: the same rule as share copies. */
+    fun destinationName(fileName: String, mimeType: String) = ExportFileNames.forExport(fileName, mimeType)
+
     const val DESTINATION_NOT_EMPTY = "DESTINATION_NOT_EMPTY"
     /** The provider doesn't report the destination's size; nothing was written. */
     const val DESTINATION_UNVERIFIED = "DESTINATION_UNVERIFIED"

@@ -41,7 +41,7 @@ import org.json.JSONObject
 class KeyVault(
     private val keyDir: File,
     private val masterKeyAlias: String = DEFAULT_MASTER_KEY_ALIAS,
-) {
+) : VaultKeys {
 
   enum class SecurityLevel(val jsValue: String) {
     STRONGBOX("strongbox"),
@@ -54,11 +54,11 @@ class KeyVault(
   private val random = SecureRandom()
 
   @Synchronized
-  fun hasKey(keyId: String): Boolean = envelopeFile(keyId).isFile
+  override fun hasKey(keyId: String): Boolean = envelopeFile(keyId).isFile
 
   /** Creates and stores a new random key. Returns the plaintext key; caller must zero it. */
   @Synchronized
-  fun createKey(keyId: String): ByteArray {
+  override fun createKey(keyId: String): ByteArray {
     val file = envelopeFile(keyId)
     if (file.exists()) {
       throw VaultException(VaultException.Code.KEY_ALREADY_EXISTS, "Key '$keyId' already exists")
@@ -75,7 +75,7 @@ class KeyVault(
 
   /** Unwraps an existing key. Returns the plaintext key; caller must zero it. */
   @Synchronized
-  fun getKey(keyId: String): ByteArray {
+  override fun getKey(keyId: String): ByteArray {
     val file = envelopeFile(keyId)
     if (!file.isFile) {
       throw VaultException(VaultException.Code.KEY_NOT_FOUND, "No key '$keyId'")

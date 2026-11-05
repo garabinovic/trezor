@@ -2,6 +2,7 @@ package com.trezor.app.reminders
 
 import android.content.Context
 import com.trezor.app.vault.KeyVault
+import com.trezor.app.vault.VaultKeys
 import java.io.File
 import java.io.FileOutputStream
 import java.security.SecureRandom
@@ -57,9 +58,12 @@ object ScheduleStore {
 
   private fun vault(context: Context) = KeyVault(File(context.noBackupFilesDir, "keys"))
 
+  /** The schedule key: [vault]'s key "reminders", created on first use. Caller zeroes it. */
+  internal fun keyFrom(vault: VaultKeys): ByteArray =
+      if (vault.hasKey(KEY_ID)) vault.getKey(KEY_ID) else vault.createKey(KEY_ID)
+
   private fun withKey(context: Context, block: (SecretKeySpec) -> Unit) {
-    val vault = vault(context)
-    val raw = if (vault.hasKey(KEY_ID)) vault.getKey(KEY_ID) else vault.createKey(KEY_ID)
+    val raw = keyFrom(vault(context))
     try {
       block(SecretKeySpec(raw, "AES"))
     } finally {

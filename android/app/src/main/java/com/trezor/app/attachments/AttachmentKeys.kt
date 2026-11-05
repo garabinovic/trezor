@@ -1,6 +1,7 @@
 package com.trezor.app.attachments
 
 import com.trezor.app.vault.VaultException
+import com.trezor.app.vault.VaultKeys
 
 /**
  * Supplies the KeyVault "attachments" key. Like the vault's master key, it is created only
@@ -32,5 +33,14 @@ class AttachmentKeys(
 
   companion object {
     const val KEY_ID = "attachments"
+
+    /** The production wiring: [vault]'s key [KEY_ID], never any other. */
+    fun of(vault: VaultKeys, hasFiles: () -> Boolean) =
+        AttachmentKeys(
+            hasKey = { vault.hasKey(KEY_ID) },
+            getKey = { vault.getKey(KEY_ID) },
+            createKey = { vault.createKey(KEY_ID) },
+            hasFiles = hasFiles,
+        )
   }
 }

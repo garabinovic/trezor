@@ -140,6 +140,34 @@ describe('opening', () => {
     db.close();
   });
 
+  test('beforeCreate runs only when the file is absent, before anything is created', async () => {
+    const seen: { key: boolean; files: string[] }[] = [];
+    const beforeCreate = jest.fn(async () => {
+      seen.push({ key: mockKeys.has('database'), files: mockFake.files() });
+    });
+    const first = await openTrezorDatabase({ beforeCreate });
+    first.db.close();
+    expect(beforeCreate).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([{ key: false, files: [] }]);
+
+    const again = await openTrezorDatabase({ beforeCreate });
+    again.db.close();
+    expect(again.created).toBe(false);
+    expect(beforeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test('a failing beforeCreate creates neither the key nor the database', async () => {
+    await expect(
+      openTrezorDatabase({
+        beforeCreate: async () => {
+          throw Object.assign(new Error('EIO'), { code: 'IO_FAILED' });
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'STORAGE_ERROR' });
+    expect(NativeTrezorVault.createKey).not.toHaveBeenCalled();
+    expect(mockFake.files()).toEqual([]);
+  });
+
   test('M1: the key is removed from every options object op-sqlite retains', async () => {
     await seedCurrent();
     const { db } = await openTrezorDatabase({

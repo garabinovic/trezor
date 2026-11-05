@@ -72,9 +72,16 @@ export interface Spec extends TurboModule {
   /** Deletes share files older than 24 hours (startup and foreground). */
   purgeExpiredShares(): Promise<number>;
   /**
-   * Deletes files of attachments not in `knownIds`, unfinished imports and
-   * every view file. Startup only, with the database's complete list of
-   * attachment ids.
+   * Records every stored attachment file as kept, so collectGarbage never
+   * deletes it. Called before a missing database is created. Resolves with
+   * how many files are kept.
+   */
+  keepUnreferenced(): Promise<number>;
+  /**
+   * Deletes files of attachments not in `knownIds` (except kept ones),
+   * unfinished imports and every view file. Startup only, with the database's
+   * complete list of attachment ids. Runs once per process: later calls only
+   * purge expired shares and resolve with -1.
    */
   collectGarbage(knownIds: string[]): Promise<number>;
 }

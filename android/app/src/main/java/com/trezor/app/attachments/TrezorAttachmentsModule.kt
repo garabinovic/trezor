@@ -19,14 +19,13 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.UiThreadUtil
+import com.trezor.app.attachments.ModuleTasks.Lane.RENDERER
+import com.trezor.app.attachments.ModuleTasks.Lane.WORKER
 import com.trezor.app.vault.KeyVault
 import com.trezor.app.vault.NativeTrezorAttachmentsSpec
 import com.trezor.app.vault.VaultException
 import java.io.File
 import java.io.OutputStream
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -46,26 +45,18 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   private val vault = KeyVault(File(reactContext.noBackupFilesDir, "keys"))
   private val store: AttachmentStore =
       AttachmentStore(File(reactContext.noBackupFilesDir, "attachments")) { keys.obtain() }
-  private val keys =
-      AttachmentKeys(
-          hasKey = { vault.hasKey(AttachmentKeys.KEY_ID) },
-          getKey = { vault.getKey(AttachmentKeys.KEY_ID) },
-          createKey = { vault.createKey(AttachmentKeys.KEY_ID) },
-          // Throws when it can't tell, so no key is created over unreadable files.
-          hasFiles = { store.hasAnyFile() },
-      )
+  // Throws when it can't tell whether files exist, so no key is created over unreadable files.
+  private val keys = AttachmentKeys.of(vault) { store.hasAnyFile() }
   private val importer = AttachmentImporter(store)
   // Decrypted copies for display live only in the private cache, never in shared storage.
   private val views = AttachmentViews(store, File(reactContext.cacheDir, "attachments/view"))
   private val pdfs = PdfViews(views)
   private val export = AttachmentExport(store)
   // The FileProvider serves this directory only (res/xml/attachment_share_paths.xml).
-  private val shares = ShareFiles(store, File(reactContext.cacheDir, "attachments/share"))
-  /** One worker: imports, deletes and garbage collection never overlap. */
-  private val worker: ExecutorService = Executors.newSingleThreadExecutor()
-  /** PDF pages render here, so scrolling isn't held up by an import. */
-  private val renderer: ExecutorService = Executors.newSingleThreadExecutor()
-  private val invalidated = AtomicBoolean(false)
+  private val shares = ShareFiles(store, File(reactContext.cacheDir, ShareFiles.CACHE_DIR))
+  private val cleanup = AttachmentCleanup(store, views, shares)
+  /** Every task runs here: imports, deletes and cleanup on WORKER, PDF pages on RENDERER. */
+  private val tasks = ModuleTasks()
 
   private class PendingPick(
       val promise: Promise,
@@ -93,27 +84,19 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   override fun getName(): String = NAME
 
   override fun invalidate() {
-    // Idempotent: a second call must not touch the executors again.
-    if (!invalidated.compareAndSet(false, true)) return
+    // Idempotent: a second call must not touch the executors again. PDFs close after pages
+    // still rendering; work already accepted still runs and settles its promise.
+    if (!tasks.shutdown { pdfs.closeAll() }) return
     reactContext.removeActivityEventListener(this)
-    // After pages still rendering; inline if the renderer is already gone.
-    SafeSubmit.submit(renderer, onRejected = { pdfs.closeAll() }) { pdfs.closeAll() }
-    // Work already accepted still runs and settles its promise; new work is refused.
-    renderer.shutdown()
-    worker.shutdown()
     super.invalidate()
   }
 
   /**
-   * Runs [task] on [executor], or rejects [promise] with IO_FAILED if the module has shut
-   * down. Every promise-returning method submits its work through here.
+   * Runs [task] on [lane]. [promise] is rejected with IO_FAILED if the module has shut
+   * down, or if the task throws anything (an OutOfMemoryError included) before settling it.
    */
-  private fun submit(executor: ExecutorService, promise: Promise, task: () -> Unit) =
-      SafeSubmit.submit(
-          executor,
-          onRejected = { promise.reject("IO_FAILED", "Attachment service is not available") },
-          task = task,
-      )
+  private fun submit(lane: ModuleTasks.Lane, promise: Promise, task: () -> Unit) =
+      tasks.submit(lane, { code, message -> promise.reject(code, message) }, task)
 
   override fun pick(source: String, imagesOnly: Boolean, maxCount: Double, promise: Promise) {
     val max = maxCount.toInt()
@@ -197,7 +180,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       pick.promise.resolve(resultJson(emptyList(), 0))
       return
     }
-    submit(worker, pick.promise) { importAll(pick, uris) }
+    submit(WORKER, pick.promise) { importAll(pick, uris) }
   }
 
   override fun onNewIntent(intent: Intent) {}
@@ -271,7 +254,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       promise.reject("INVALID_ARGUMENT", "Invalid attachment id")
       return
     }
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         promise.resolve(list.count { store.delete(it!!) }.toDouble())
       } catch (e: Exception) {
@@ -281,7 +264,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   }
 
   override fun openView(id: String, sizeBytes: Double, sha256: String, promise: Promise) {
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         promise.resolve(Uri.fromFile(views.open(id, sizeBytes.toLong(), sha256)).toString())
       } catch (e: AttachmentStore.StoreException) {
@@ -300,7 +283,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       promise.reject("INVALID_ARGUMENT", "Not a view file")
       return
     }
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         views.close(path)
         promise.resolve(null)
@@ -313,7 +296,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   }
 
   override fun openPdf(id: String, sizeBytes: Double, sha256: String, promise: Promise) {
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         val opened = pdfs.open(id, sizeBytes.toLong(), sha256)
         val pages = JSONArray()
@@ -332,7 +315,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   }
 
   override fun renderPdfPage(handle: String, index: Double, widthPx: Double, promise: Promise) {
-    submit(renderer, promise) {
+    submit(RENDERER, promise) {
       try {
         val page = pdfs.render(handle, index.toInt(), widthPx.toInt())
         promise.resolve(Uri.fromFile(page).toString())
@@ -348,14 +331,14 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
 
   override fun closePdf(handle: String, promise: Promise) {
     // After any page still rendering, on the same thread.
-    submit(renderer, promise) {
+    submit(RENDERER, promise) {
       pdfs.close(handle)
       promise.resolve(null)
     }
   }
 
   override fun purgeInactiveViews(promise: Promise) {
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         promise.resolve(views.purgeInactive().toDouble())
       } catch (e: Exception) {
@@ -380,7 +363,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       promise.reject("INVALID_ARGUMENT", "Unsupported type")
       return
     }
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         export.verify(id, sizeBytes.toLong(), sha256)
       } catch (e: Exception) {
@@ -396,7 +379,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
           else -> {
             val intent =
                 CreateDocument(mimeType)
-                    .createIntent(activity, ExportFileNames.forExport(fileName, mimeType))
+                    .createIntent(activity, AttachmentExport.destinationName(fileName, mimeType))
             pendingExport = PendingExport(promise, id, sizeBytes.toLong(), sha256)
             try {
               activity.startActivityForResult(intent, REQUEST_EXPORT)
@@ -418,7 +401,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       job.promise.resolve("cancelled")
       return
     }
-    submit(worker, job.promise) {
+    submit(WORKER, job.promise) {
       try {
         export.write(job.id, job.sizeBytes, job.sha256, documentDestination(uri))
         job.promise.resolve("saved")
@@ -458,7 +441,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
       promise.reject("INVALID_ARGUMENT", "Unsupported type")
       return
     }
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       val file =
           try {
             shares.prepare(id, sizeBytes.toLong(), sha256, fileName, mimeType)
@@ -495,7 +478,7 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   }
 
   override fun purgeExpiredShares(promise: Promise) {
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
         promise.resolve(shares.purgeExpired().toDouble())
       } catch (e: Exception) {
@@ -515,13 +498,22 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     }
   }
 
+  override fun keepUnreferenced(promise: Promise) {
+    submit(WORKER, promise) {
+      try {
+        promise.resolve(cleanup.beforeDatabaseCreated().toDouble())
+      } catch (e: Exception) {
+        promise.reject("IO_FAILED", "Could not record existing attachment files")
+      }
+    }
+  }
+
   override fun collectGarbage(knownIds: ReadableArray, promise: Promise) {
     val known = (0 until knownIds.size()).mapNotNull { knownIds.getString(it) }.toSet()
-    submit(worker, promise) {
+    submit(WORKER, promise) {
       try {
-        views.purge()
-        shares.purgeExpired()
-        promise.resolve(store.collectGarbage(known).toDouble())
+        // -1: already done in this process (a later React root), nothing was removed.
+        promise.resolve((cleanup.atStartup(known) ?: -1).toDouble())
       } catch (e: Exception) {
         promise.reject("IO_FAILED", "Could not clean up attachment files")
       }

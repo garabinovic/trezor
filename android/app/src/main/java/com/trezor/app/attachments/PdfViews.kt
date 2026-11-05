@@ -56,14 +56,17 @@ class PdfViews(private val views: AttachmentViews) {
             (0 until renderer.pageCount).map { index ->
               renderer.openPage(index).use { it.width to it.height }
             }
-          } catch (e: Exception) {
+          } catch (e: Throwable) {
             renderer.close()
-            throw PdfException(UNSUPPORTED, "PDF can't be read", e)
+            if (e is Exception) throw PdfException(UNSUPPORTED, "PDF can't be read", e)
+            throw e
           }
       val handle = ByteArray(16).also(random::nextBytes).joinToString("") { "%02x".format(it) }
       documents[handle] = Document(file, descriptor, renderer)
       return Opened(handle, sizes)
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Errors too (out of memory): the descriptor and the decrypted copy never outlive a
+      // failed open.
       descriptor?.close()
       views.close(file.path)
       throw e
@@ -99,9 +102,11 @@ class PdfViews(private val views: AttachmentViews) {
         }
         document.pages.add(out.path)
         return out
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
+        // Errors too (a page bitmap that doesn't fit in memory): no partial page file stays.
         views.close(out.path)
-        throw PdfException(UNSUPPORTED, "Page can't be shown", e)
+        if (e is Exception) throw PdfException(UNSUPPORTED, "Page can't be shown", e)
+        throw e
       }
     }
   }

@@ -39,6 +39,8 @@ class AttachmentExportTest {
   private class FakeDestination(
       var existing: Long? = 0,
       val failAfter: Int = Int.MAX_VALUE,
+      /** What a write past [failAfter] throws. */
+      val failure: () -> Throwable = { IOException("disk full") },
       val deletable: Boolean = true,
       /** Modes the provider accepts. */
       val modes: Set<String> = setOf("wt", "w"),
@@ -58,7 +60,7 @@ class AttachmentExportTest {
         override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
 
         override fun write(b: ByteArray, off: Int, len: Int) {
-          if (written.size() + len > failAfter) throw IOException("disk full")
+          if (written.size() + len > failAfter) throw failure()
           written.write(b, off, len)
         }
       }
@@ -176,6 +178,23 @@ class AttachmentExportTest {
         exportCode { export.write(imageId, imageRecord.sizeBytes, imageRecord.sha256, stuck) })
     assertArrayEquals(before, encrypted(imageId))
     store.verify(imageId, imageRecord.sizeBytes, imageRecord.sha256)
+  }
+
+  @Test
+  fun anErrorWhileWritingStillDeletesThePartialDestination() {
+    // L3: an Error (simulated out of memory) must not leave a partial plaintext copy
+    // outside the app without at least trying to delete it, and is reported like a failure.
+    val oom = FakeDestination(failAfter = 100_000, failure = { OutOfMemoryError("simulated") })
+    assertEquals(
+        AttachmentExport.EXPORT_FAILED,
+        exportCode { export.write(imageId, imageRecord.sizeBytes, imageRecord.sha256, oom) })
+    assertTrue(oom.deleted)
+
+    val stuck =
+        FakeDestination(failAfter = 100_000, failure = { OutOfMemoryError("simulated") }, deletable = false)
+    assertEquals(
+        AttachmentExport.EXPORT_INCOMPLETE,
+        exportCode { export.write(imageId, imageRecord.sizeBytes, imageRecord.sha256, stuck) })
   }
 
   @Test

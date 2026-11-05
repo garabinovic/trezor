@@ -59,7 +59,9 @@ class ShareFiles(
       }
       target.setLastModified(now())
       return target
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Errors too (out of memory while decrypting): no partial copy may stay behind, and
+      // a folder left in `active` would never be purged in this process.
       folder.deleteRecursively()
       synchronized(this) { active.remove(folder.name) }
       if (e is java.io.IOException) {
@@ -125,6 +127,8 @@ class ShareFiles(
   companion object {
     /** 24 hours, as agreed: long enough for the receiving app to read the file. */
     const val RETENTION_MS = 24L * 60 * 60 * 1000
+    /** Under the cache directory; the only path the FileProvider serves (attachment_share_paths.xml). */
+    const val CACHE_DIR = "attachments/share"
     private const val PART_NAME = ".part"
     private const val BUFFER_BYTES = 64 * 1024
   }

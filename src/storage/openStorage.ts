@@ -29,11 +29,22 @@ export interface OpenedStorage {
  * removes attachment files no row refers to (left by a crash between writing
  * a file and saving its item, or after deleting an item); this runs before
  * the UI can pick new files, and never touches a file the database knows.
+ *
+ * If the database has to be created while attachment files exist (its file
+ * is missing, but the key is not), those files may be all that is left of the
+ * original, so they are recorded as kept before the new database exists and
+ * are never collected. Native code also runs the cleanup at most once per
+ * process, so a second React root (the Activity recreated) can't remove a file
+ * the first one is still saving.
  */
 export async function openStorage(
   attachments: AttachmentPlatform = nativeAttachmentPlatform,
 ): Promise<OpenedStorage> {
-  const opened = await openTrezorDatabase();
+  const opened = await openTrezorDatabase({
+    beforeCreate: async () => {
+      await attachments.keepUnreferenced();
+    },
+  });
   // Every read and write on the shared connection goes through one queue.
   const db = serializeDatabase(opened.db);
   const items = new SqliteItemRepository(db);

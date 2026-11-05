@@ -657,6 +657,7 @@ implemented as a backup yet:
 | Phase 4 review fixes (`06004a0`) | JVM +11: share launch failures delete the copy (URI, activity, receiver), success keeps it 24 h, failing cleanup keeps the original error; export `"wt"` with fallback, unknown size refused untouched, unopenable destination cleaned up; close-time `IOException`; `importAll` continues after failures; key never created when files can't be listed; `hasAnyFile` fails closed; AVIF not taken for HEIF. Jest +5: Save disabled during import (document and card), no second selection while one runs, failed import unblocks Save, leaving during an import deletes late files | **JVM 59/59, Jest 347/347** |
 | KeyVault hardening (`04c4605`) | JVM +5 `JsKeyAccessTest`: only `database` allowed; `attachments`, `reminders`, unknown and malformed ids rejected; the three JS key operations go through the check; native code keeps its own keys. Instrumentation: + `nativeCodeKeepsAccessToAttachmentsAndRemindersKeys` (compiled, **not run**) | **JVM 64/64, Jest 347/347** |
 | UTF-8-safe export names (`6786ceb`) | JVM +8 `ExportFileNamesTest`: byte limit, extension kept, code-point-safe cut, exact and one-over boundary, no-extension, hidden and empty names, overlong extension, lone surrogate, a real share copy on disk, Share and Save a copy use the same helper | **JVM 72/72, Jest 347/347** |
+| Phase 4 corrective work (third review) | Jest 355/355 in 21 suites (+2 `openStorage`: files kept when the database is created, now and on the next launch, and never for an existing one; +2 `database`: `beforeCreate` runs only before creating, and a failure creates neither key nor file). JVM 106/106 in 14 classes: + `AttachmentCleanupTest` 13 (M1, M2), `ModuleTasksTest` 6, `JsVaultTest` 5, an `Error` case each for export, share, views and import; source-text tests removed (`SafeSubmitTest` 1, `JsKeyAccessTest` 2, `ExportFileNamesTest` 1, part of a `ShareFilesTest` case) and replaced by behaviour tests. Each fix was removed once on purpose and its test failed (the views case can't observe the released name; it shows no copy stays) | **Jest 355/355, JVM 106/106** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
@@ -774,13 +775,14 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Image zoom runs on the JS thread | `PanResponder`, no inertia, no animated double-tap; may feel less smooth on slow phones |
 | Share copies outlive 24 h if Trezor isn't reopened | Expired copies are purged only at startup or on return to the foreground (no background job). They stay in the private cache, which Android may also clear |
 | Long non-ASCII export names | **Fixed (`6786ceb`):** Share and Save a copy names were limited to 120 UTF-16 characters, so a long CJK name exceeded the 255-byte file-name limit and Share always failed. Now at most 200 UTF-8 bytes (§14.9) |
-| Second Phase 4 review, open (Low) | (1) **Fixed:** the attachments directory is now `fsync`ed after the import rename, and an import whose sync fails is undone (§14.3). (2) **Fixed:** records `parsePickResult` rejects are reported as `IMPORT_FAILED` and their files deleted at once (§14.2). (3) **Fixed:** every task goes through `SafeSubmit`. After `invalidate()` a refused submission rejects its promise with `IO_FAILED`, and work already accepted still runs (`shutdown`, not `shutdownNow`). `invalidate()` is idempotent **[verified: JVM, incl. a shutdown racing with submissions]**. Not covered: a Save a copy or picker promise whose activity result never arrives because the module was torn down while the system picker was open (the JS context that awaited it is gone too); the module lifecycle itself has no automated test (instrumentation). Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
+| Second Phase 4 review, open (Low) | (1) **Fixed:** the attachments directory is now `fsync`ed after the import rename, and an import whose sync fails is undone (§14.3). (2) **Fixed:** records `parsePickResult` rejects are reported as `IMPORT_FAILED` and their files deleted at once (§14.2). (3) **Fixed:** every task goes through `SafeSubmit` (now inside `ModuleTasks`, which owns the module's executors). After `invalidate()` a refused submission rejects its promise with `IO_FAILED`, and work already accepted still runs (`shutdown`, not `shutdownNow`). `invalidate()` is idempotent **[verified: JVM, incl. a shutdown racing with submissions]**. Not covered: a Save a copy or picker promise whose activity result never arrives because the module was torn down while the system picker was open (the JS context that awaited it is gone too); the module lifecycle itself has no automated test (instrumentation). Informational: one worker serializes imports with viewing and export; card thumbnails decrypt the whole file per mount; files picked in debug sample-data mode stay until startup cleanup |
 | Phase 4 review findings | Fixed in the review-fix commit (`06004a0`): a failed share deletes its copy at once; exports use `"wt"` and refuse destinations of unknown size; a stream that fails on close is a per-file failure; Save waits for imports; the key is never created when files can't be listed; AVIF is no longer taken for HEIF (§14) |
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
-| JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched. Native code keeps using `KeyVault` directly. **[verified: JVM]** for the rule and the module wiring; native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
+| JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched (`JsVault`). Native code keeps using `KeyVault` directly, attachments and reminders through their fixed ids. **[verified: JVM]** with a recording vault for the rule, `JsVault`, `AttachmentKeys.of` and `ScheduleStore.keyFrom`; the module's one-line delegation to `JsVault` is not tested (instrumentation). Native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
 | Untrusted PDFs are rendered in-process | Android's `PdfRenderer` (PDFium) parses picked PDFs in Trezor's process, which can unwrap the attachments key. Accepted platform risk |
 | Screen contents in Recents and screenshots (no `FLAG_SECURE`) | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Product decision pending; no change made |
-| Device UI issues (Galaxy A53) | The tab bar overlaps the Android navigation buttons, and the keyboard does not open for an auto-focused field. Both are unresolved (found during Phase 3 testing) |
+| Device UI issues (Galaxy A53) | Tab bar overlap: **fixed in code (`8d728c3`)**. The bar's height and bottom padding now include the system navigation inset, and the Documents tab is labelled "Docs". Installed on the A53 (release build); not yet confirmed there by the user. The keyboard not opening for an auto-focused field is still unresolved (found during Phase 3 testing) |
+| Third, independent Phase 4 review | (M1) **Fixed:** startup cleanup deleted every `.tza` file when the database had to be created because its file was missing; now they are recorded as kept before the database is created (§14.3). (M2) **Fixed:** startup cleanup ran on every React root mount; now once per process (§14.3). (L1) **Corrected in the docs:** the HEIF/AVIF check reads at most 12 compatible brands (§14.2). (L2) **Corrected in the docs:** tab bar row above. (L3) **Fixed:** an `Error` such as `OutOfMemoryError` in a native task now rejects its promise with `IO_FAILED` (`ModuleTasks`), instead of killing the process with the promise unsettled; share and view copies, PDF pages and descriptors, and partial exports are cleaned up on an `Error` too, and a pick that ends with an `Error` removes the files it already imported **[verified: JVM]**, except `PdfViews` (Android only, no JVM test). (L4) **Fixed:** tests that only matched Kotlin source text were replaced by behaviour tests against recording fakes (`JsVaultTest`, `ModuleTasksTest`, `AttachmentCleanupTest`, the shared export name in `ShareFilesTest`). What they can't reach is the one-line glue in the React Native modules (which method calls which helper); that needs instrumentation. The FileProvider test reads the source manifest; the merged manifest of the debug APK (checked with `aapt2`, not automated) has two providers, ours (not exported, authority `com.trezor.app.attachments`) and androidx.startup's `InitializationProvider` (not exported, no file paths). Observed, not changed: a second React root also opens a second database connection (the first is never closed); M2 no longer depends on that, but two connections writing at once is unreviewed |
 
 ---
 
@@ -1005,10 +1007,12 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   (`ACTION_OPEN_DOCUMENT` with the supported types). Neither needs a storage
   permission; the picked URIs are read once and not kept.
 - Each file is imported on one background worker. The type is taken from the
-  first 64 bytes (JPEG, PNG, WebP, HEIC/HEIF, PDF). For HEIF the whole `ftyp`
-  brand list is read. AVIF is refused as unsupported even when its major
-  brand is the generic `mif1`/`msf1`, so it is never stored as HEIF
-  **[verified: JVM]**. The name and type the
+  first 64 bytes (JPEG, PNG, WebP, HEIC/HEIF, PDF). For HEIF the major brand and
+  the compatible brands within those 64 bytes are read (at most 12). AVIF is
+  refused as unsupported even when its major brand is the generic
+  `mif1`/`msf1` **[verified: JVM]**, but only if `avif`/`avis` is among the
+  brands read: a file that lists it after the 12th compatible brand is stored
+  as `image/heif`. The name and type the
   providing app declares do not decide it, so a renamed file can't pass as
   another type. Over 25 MB is refused while reading, even if the declared size
   is wrong. Names are reduced to their last segment, without control or
@@ -1035,7 +1039,8 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
     startup cleanup. The user has already been told the file wasn't added.
   - Kotlin and TS apply the same limits today, so a valid import is never
     refused; this guards against future drift.
-- `deleteFiles(ids)` (idempotent) and `collectGarbage(knownIds)` (§14.3), plus
+- `deleteFiles(ids)` (idempotent), `keepUnreferenced()` and
+  `collectGarbage(knownIds)` (§14.3), plus
   `openView`/`closeView`, `openPdf`/`renderPdfPage`/`closePdf`,
   `purgeInactiveViews` (§14.4, §14.8), `saveCopy`, `share` and
   `purgeExpiredShares` (§14.9).
@@ -1075,6 +1080,31 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   imports, and leaves other files alone. A failure is logged as a code and
   retried next launch. If the database cannot be opened, nothing is removed
   **[verified: Jest]**.
+- **Once per process** (`AttachmentCleanup`). Removing files without a row
+  is only safe while no import awaits its row. If the Activity is recreated
+  while the process and the JS runtime live on, a second React root runs
+  `openStorage` again; its `collectGarbage` only purges expired shares and
+  resolves with -1. Files the first tree imported but hasn't saved yet, and
+  its open views, stay. The claim is taken before any work, so a failed
+  cleanup is retried by the next process, not by a later root
+  **[verified: JVM, incl. concurrent calls]**. Whether RN 0.88 keeps the JS
+  runtime across Activity recreation is not verified on a device; the rule
+  holds either way.
+- **Never over a database that had to be created.** If the key exists but
+  `trezor.db` is missing, the database is created again (§6.1). The `.tza`
+  files may then be all that is left of the original (still decryptable with
+  the existing key), so `openTrezorDatabase` runs `beforeCreate` first: the
+  native `keepUnreferenced()` records every stored id in
+  `attachments/kept-ids` (ids only; synced, renamed, directory synced) before
+  the database file (and, on a first launch, the key) is created. `collectGarbage` never removes a
+  kept id, on this or any later launch; the record only grows. If it can't be
+  written, or the store directory exists but can't be listed, nothing is
+  created and the error screen shows `STORAGE_ERROR`. If
+  it can't be read, garbage collection removes only `.part` files and fails
+  with `IO_FAILED`. Kept files still count for the key rule (§14.1)
+  **[verified: JVM, Jest]**. They are manual-recovery material like
+  snapshots: nothing deletes them yet (delete-all, Phase 7, will). A genuine
+  first launch has no files, so nothing is written.
 - Files picked for a draft that is then discarded are deleted at once by the
   editor session (§14.5). Only a crash or a killed process leaves them for
   the startup cleanup.

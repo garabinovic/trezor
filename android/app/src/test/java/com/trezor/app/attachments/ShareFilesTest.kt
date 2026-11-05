@@ -55,6 +55,20 @@ class ShareFilesTest {
   }
 
   @Test
+  fun anErrorWhilePreparingLeavesNoFolderBehind() {
+    // L3: an Error (simulated out of memory) while decrypting the share copy.
+    val failing = AttachmentStore(File(folder.root, "files/attachments")) { throw OutOfMemoryError("simulated") }
+    val broken = ShareFiles(failing, dir, now = { clock })
+    try {
+      broken.prepare(id, record.sizeBytes, record.sha256, "x.pdf", MediaTypes.PDF)
+      fail("the Error must propagate")
+    } catch (e: OutOfMemoryError) {
+      // expected
+    }
+    assertTrue(dir.listFiles().orEmpty().isEmpty())
+  }
+
+  @Test
   fun aDamagedOrMissingAttachmentLeavesNothingToShare() {
     try {
       shares.prepare(id, record.sizeBytes, "0".repeat(64), "x.pdf", MediaTypes.PDF)
@@ -225,12 +239,20 @@ class ShareFilesTest {
     val meta = children(provider).single()
     assertEquals("@xml/attachment_share_paths", meta.getAttributeNS(android, "resource"))
 
-    // The module writes share files into exactly that directory.
-    val module = File("src/main/java/com/trezor/app/attachments/TrezorAttachmentsModule.kt").readText()
-    assertTrue(module.contains("ShareFiles(store, File(reactContext.cacheDir, \"attachments/share\"))"))
-    // Startup cleanup (collectGarbage) removes expired shares too.
-    val startup = module.substringAfter("override fun collectGarbage").substringBefore("\n  }\n")
-    assertTrue(startup.contains("shares.purgeExpired()"))
+    // The directory share copies are written to (ShareFiles.CACHE_DIR, used by the module)
+    // is exactly the one served.
+    assertEquals("${ShareFiles.CACHE_DIR}/", entries[0].getAttribute("path"))
+  }
+
+  @Test
+  fun shareCopiesAndSaveACopyGetTheSameName() {
+    // Save a copy suggests AttachmentExport.destinationName in the save-to picker; a
+    // share copy is named by ShareFiles. Both must follow one rule (ExportFileNames).
+    val names =
+        listOf("Receipt March.pdf", "scan", "../../files/attachments/notes", "收据".repeat(120), "a".repeat(400) + ".pdf")
+    for (name in names) {
+      assertEquals(name, AttachmentExport.destinationName(name, MediaTypes.PDF), prepare(name).name)
+    }
   }
 
   private fun parse(file: File) =

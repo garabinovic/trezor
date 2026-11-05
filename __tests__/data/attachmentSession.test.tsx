@@ -40,6 +40,7 @@ function fakePlatform() {
     saveCopy: async () => 'cancelled',
     share: async () => {},
     purgeExpiredShares: async () => 0,
+    keepUnreferenced: async () => 0,
     collectGarbage: async () => 0,
   };
   return {

@@ -9,12 +9,21 @@ import { createNodeSqliteDatabase } from '../../test-utils/nodeSqlite';
 // step is replaced.
 let mockDb: SqlDatabase;
 let mockOpenFailure: Error | null = null;
+/** The database file is absent, so this open creates it. */
+let mockCreating = false;
 jest.mock('../../src/storage/database', () => ({
-  openTrezorDatabase: async () => {
+  openTrezorDatabase: async (options?: {
+    beforeCreate?: () => Promise<void>;
+  }) => {
     if (mockOpenFailure) {
       throw mockOpenFailure;
     }
-    return { db: mockDb };
+    if (mockCreating) {
+      // The real openTrezorDatabase turns a failure here into STORAGE_ERROR
+      // before anything is created (database.test.ts).
+      await options?.beforeCreate?.();
+    }
+    return { db: mockDb, created: mockCreating };
   },
 }));
 
@@ -50,6 +59,7 @@ const doc: DocumentItem = {
 beforeEach(async () => {
   fakeAttachments.reset();
   mockOpenFailure = null;
+  mockCreating = false;
   mockDb = createNodeSqliteDatabase();
   await runMigrations(mockDb);
   await new SqliteItemRepository(mockDb).save(doc);
@@ -80,6 +90,28 @@ describe('openStorage attachment cleanup', () => {
       '[attachments] cleanup failed: IO_FAILED',
     );
     warn.mockRestore();
+  });
+
+  test('M1: files that exist when the database is created are kept, now and later', async () => {
+    // The database file is missing (its key is not); its files are still there.
+    mockCreating = true;
+    mockDb = createNodeSqliteDatabase();
+    await runMigrations(mockDb);
+
+    await openStorage();
+    expect(fakeAttachments.keepRuns).toBe(1);
+    expect(fakeAttachments.files.size).toBe(3);
+
+    // Next launch: the database exists now and has none of their rows.
+    mockCreating = false;
+    await openStorage();
+    expect(fakeAttachments.keepRuns).toBe(1);
+    expect(fakeAttachments.files.size).toBe(3);
+  });
+
+  test('an existing database never records files as kept', async () => {
+    await openStorage();
+    expect(fakeAttachments.keepRuns).toBe(0);
   });
 
   test('nothing is cleaned up when the database cannot be opened', async () => {

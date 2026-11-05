@@ -20,9 +20,9 @@ import java.io.OutputStream
  *
  * Crash safety relies on the caller's order: files are imported before their database row
  * is committed, and deleted only after the row is gone. A crash can leave an orphan file,
- * which [collectGarbage] removes at startup. A row without its file would need storage that
- * loses a synced directory entry; the store can't recreate such a file (it shows as
- * missing).
+ * which [collectGarbage] removes at startup unless [keepUnreferenced] recorded it. A row
+ * without its file would need storage that loses a synced directory entry; the store
+ * can't recreate such a file (it shows as missing).
  *
  * [key] returns the 32-byte wrapping key (KeyVault "attachments"); it is zeroed after use.
  */
@@ -181,17 +181,20 @@ class AttachmentStore(
 
   /**
    * Removes files whose id is not in [knownIds] (the database's attachment ids) and every
-   * unfinished import. Only safe when no import awaits its database row, i.e. at startup.
-   * Files that are not attachment files are left alone. Returns the number removed.
+   * unfinished import. Only safe when no import awaits its database row, i.e. once at
+   * startup (AttachmentCleanup). Files recorded by [keepUnreferenced] and files that are
+   * not attachment files are left alone. If that record can't be read, nothing but
+   * unfinished imports is removed and IO_FAILED is thrown. Returns the number removed.
    */
   @Synchronized
   fun collectGarbage(knownIds: Set<String>): Int {
     var removed = 0
     tmp.listFiles()?.forEach { if (it.isFile && it.name.endsWith(PART_SUFFIX) && it.delete()) removed++ }
+    val kept = keptIds()
     root.listFiles()?.forEach { file ->
       val id = file.name.removeSuffix(SUFFIX)
       if (file.isFile && file.name.endsWith(SUFFIX) && ID_PATTERN.matches(id) &&
-          id !in knownIds && file.delete()) {
+          id !in knownIds && id !in kept && file.delete()) {
         removed++
       }
     }
@@ -199,16 +202,73 @@ class AttachmentStore(
   }
 
   /**
+   * Records every stored id not in [knownIds] as kept, so [collectGarbage] never removes
+   * those files (used when the database had to be created while files exist: they may be
+   * all that is left of the missing original). The record is added to, never shrunk, and
+   * written durably (synced, renamed, directory synced) before this returns. It holds ids
+   * only. Fails closed like [hasAnyFile]: a store directory that exists but can't be listed
+   * throws IO_FAILED instead of keeping nothing. Returns how many ids are kept in total.
+   */
+  @Synchronized
+  fun keepUnreferenced(knownIds: Set<String>): Int {
+    val before = keptIds()
+    val stored =
+        listOrThrow()
+            .filter { it.isFile && it.name.endsWith(SUFFIX) }
+            .map { it.name.removeSuffix(SUFFIX) }
+            .filter(ID_PATTERN::matches)
+    val kept = before + (stored.toSet() - knownIds)
+    if (kept == before) return kept.size
+    if (!tmp.isDirectory && !tmp.mkdirs()) {
+      throw StoreException(StoreException.Code.IO_FAILED, "Could not create attachment directory")
+    }
+    val part = File(tmp, "$KEPT_NAME.new")
+    try {
+      FileOutputStream(part).use { out ->
+        val text = (listOf(KEPT_HEADER) + kept.sorted()).joinToString("\n", postfix = "\n")
+        out.write(text.toByteArray(Charsets.US_ASCII))
+        out.fd.sync()
+      }
+      if (!part.renameTo(File(root, KEPT_NAME))) {
+        throw StoreException(StoreException.Code.IO_FAILED, "Could not record kept attachments")
+      }
+      syncDirectory(root)
+    } catch (e: java.io.IOException) {
+      throw StoreException(StoreException.Code.IO_FAILED, "Could not record kept attachments", e)
+    } finally {
+      part.delete()
+    }
+    return kept.size
+  }
+
+  /** Ids recorded by [keepUnreferenced]; throws IO_FAILED when the record can't be read. */
+  fun keptIds(): Set<String> {
+    val file = File(root, KEPT_NAME)
+    if (!file.exists()) return emptySet()
+    val lines =
+        try {
+          file.readText(Charsets.US_ASCII).split("\n").dropLastWhile { it.isEmpty() }
+        } catch (e: java.io.IOException) {
+          throw StoreException(StoreException.Code.IO_FAILED, "Kept attachments can't be read", e)
+        }
+    if (lines.firstOrNull() != KEPT_HEADER || !lines.drop(1).all(ID_PATTERN::matches)) {
+      throw StoreException(StoreException.Code.IO_FAILED, "Kept attachments record is damaged")
+    }
+    return lines.drop(1).toSet()
+  }
+
+  /**
    * Whether any encrypted attachment file exists. Never guesses "no": a store directory
    * that exists but can't be listed, or isn't a directory, throws IO_FAILED, so a caller
    * deciding whether a new key is safe fails closed (see AttachmentKeys).
    */
-  fun hasAnyFile(): Boolean {
-    if (!root.exists()) return false
-    val files =
-        (if (root.isDirectory) root.listFiles() else null)
-            ?: throw StoreException(StoreException.Code.IO_FAILED, "Attachment directory can't be read")
-    return files.any { it.isFile && it.name.endsWith(SUFFIX) }
+  fun hasAnyFile(): Boolean = listOrThrow().any { it.isFile && it.name.endsWith(SUFFIX) }
+
+  /** Entries of [root]; none if it doesn't exist, IO_FAILED if it exists but can't be listed. */
+  private fun listOrThrow(): Array<File> {
+    if (!root.exists()) return emptyArray()
+    return (if (root.isDirectory) root.listFiles() else null)
+        ?: throw StoreException(StoreException.Code.IO_FAILED, "Attachment directory can't be read")
   }
 
   /** Attachment ids that have a file (diagnostics and tests). */
@@ -228,6 +288,9 @@ class AttachmentStore(
   companion object {
     const val SUFFIX = ".tza"
     private const val PART_SUFFIX = ".part"
+    /** In [root], next to the `.tza` files; not an attachment file name. */
+    const val KEPT_NAME = "kept-ids"
+    private const val KEPT_HEADER = "trezor.kept-attachments|1"
     private const val BUFFER_BYTES = 64 * 1024
     /** Lower-case UUID (the app's UUIDv7 ids); also keeps ids out of path traversal. */
     val ID_PATTERN = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
