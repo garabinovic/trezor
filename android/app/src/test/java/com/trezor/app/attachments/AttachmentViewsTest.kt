@@ -83,6 +83,43 @@ class AttachmentViewsTest {
   }
 
   @Test
+  fun aFailedOpenReleasesTheNameItReserved() {
+    val key = ByteArray(32) { 9 }
+    for (failure in listOf<() -> Nothing>(
+        { throw OutOfMemoryError("simulated") },
+        { throw AttachmentStore.StoreException(Code.IO_FAILED, "simulated") })) {
+      dir.deleteRecursively()
+      // The name an open reserves is visible only through its .part file while it
+      // decrypts: the key provider records it there, and fails the first time.
+      var reserved: String? = null
+      val once =
+          AttachmentViews(
+              AttachmentStore(File(folder.root, "attachments")) {
+                if (reserved != null) return@AttachmentStore key.copyOf()
+                reserved = dir.listFiles().orEmpty().single().name.removeSuffix(".part")
+                failure()
+              },
+              dir)
+      try {
+        once.open(id, stored.sizeBytes, stored.sha256)
+        fail("the first open must fail")
+      } catch (e: Throwable) {
+        // expected: the OutOfMemoryError or the StoreException
+      }
+      assertTrue(dir.listFiles().orEmpty().isEmpty())
+
+      // A file that later appears under that name is held by no screen, so the same
+      // instance removes it; a retry still opens, and its copy is held.
+      val leftover = File(dir, reserved!!).also { it.writeBytes(byteArrayOf(7)) }
+      val retried = once.open(id, stored.sizeBytes, stored.sha256)
+      assertArrayEquals(content, retried.readBytes())
+      assertEquals(1, once.purgeInactive())
+      assertFalse("a failed open must release its name", leftover.exists())
+      assertTrue(retried.exists())
+    }
+  }
+
+  @Test
   fun closeRefusesFilesOutsideTheViewDirectory() {
     val outside = File(folder.root, "attachments/$id${AttachmentStore.SUFFIX}")
     for (path in listOf(outside.path, "${dir.path}/../../attachments/x.view", "${dir.path}/notes.txt")) {

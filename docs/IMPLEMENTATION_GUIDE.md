@@ -675,7 +675,11 @@ or a physical device, and no instrumentation test was run.
     task now rejects its promise with `IO_FAILED` (`ModuleTasks`), instead
     of killing the process with the promise unsettled; partial plaintext
     copies, PDF pages and descriptors are cleaned up on an `Error` too, and
-    an interrupted pick removes the files it already imported.
+    an interrupted pick removes the files it already imported. For
+    `OutOfMemoryError` this is best effort only: the rejection and the
+    cleanup need memory themselves, the React Native bridge or JS runtime
+    can fail on the same shortage, and the process may still die. The app
+    does not claim to recover from running out of memory.
   - **Fixed, Low (L4):** tests that only matched Kotlin source text were
     replaced by behaviour tests against recording fakes. The one-line glue
     inside the React Native modules remains untested (instrumentation).

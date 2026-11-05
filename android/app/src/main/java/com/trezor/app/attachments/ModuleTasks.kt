@@ -16,6 +16,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * thread's uncaught-exception handler (which would kill the process and leave the promise
  * unsettled). React Native ignores a second settlement, so a task that already settled
  * and then threw stays settled once.
+ *
+ * For an [OutOfMemoryError] this, and the cleanup the attachment classes attempt on an
+ * [Error], is best effort: the rejection and the cleanup need memory too and may fail
+ * themselves, other threads (the React Native bridge or JS runtime included) can fail on
+ * the same shortage, and the process may still be killed. Nothing here claims the app
+ * recovers from running out of memory; it only avoids turning a failure this code could
+ * report into a certain crash with the promise left unsettled.
  */
 class ModuleTasks(
     private val worker: ExecutorService = Executors.newSingleThreadExecutor(),
