@@ -1,22 +1,15 @@
 package com.trezor.app.vault
 
 import android.os.Build
-import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
 import java.io.File
-import java.io.FileOutputStream
-import java.io.IOException
 import java.security.GeneralSecurityException
-import java.security.KeyStore
 import java.security.SecureRandom
-import java.security.UnrecoverableKeyException
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -37,11 +30,24 @@ import org.json.JSONObject
  * so an envelope cannot be renamed or reused for another purpose.
  *
  * The vault never creates a replacement key on failure: callers decide what to do.
+ *
+ * Every operation runs under one process-wide lock in [EnvelopeStore], which also decides
+ * when a master key may be generated and makes each new envelope durable. Several
+ * instances on the same [keyDir] are therefore safe.
  */
-class KeyVault(
-    private val keyDir: File,
-    private val masterKeyAlias: String = DEFAULT_MASTER_KEY_ALIAS,
+class KeyVault
+internal constructor(
+    keyDir: File,
+    private val masterKeyAlias: String,
+    masterKeys: MasterKeys,
 ) : VaultKeys {
+
+  constructor(
+      keyDir: File,
+      masterKeyAlias: String = DEFAULT_MASTER_KEY_ALIAS,
+  ) : this(keyDir, masterKeyAlias, AndroidMasterKeys(masterKeyAlias))
+
+  private val store = EnvelopeStore(keyDir, masterKeys)
 
   enum class SecurityLevel(val jsValue: String) {
     STRONGBOX("strongbox"),
@@ -53,20 +59,16 @@ class KeyVault(
 
   private val random = SecureRandom()
 
-  @Synchronized
-  override fun hasKey(keyId: String): Boolean = envelopeFile(keyId).isFile
+  override fun hasKey(keyId: String): Boolean = store.exists(envelopeName(keyId))
 
   /** Creates and stores a new random key. Returns the plaintext key; caller must zero it. */
-  @Synchronized
   override fun createKey(keyId: String): ByteArray {
-    val file = envelopeFile(keyId)
-    if (file.exists()) {
-      throw VaultException(VaultException.Code.KEY_ALREADY_EXISTS, "Key '$keyId' already exists")
-    }
-    val master = loadMasterKey() ?: createMasterKeyIfSafe()
+    val name = envelopeName(keyId)
     val key = randomBytes(KEY_LENGTH_BYTES)
     try {
-      writeEnvelope(file, wrap(master, keyId, key, System.currentTimeMillis()))
+      store.create(name) { master ->
+        encodeEnvelope(wrap(master, keyId, key, System.currentTimeMillis()))
+      }
       return key.copyOf()
     } finally {
       key.fill(0)
@@ -74,13 +76,15 @@ class KeyVault(
   }
 
   /** Unwraps an existing key. Returns the plaintext key; caller must zero it. */
-  @Synchronized
-  override fun getKey(keyId: String): ByteArray {
-    val file = envelopeFile(keyId)
-    if (!file.isFile) {
-      throw VaultException(VaultException.Code.KEY_NOT_FOUND, "No key '$keyId'")
-    }
-    val envelope = readEnvelope(file)
+  override fun getKey(keyId: String): ByteArray =
+      EnvelopeStore.locked {
+        val bytes =
+            store.read(envelopeName(keyId))
+                ?: throw VaultException(VaultException.Code.KEY_NOT_FOUND, "No key '$keyId'")
+        unwrapStored(keyId, decodeEnvelope(bytes))
+      }
+
+  private fun unwrapStored(keyId: String, envelope: Envelope): ByteArray {
     if (envelope.version > ENVELOPE_VERSION) {
       throw VaultException(
           VaultException.Code.ENVELOPE_UNSUPPORTED,
@@ -91,7 +95,7 @@ class KeyVault(
       throw VaultException(VaultException.Code.UNWRAP_FAILED, "Envelope does not match '$keyId'")
     }
     val master =
-        loadMasterKey()
+        store.masterKey()
             ?: throw VaultException(
                 VaultException.Code.MASTER_KEY_MISSING,
                 "Master key is missing from Android Keystore",
@@ -105,9 +109,8 @@ class KeyVault(
   }
 
   /** Where the master key is stored. [SecurityLevel.NONE] when it does not exist yet. */
-  @Synchronized
   fun masterKeySecurityLevel(): SecurityLevel {
-    val key = loadMasterKey() ?: return SecurityLevel.NONE
+    val key = store.masterKey() ?: return SecurityLevel.NONE
     return try {
       val factory = SecretKeyFactory.getInstance(key.algorithm, ANDROID_KEYSTORE)
       val info = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
@@ -125,87 +128,6 @@ class KeyVault(
       }
     } catch (e: GeneralSecurityException) {
       SecurityLevel.UNKNOWN
-    }
-  }
-
-  // --- Master key -------------------------------------------------------------------------
-
-  private fun keyStore(): KeyStore =
-      try {
-        KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-      } catch (e: Exception) {
-        throw VaultException(
-            VaultException.Code.KEYSTORE_UNAVAILABLE,
-            "Android Keystore unavailable",
-            e,
-        )
-      }
-
-  private fun loadMasterKey(): SecretKey? =
-      try {
-        keyStore().getKey(masterKeyAlias, null) as SecretKey?
-      } catch (e: UnrecoverableKeyException) {
-        throw VaultException(VaultException.Code.KEY_INVALIDATED, "Master key unrecoverable", e)
-      } catch (e: VaultException) {
-        throw e
-      } catch (e: Exception) {
-        throw VaultException(
-            VaultException.Code.KEYSTORE_UNAVAILABLE,
-            "Could not load master key",
-            e,
-        )
-      }
-
-  /**
-   * A new master key would orphan every existing envelope, so it is only created when no
-   * envelopes exist yet (first launch, or after the app's data was cleared).
-   */
-  private fun createMasterKeyIfSafe(): SecretKey {
-    val existing = keyDir.listFiles { f -> f.name.endsWith(ENVELOPE_SUFFIX) }.orEmpty()
-    if (existing.isNotEmpty()) {
-      throw VaultException(
-          VaultException.Code.MASTER_KEY_MISSING,
-          "Master key is missing but ${existing.size} envelope(s) exist",
-      )
-    }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-      try {
-        return generateMasterKey(strongBox = true)
-      } catch (e: StrongBoxUnavailableException) {
-        // Fall through to TEE / software-backed key.
-      }
-    }
-    return generateMasterKey(strongBox = false)
-  }
-
-  private fun generateMasterKey(strongBox: Boolean): SecretKey {
-    val spec =
-        KeyGenParameterSpec.Builder(
-                masterKeyAlias,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-            )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setRandomizedEncryptionRequired(true)
-            .apply {
-              if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                setIsStrongBoxBacked(true)
-              }
-            }
-            .build()
-    return try {
-      KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-          .apply { init(spec) }
-          .generateKey()
-    } catch (e: StrongBoxUnavailableException) {
-      throw e
-    } catch (e: Exception) {
-      throw VaultException(
-          VaultException.Code.KEYSTORE_UNAVAILABLE,
-          "Could not create master key",
-          e,
-      )
     }
   }
 
@@ -262,13 +184,12 @@ class KeyVault(
 
   // --- Envelope files ---------------------------------------------------------------------
 
-  private fun envelopeFile(keyId: String): File {
+  private fun envelopeName(keyId: String): String {
     require(KEY_ID_PATTERN.matches(keyId)) { "Invalid key id" }
-    return File(keyDir, "$keyId$ENVELOPE_SUFFIX")
+    return "$keyId${EnvelopeStore.SUFFIX}"
   }
 
-  private fun writeEnvelope(file: File, envelope: Envelope) {
-    val json =
+  private fun encodeEnvelope(envelope: Envelope): ByteArray =
         JSONObject()
             .put("format", ENVELOPE_FORMAT)
             .put("version", envelope.version)
@@ -279,27 +200,10 @@ class KeyVault(
             .put("ciphertext", Base64.encodeToString(envelope.ciphertext, Base64.NO_WRAP))
             .put("createdAt", envelope.createdAt)
             .toString()
-    try {
-      if (!keyDir.isDirectory && !keyDir.mkdirs()) throw IOException("Cannot create $keyDir")
-      // Write-then-rename so a crash never leaves a half-written envelope.
-      val tmp = File(keyDir, "${file.name}.tmp")
-      FileOutputStream(tmp).use {
-        it.write(json.toByteArray(Charsets.UTF_8))
-        it.fd.sync()
-      }
-      if (!tmp.renameTo(file)) throw IOException("Cannot move envelope into place")
-    } catch (e: IOException) {
-      throw VaultException(VaultException.Code.STORAGE_ERROR, "Could not write key envelope", e)
-    }
-  }
+            .toByteArray(Charsets.UTF_8)
 
-  private fun readEnvelope(file: File): Envelope {
-    val text =
-        try {
-          file.readText(Charsets.UTF_8)
-        } catch (e: IOException) {
-          throw VaultException(VaultException.Code.STORAGE_ERROR, "Could not read key envelope", e)
-        }
+  private fun decodeEnvelope(bytes: ByteArray): Envelope {
+    val text = String(bytes, Charsets.UTF_8)
     return try {
       val json = JSONObject(text)
       if (json.getString("format") != ENVELOPE_FORMAT) throw JSONException("Unknown format")
@@ -324,8 +228,7 @@ class KeyVault(
     const val ENVELOPE_VERSION = 1
     const val KEY_LENGTH_BYTES = 32
     private const val MAX_RANDOM_BYTES = 1024
-    private const val ENVELOPE_SUFFIX = ".key.json"
-    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    internal const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_BITS = 128
     private val KEY_ID_PATTERN = Regex("^[a-z][a-z0-9-]{0,31}$")

@@ -161,6 +161,21 @@ Android Keystore  "trezor.master.v1"  AES-256-GCM, non-exportable,
   orphan every existing envelope, so if envelopes exist and the master key is
   gone, the vault reports `MASTER_KEY_MISSING` and never replaces it
   **[verified: instrumentation test]**.
+- **One lock for the whole process** (`EnvelopeStore`, audit V1). The React
+  modules and the reminder code each create a `KeyVault` on the same
+  directory; a lock per instance let two of them see "no master key" at once
+  and both generate one, and Android Keystore silently replaces an alias.
+  Under the lock the alias is re-checked, and a master key is generated only
+  when the key directory can be listed (L1: a failed listing is
+  `STORAGE_ERROR`, never "empty") and holds no envelope and no envelope temp
+  file **[verified: JVM, several instances on one directory, fake Keystore]**.
+- **Durable envelopes** (V2, L4): each write uses its own temp file name,
+  is synced, renamed (an envelope is never replaced), and the directory is
+  synced, plus its parent when it was just created, before the key is
+  returned; a failed sync is `STORAGE_ERROR` **[verified: JVM]**. Temp files
+  left by a crash are kept and never reused: one may be the only copy of an
+  envelope whose rename didn't reach the disk. Recovering such a file is not
+  implemented.
 - Not bound to user authentication or `setUnlockedDeviceRequired`. The reasons:
   - Phase 1 has no app lock.
   - Unlocked-device binding (API 28+) would stop future features that need
