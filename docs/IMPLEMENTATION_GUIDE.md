@@ -276,7 +276,8 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
 - `allowBackup="false"`, plus `fullBackupContent` and `dataExtractionRules`
   that exclude every domain from cloud backup and device transfer.
 - Keys, the database and attachments are bound to this device's Keystore.
-  Uninstalling or clearing storage loses the data (by design until Phase 6).
+  Uninstalling or clearing storage loses the data: restore is not
+  implemented yet (Phase 6; TA §8).
 
 **Not protected:**
 - An attacker running code inside the unlocked app process.
@@ -533,6 +534,13 @@ npm start / npm run android  # Metro + install (see README for another port)
 - **Data:** drafts, organizer, search and the attachment session.
 - **Reminders:** recurrence fixtures and the scheduler.
 - **Attachments:** platform parsing and zoom math.
+- **Backup** (`backup/backup.test.ts`): `createBackup` and `checkBackup` with
+  the real export and artifact checks on the SQLCipher fake and a recording
+  fake of the native platform. The fake supports `location` (including
+  `:memory:`), reports SQLCipher 4's cipher settings unless a test changes
+  them, and, like the real export, creates every table before copying rows
+  with foreign keys off. `NativeTrezorBackup` is stubbed in `jest.setup.js`
+  (every call rejects): tests pass their own platform.
 - **App-level flows:** `organizerFlows`, `reminderFlows`, `cardFlows`,
   `documentFlows`, `viewerFlows`.
   - They use `test-utils/appHarness.tsx`, which drives the real screens.
@@ -547,6 +555,10 @@ npm start / npm run android  # Metro + install (see README for another port)
   `AttachmentExportTest`, `ShareFilesTest`, `ExportFileNamesTest`.
 - `reminders/RecurrenceTest`.
 - `vault/JsKeyAccessTest`.
+- `backup/`: format (`TzbkFormatTest`, `TzbkVectorsTest`, `TzaSectionTest`,
+  `BackupManifestTest`, `BackupPasswordTest`) and Step 2 (`BackupServiceTest`
+  on a real `AttachmentStore` with an in-memory destination that can fail at
+  every step, `BackupGateTest`, `BackupFilesTest`).
 - Platform-free logic is extracted from Android classes so it can be tested
   here. Keep that pattern.
 
@@ -569,8 +581,13 @@ checks on the device (logged with `[SELFTEST]`). It reuses the production
 - Done once for v2 → v3 (TA §5). op-sqlite's bundled
   `cpp/sqlcipher/sqlite3.c` was compiled for macOS with the Android flags,
   and a ctypes bridge drove the production `openTrezorDatabase`.
+- Done again for Phase 6 Step 2 (`backup.check.ts`, same bridge with
+  `location` and `:memory:`): the backup export with foreign keys on and every
+  artifact check of TA §8.5, on production `artifact.ts` and `createBackup`.
 - **The harness is not in the repository**, so repeating it means rebuilding
-  it the same way, with isolated temporary files only.
+  it the same way, with isolated temporary files only. Run its suites in band
+  (`jest -i`): the migration check deletes the shared temporary root when it
+  starts.
 
 **Verification levels:** always say which one was reached.
 - **Automated:** Jest/JVM.
@@ -581,6 +598,10 @@ checks on the device (logged with `[SELFTEST]`). It reuses the production
 Phase 4 has reached the automated level only (Jest, JVM and the one-off
 real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
 or a physical device, and no instrumentation test was run.
+
+Phase 6 Steps 1–2 are at the automated level too (JVM, Jest and the one-off
+real-SQLCipher backup check on macOS). Backup creation and Check backup have
+not run on an emulator or a device (TA §8.8).
 
 ---
 
@@ -593,10 +614,11 @@ or a physical device, and no instrumentation test was run.
 | 2 — Persistent items and search | Repository CRUD for all four types, pinning, filters and sorts, Unicode search, document expiry, debug sample data | TA §7 |
 | 3 — Reminders | Schema v2, six repeat modes, native alarms and notifications, notification privacy, reboot/time-change re-arming, exact alarms (`191ad7f`) | TA §13; commit `147699d` |
 | 4 — Cards, documents, attachments | Schema v3, TZA encrypted files, card issuer and front/back photos, up to 10 document files, viewer, save a copy, share, cleanup; review fixes | TA §14; steps `ade411f` … `3982135`, docs `1b15cf4`, review fixes `06004a0`, KeyVault hardening `04c4605`, UTF-8 export names `6786ceb`. Acceptance pending |
+| 6 — Encrypted backup (Steps 1–2 of 5) | TZBK v1 format library (`1dbcfae`); backup creation (SQLCipher export under the backup gate, attachment verification and DEK rewrap, SAF write with `fsync` and mandatory read-back) and non-destructive Check backup, as APIs without UI (`src/backup/backup.ts`) | TA §8 |
 
 **Not implemented** (shown as "Not available yet" or not present):
 - app lock and biometrics;
-- backup and restore (Phase 6 design only, TA §8);
+- restore, and any backup or Check backup UI (Phase 6 Steps 3–5; creation and Check exist as APIs only, TA §8);
 - delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;
@@ -695,8 +717,9 @@ or a physical device, and no instrumentation test was run.
   - card thumbnails decrypt the whole file on every mount;
   - files picked in debug sample-data mode stay until startup cleanup.
 
-- Key loss means data loss until backup exists. Snapshots are never cleaned
-  up or restored automatically.
+- Key loss means data loss until restore exists (backup creation exists as
+  an API without UI, TA §8). Snapshots are never cleaned up or restored
+  automatically.
 
 ---
 

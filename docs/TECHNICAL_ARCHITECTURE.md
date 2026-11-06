@@ -59,7 +59,8 @@ Rules:
 | `src/native/NativeTrezorVault.ts` | TurboModule spec (app-level codegen, `codegenConfig` in `package.json`) |
 | `src/storage/vault.ts` | TS wrapper; maps native rejections to `StorageError` |
 | `android/app/src/main/java/com/trezor/app/storage/` | `DatabaseFiles`: definite file state, no-replace rename, temp-only delete (database directory only) |
-| `android/app/src/main/java/com/trezor/app/backup/` | Phase 6 Step 1: the TZBK v1 backup format library (header, Argon2id via BouncyCastle 1.79, HKDF, chunked AES-GCM sections, trailer HMAC, strict manifest, password rules with the Unicode 8.0 table). Not wired into the app yet; reference and vectors in `tools/backup-format/` |
+| `android/app/src/main/java/com/trezor/app/backup/` | Phase 6. Step 1: the TZBK v1 backup format library (header, Argon2id via BouncyCastle 1.79, HKDF, chunked AES-GCM sections, trailer HMAC, strict manifest, password rules with the Unicode 8.0 table; reference and vectors in `tools/backup-format/`). Step 2: backup creation and Check backup, native half (`BackupService`, `BackupCreator`, `BackupChecker`, `BackupGate`, `BackupFiles`, module `TrezorBackup`), §8. No UI yet |
+| `src/backup/` | Phase 6 Step 2: the JS half of backup creation and Check backup (`createBackup`, `checkBackup`; SQLCipher export and artifact verification in `artifact.ts`), §8. Not called by any screen yet |
 | `src/native/NativeTrezorDatabaseFiles.ts`, `src/storage/databaseFiles.ts` | Spec and TS wrapper for the above |
 | `src/storage/database.ts` | Startup matrix, verification, snapshot, migrations |
 | `src/storage/sqlcipher.ts` | Key-format check, keyed `open()` (drops the key from op-sqlite's retained options), encryption/integrity verification |
@@ -282,7 +283,7 @@ is out of scope (§3).
 | First launch | No envelope, no DB → master key + database key created, DB created at schema v1 **[verified]** | — |
 | Normal launch | Envelope unwrapped → DB opened and verified **[verified]** | Kept |
 | App update (install over) | Keystore entry, envelope and DB all kept **[verified: debug → release install]** | Kept |
-| Uninstall / reinstall | Android deletes the app's Keystore entries and files | **Lost by design** (no backup yet) |
+| Uninstall / reinstall | Android deletes the app's Keystore entries and files | **Lost by design** (no restore yet; backup creation exists without UI, §8) |
 | "Clear storage" in system settings | Files and Keystore entries removed → treated as a first launch | **Lost by design** |
 | Database file state can't be determined (I/O or permission error) | `DATABASE_STATE_UNKNOWN`; no key is created **[verified: Jest]** | Kept |
 | Vault returns a malformed key | `INVALID_KEY_FORMAT` before anything is opened **[verified: Jest]** | Kept |
@@ -291,7 +292,7 @@ is out of scope (§3).
 | Envelope tampered / corrupt | `UNWRAP_FAILED` **[verified: test]** | Kept on disk, unreadable |
 | Key permanently invalidated | `KEY_INVALIDATED` (not expected while the key isn't auth-bound) | Kept on disk, unreadable |
 | Android backup / device transfer | Excluded by manifest rules. Even if copied, the DB is useless without the device-bound master key | Not transferred |
-| New phone | Nothing migrates. Moving data will need the encrypted export of the backup phase (§8) | — |
+| New phone | Nothing migrates. An encrypted backup can be created (§8, no UI yet), but restore is not implemented | — |
 
 The app **never** deletes, recreates or overwrites the database or a key in
 response to an error. The error screen offers *Try again* only.
@@ -659,49 +660,170 @@ Follows SQLite's documented procedure for schema changes:
 
 ---
 
-## 8. Compatibility with future encrypted backup and restore
+## 8. Encrypted backup (Phase 6)
 
-The design keeps backup independent of this device's Keystore:
+Specification: Phase 6 spec v2.4 (backup format §3–§4, creation §6, Check
+backup §7, Annex B for the SQLCipher artifact). Implemented so far: the format
+library (Step 1) and **backup creation and Check backup** (Step 2), without UI.
+**Restore is not implemented**: no journal, quarantine, restore staging or
+settings/reminder restore exists, and nothing in the app can replace live data
+from a backup.
 
-- **Format:** backups will be a **logical export** (NDJSON per entity, tagged
-  with `schema_version`), encrypted with a key derived from a user passphrase
-  (Argon2id or scrypt). They will not be a copy of `trezor.db`, which is useless
-  off-device.
-- **Restore:** import into a staging database, run the same migrations, then
-  `quick_check`, `cipher_integrity_check` and `foreign_key_check`, then swap.
-- **Why the current model fits:**
-  - UUIDv7 IDs, so imports don't collide;
-  - integer timestamps;
-  - a typed, versioned schema;
-  - every write path goes through repositories.
-- **Key rotation:** the envelope's `version` and `keyId` and the master key
-  alias `.v1` leave room to rotate keys.
+### 8.1 The file
 
-**Attachments (Phase 4) — what a Phase 6 backup must keep.** Nothing below is
-implemented as a backup yet:
-- The database stores no file paths. A file is found only by its attachment id
-  (`<id>.tza`), and ids are UUIDv7, so they survive a restore unchanged.
-- Each file has its own random key (DEK), wrapped by the device-bound
-  `attachments` key. `AttachmentFormat.rewrap` re-wraps only the 48-byte DEK
-  under another key and copies the encrypted body byte for byte
-  **[verified: JVM]**. It takes the file's exact length, copies exactly that
-  many bytes and then requires the end of its input; an input that ends
-  early or continues fails with `CORRUPTED`, so a backup section can't be
-  copied past its end (Corrective D) **[verified: JVM]**. A backup can wrap DEKs under its passphrase-derived key
-  without decrypting any file, and a restore can wrap them under the new
-  device's `attachments` key.
-- The `attachments` rows carry `size_bytes`, `sha256` and `format_version`,
-  so a restore can verify every file completely before swapping it in.
-- **Restore order:**
-  1. stage the files;
-  2. verify each against its row;
-  3. swap in the database;
-  4. move the files into place.
-  The live attachments directory must not be touched before the swap. Startup
-  garbage collection deletes `.tza` files without a row, so restored files must
-  not be moved in before their rows.
+A TZBK v1 file holds, in order: the 128-byte header (Argon2id parameters, salt,
+backup ID, BMK wrapped under the password-derived KEK), the manifest (strict
+JSON), the database section, one section per attachment and the HMAC trailer.
+Every section is chunked AES-256-GCM under its own HKDF key; the file ends
+exactly after the trailer.
+
+- **Database section:** a SQLCipher 4 database (the *artifact*) made by
+  `sqlcipher_export` from the live database, keyed with the backup's
+  `sqlcipher` key (HKDF from the BMK), so it is a different file under a
+  different key; it is not `trezor.db` and is useless without the password.
+- **Attachment sections:** the attachment's TZA file with only its 76-byte
+  header changed: the DEK is unwrapped with the device `attachments` key and
+  wrapped again under the backup's attachment-wrap key with a new IV
+  (`AttachmentFormat.rewrapHeader`). The encrypted body is copied byte for
+  byte; no file is decrypted into plaintext storage.
+- The manifest lists the database (size, SHA-256) and every attachment (id,
+  name, type, size, SHA-256 of the plaintext, TZA size), sorted by id.
+
+### 8.2 Who does what
+
+| JS (`src/backup/`, op-sqlite) | Native (`backup/`, Kotlin) |
+| --- | --- |
+| Every SQLCipher statement: export, artifact checks | Password rules, Argon2id, keys, header |
+| Reads the attachment rows from the export | Verifies, rewraps and streams attachment files |
+| Decides success after the read-back check | SAF destination, `fsync`, read back, staging files, cleanup |
+
+Native code never opens a SQLCipher database. The backup's SQLCipher key
+crosses to JS (as the live database key does) so op-sqlite can create and
+check the artifact; no other backup key leaves native code. Native results are
+JSON; errors are codes, and only `BACKUP_ATTACHMENT_UNREADABLE`
+(`attachmentId`, `itemId`, `reason`: `MISSING`, `DAMAGED`, `MISMATCH`) and
+`INSUFFICIENT_SPACE` carry details. No password, key, name or URI is logged.
+
+### 8.3 Creating a backup (`createBackup`)
+
+1. **Begin** (native): password and confirmation rules (§4 of the spec), free
+   space for the export (live database size + 16 MiB), random salt, backup ID,
+   nonce prefix and BMK, Argon2id, the sealed header. One session at a time.
+2. **Destination**: the system save-to picker (`CREATE_DOCUMENT`). The
+   document must report size 0; one that reports another size or none is
+   refused (`DESTINATION_NOT_EMPTY`, `DESTINATION_UNVERIFIED`) and never
+   written or deleted. An accepted URI is recorded durably in
+   `noBackupFilesDir/backup/pending-destination`.
+3. **The backup gate**, held from the export until the destination is closed:
+   - JS runs one *exclusive* operation on the live database queue
+     (`SerialDatabase.exclusive`): every database operation queued meanwhile
+     waits and runs afterwards (none is refused or lost);
+   - inside it: `ATTACH … KEY`, `sqlcipher_export`, `PRAGMA
+     backup.user_version = 3`, `DETACH` (no transaction open), then the
+     artifact is checked on a separate connection (8.5) and its attachment
+     rows are read;
+   - native `BackupGate` protects the exported attachment ids: a deletion of
+     one of them (`TrezorAttachments.deleteFiles`) is deferred and runs when
+     the gate is released, whatever the outcome. Other deletions and imports
+     are not affected (a new file is not in the exported set).
+4. **Write** (native, still under the gate):
+   - format limits (25 MiB per attachment, 20 000 attachments, 4 GiB in
+     total) are checked first;
+   - **every attachment file is verified before the first byte is written**:
+     exact TZA size, header, full authenticated decryption, plaintext size and
+     SHA-256 against its row. A missing, damaged (including under another
+     key) or mismatching file fails the whole backup with
+     `BACKUP_ATTACHMENT_UNREADABLE`; there is no partial backup without it.
+     Attachments without the device `attachments` key fail with
+     `KEY_UNAVAILABLE` (the key is never created);
+   - the file is written through `"wt"` (else `"w"`), flushed, `fsync`ed and
+     closed; any failure there fails the backup. The size the provider then
+     reports must equal the bytes written (unknown or different:
+     `DESTINATION_UNVERIFIED`). Each attachment body is hashed again while it
+     is copied and must match the verified file;
+   - the export file is deleted.
+5. **Read back** (mandatory): the destination is read completely as by Check
+   backup (8.4) with the session's KEK (no second Argon2id), and JS checks the
+   staged artifact against the manifest.
+6. **Complete**: the pending-destination record and the session keys are
+   dropped, and only now is success reported.
+
+On any failure or cancellation after step 2, the destination is deleted where
+the provider allows it; the result says `deleted`, `remains` or `none`. The
+live database, attachment files and keys are not changed by a backup (the
+gate only delays work).
+
+### 8.4 Check backup (`checkBackup`)
+
+Opens a file with the system picker (`OPEN_DOCUMENT`) and verifies all of it
+**without touching the live database, attachment files, keys, reminders or
+settings**:
+
+1. header, password, Argon2id and BMK; manifest;
+2. free space for the database artifact (its size + 16 MiB);
+3. the database section is decrypted into
+   `databases/check/<checkId>/incoming.db` (still SQLCipher-encrypted under
+   the backup's key), `fsync`ed, and its size and SHA-256 compared with the
+   manifest (`BACKUP_INCONSISTENT` otherwise);
+4. each attachment section is decrypted in memory, streamed through the TZA
+   decryptor (into nothing), and its size and SHA-256 compared;
+5. the trailer HMAC and the exact end of file;
+6. JS checks the staged artifact (8.5) and that its `attachments` rows and the
+   manifest are the same set, field by field;
+7. the staging directory is deleted, whatever the outcome.
+
+Errors: `BACKUP_PASSWORD_OR_HEADER`, `BACKUP_UNSUPPORTED`, `BACKUP_CORRUPT`,
+`BACKUP_TOO_LARGE`, `BACKUP_INSUFFICIENT_MEMORY`, `BACKUP_INCONSISTENT`,
+`INSUFFICIENT_SPACE`.
+
+### 8.5 Artifact checks (Annex B §B.4, `verifyArtifact`)
+
+On a separate connection opened with `failOnCreate`, in this order:
+`cipher_version` 4.x; `cipher_page_size` 4096, `cipher_hmac_algorithm`
+HMAC_SHA512, `cipher_kdf_algorithm` PBKDF2_HMAC_SHA512, `cipher_use_hmac` 1,
+`cipher_plaintext_header_size` 0 (else `BACKUP_UNSUPPORTED`);
+`cipher_integrity_check` without rows and `integrity_check` = ok (else
+`BACKUP_CORRUPT`); `foreign_key_check` without rows (`BACKUP_INCONSISTENT`);
+`user_version` = 3 (`BACKUP_UNSUPPORTED`); and the schema in `sqlite_master`
+equal to a reference built at run time in an in-memory database from the
+app's own migrations (`BACKUP_INCONSISTENT`). A wrong key or damage is
+`BACKUP_CORRUPT`.
+
+### 8.6 Staging files and cleanup
+
+| Path | What | Removed |
+| --- | --- | --- |
+| `databases/backup/<random>.db` | The export (SQLCipher, backup key) | After the write, on abort, and at module start |
+| `databases/check/<checkId>/` | A staged artifact being checked | After each check, and at module start |
+| `noBackupFilesDir/backup/pending-destination` | URI of the document being written | On completion or abort; at module start it is read, the document is deleted where possible (otherwise its name is kept for `takeIncompleteNotice`), and the record removed |
+
+None of these is plaintext; staged artifacts are useless without the backup's
+BMK. The app's own backup exclusions (§3) still exclude every file.
+
+### 8.7 What a restore will need (not implemented)
+
+- The database stores no file paths; a file is found by its attachment id
+  (UUIDv7, `<id>.tza`), so ids survive a restore unchanged.
+- `AttachmentFormat.rewrap` copies exactly a file's length and then requires
+  the end of its input (Corrective D) **[verified: JVM]**, so a section can't
+  be copied past its end; a restore wraps each DEK under the new device's
+  `attachments` key.
+- Files must be staged and verified before the database swap and moved in
+  only after it: startup garbage collection deletes `.tza` files without a
+  row.
 - Decrypted view and share copies live only in `cacheDir` and are never part
   of a backup.
+
+### 8.8 Not verified yet
+
+- Nothing of Step 2 has run on a device or emulator: the pickers, SAF
+  providers (`"wt"`, `fsync`, reported sizes, deletion), `StatFs`, the
+  Keystore `attachments` key and op-sqlite's `location` option on Android.
+- The export and artifact checks ran on real SQLCipher 4.19.0 (op-sqlite's
+  amalgamation) on macOS, not on Android (§9).
+- The module glue (`TrezorBackupModule`, the `deleteFiles` hook) has no
+  automated test; the rules behind it are JVM-tested.
+- Argon2id time and memory on a physical device have not been measured.
 
 ---
 
@@ -729,6 +851,7 @@ implemented as a backup yet:
 | Phase 4 corrective work (third review) | Jest 355/355 in 21 suites (+2 `openStorage`: files kept when the database is created, now and on the next launch, and never for an existing one; +2 `database`: `beforeCreate` runs only before creating, and a failure creates neither key nor file). JVM 106/106 in 14 classes: + `AttachmentCleanupTest` 13 (M1, M2), `ModuleTasksTest` 6, `JsVaultTest` 5, an `Error` case each for export, share, views and import; source-text tests removed (`SafeSubmitTest` 1, `JsKeyAccessTest` 2, `ExportFileNamesTest` 1, part of a `ShareFilesTest` case) and replaced by behaviour tests. Each fix was removed once on purpose and its test failed. Follow-up: + `AttachmentViewsTest` 1 (a failed open, by an `Error` or a `StoreException`, releases the name it reserved: a later file under that name is removed by `purgeInactive`, and a retry opens and is held); without the release it fails | **Jest 355/355, JVM 107/107** |
 | F9 database lifecycle | Jest 370/370 in 22 suites. `openStorage` +5: roots mounting together share one initialization, connection and repositories; a later root loads its own data and initializes nothing; a failure after opening closes the connection after its queued statements; Retry opens a fresh one; a failing attempt is joined, never replaced, and doesn't clear its successor. `migrations` +3 on two real connections to one file: a step another connection completed is skipped (schema and an interval reminder unchanged), a control shows a deferred transaction still reads the old version, and while another connection runs a step this one fails without running one. `serialDatabase` +2 (`closeWhenIdle` order, options passed on), new `opSqliteAdapter` 5 (`BEGIN IMMEDIATE` first, rollback keeps the original error, failed `COMMIT` rolls back, no lock runs nothing, default unchanged). Each fix removed once on purpose fails a test, except the check that only the failed attempt clears the slot: no path can replace the slot while an attempt is failing, so that check is defensive | **Jest 370/370, JVM 107/107** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
+| Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
 | Android instrumentation after the exact-alarm change | + `withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm` | **Not run** — emulator unusable; running it on the phone uninstalls the app |
