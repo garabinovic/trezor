@@ -118,6 +118,10 @@ dependencies {
         implementation jscFlavor
     }
 
+    // Argon2id and HKDF for the encrypted backup format (Phase 6, TZBK v1). Only the
+    // lightweight crypto API is used, never the JCA provider.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
+
     // JVM unit tests (recurrence rules); not in the app.
     testImplementation("junit:junit:4.13.2")
 

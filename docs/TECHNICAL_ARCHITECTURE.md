@@ -59,6 +59,7 @@ Rules:
 | `src/native/NativeTrezorVault.ts` | TurboModule spec (app-level codegen, `codegenConfig` in `package.json`) |
 | `src/storage/vault.ts` | TS wrapper; maps native rejections to `StorageError` |
 | `android/app/src/main/java/com/trezor/app/storage/` | `DatabaseFiles`: definite file state, no-replace rename, temp-only delete (database directory only) |
+| `android/app/src/main/java/com/trezor/app/backup/` | Phase 6 Step 1: the TZBK v1 backup format library (header, Argon2id via BouncyCastle 1.79, HKDF, chunked AES-GCM sections, trailer HMAC, strict manifest, password rules with the Unicode 8.0 table). Not wired into the app yet; reference and vectors in `tools/backup-format/` |
 | `src/native/NativeTrezorDatabaseFiles.ts`, `src/storage/databaseFiles.ts` | Spec and TS wrapper for the above |
 | `src/storage/database.ts` | Startup matrix, verification, snapshot, migrations |
 | `src/storage/sqlcipher.ts` | Key-format check, keyed `open()` (drops the key from op-sqlite's retained options), encryption/integrity verification |
