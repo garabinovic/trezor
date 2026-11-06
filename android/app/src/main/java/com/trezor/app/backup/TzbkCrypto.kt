@@ -15,9 +15,21 @@ fun interface MemoryCheck {
   fun availableBytes(): Long
 
   companion object {
+    /**
+     * Free heap, counting garbage as used. When that looks too small for Argon2id, one
+     * collection is requested and the heap measured again, so garbage left by earlier work
+     * (a large backup, say) doesn't fail the check while the memory is really there.
+     */
     val RUNTIME = MemoryCheck {
       val r = Runtime.getRuntime()
-      r.maxMemory() - (r.totalMemory() - r.freeMemory())
+      val measure = { r.maxMemory() - (r.totalMemory() - r.freeMemory()) }
+      val first = measure()
+      if (first >= Tzbk.MEMORY_KIB * 1024L + Tzbk.MEMORY_MARGIN_BYTES) {
+        first
+      } else {
+        System.gc()
+        measure()
+      }
     }
   }
 }
