@@ -133,7 +133,7 @@ class AttachmentFormatTest {
     val sealed = encrypt(plain)
     val moved =
         ByteArrayOutputStream().also {
-          AttachmentFormat.rewrap(ByteArrayInputStream(sealed), it, id, key, otherKey)
+          AttachmentFormat.rewrap(ByteArrayInputStream(sealed), it, id, key, otherKey, sealed.size.toLong())
         }.toByteArray()
     assertEquals(sealed.size, moved.size)
     assertNotEquals(sealed.copyOfRange(0, HEADER_BYTES).toList(), moved.copyOfRange(0, HEADER_BYTES).toList())
@@ -141,8 +141,55 @@ class AttachmentFormatTest {
     assertArrayEquals(plain, decrypt(moved, k = otherKey))
     expectFailure(Code.KEY_MISMATCH) { decrypt(moved, k = key) }
     expectFailure(Code.KEY_MISMATCH) {
-      AttachmentFormat.rewrap(ByteArrayInputStream(sealed), ByteArrayOutputStream(), id, otherKey, key)
+      AttachmentFormat.rewrap(ByteArrayInputStream(sealed), ByteArrayOutputStream(), id, otherKey, key, sealed.size.toLong())
     }
+  }
+
+  @Test
+  fun rewrapCopiesExactlyTheGivenLengthAndRequiresTheEnd() {
+    for (size in listOf(0, 5, CHUNK_SIZE, 2 * CHUNK_SIZE + 5)) {
+      val plain = bytes(size)
+      val sealed = encrypt(plain)
+      val length = sealed.size.toLong()
+      fun rewrap(input: ByteArray, fileBytes: Long = length) =
+          ByteArrayOutputStream().also {
+            AttachmentFormat.rewrap(ByteArrayInputStream(input), it, id, key, otherKey, fileBytes)
+          }.toByteArray()
+
+      // Exact: the body is copied unchanged and decrypts under the new key.
+      val moved = rewrap(sealed)
+      assertEquals(sealed.size, moved.size)
+      assertArrayEquals(plain, decrypt(moved, k = otherKey))
+
+      // The input ends early (a truncated section).
+      expectFailure(Code.CORRUPTED) { rewrap(sealed.copyOf(sealed.size - 1)) }
+      // The input continues (bytes of a following section, or a too-small length).
+      expectFailure(Code.CORRUPTED) { rewrap(sealed + byteArrayOf(1, 2, 3)) }
+      expectFailure(Code.CORRUPTED) { rewrap(sealed, length - 1) }
+      // A length longer than the input.
+      expectFailure(Code.CORRUPTED) { rewrap(sealed, length + 1) }
+    }
+  }
+
+  @Test
+  fun rewrapReadsNoMoreThanTheFileAndOneByteToProveItsEnd() {
+    val sealed = encrypt(bytes(3 * CHUNK_SIZE))
+    val next = ByteArray(10_000) { 7 }
+    val input = ByteArrayInputStream(sealed + next)
+    expectFailure(Code.CORRUPTED) {
+      AttachmentFormat.rewrap(input, ByteArrayOutputStream(), id, key, otherKey, sealed.size.toLong())
+    }
+    // The old copy-to-end read all 10 000 bytes of the next section.
+    assertEquals(next.size - 1, input.available())
+  }
+
+  @Test
+  fun rewrapRejectsALengthBelowTheSmallestFileBeforeReading() {
+    val input = ByteArrayInputStream(encrypt(ByteArray(0)))
+    expectFailure(Code.CORRUPTED) {
+      AttachmentFormat.rewrap(input, ByteArrayOutputStream(), id, key, otherKey, HEADER_BYTES + 15L)
+    }
+    assertEquals(HEADER_BYTES + 16, input.available())
   }
 
   @Test(expected = IllegalArgumentException::class)

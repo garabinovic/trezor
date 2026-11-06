@@ -81,15 +81,27 @@ export function ItemEditorScreen({ route, navigation }: Props) {
       return;
     }
     const item = normalize(draft);
+    const keptIds = attachmentIdsOf(item);
     savingRef.current = true;
     setSaving(true);
-    const reopen = attachments.commit(attachmentIdsOf(item));
-    if (!(await saveItem(item))) {
-      // Not stored (WriteErrorDialog says so): the draft and its new files
-      // stay, and Save can be tried again.
-      reopen();
-      savingRef.current = false;
-      setSaving(false);
+    let stored = false;
+    let reopen: (() => void) | null = null;
+    try {
+      reopen = attachments.commit(keptIds);
+      stored = await saveItem(item);
+    } catch {
+      // saveItem reports failures as false; anything thrown is unexpected.
+      console.warn('[editor] save failed');
+    } finally {
+      if (!stored) {
+        // Not stored: the draft and its new files stay, and Save can be
+        // tried again. Never left stuck in "saving".
+        reopen?.();
+        savingRef.current = false;
+        setSaving(false);
+      }
+    }
+    if (!stored) {
       return;
     }
     if (draft.type === 'reminder' && !draft.completed) {

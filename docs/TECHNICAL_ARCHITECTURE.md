@@ -588,7 +588,9 @@ Follows SQLite's documented procedure for schema changes:
     ignored and leaving is blocked. On failure the editor stays open with
     every value, *Couldn’t save your change* is shown, and the files added in
     this session belong to the editor again (Discard deletes them; a retry
-    saves them) **[verified: Jest, app-level flows]**.
+    saves them) **[verified: Jest, app-level flows]**. The saving state is
+    always reset in `finally`, so even an unexpected throw while saving
+    leaves the editor usable (Corrective D, Low-3) **[verified: Jest]**.
   - **After a failed write** (audit V3) state is reloaded from storage only
     once every write queued behind it has settled, and the result is applied
     only if no local change was made while it read; otherwise that change's
@@ -598,9 +600,11 @@ Follows SQLite's documented procedure for schema changes:
     reads and applies its result inside the queue under the same rule
     **[verified: Jest, gated repository]**.
   - **One queue per repository**, shared by every provider: a second React
-    root orders its writes after those the first still has queued, and
-    reloads once they settle if any were pending when it mounted
-    **[verified: Jest]**.
+    root orders its writes after those the first still has queued. If any
+    root has ever written through the queue, a newly mounted root reloads
+    once the queue has drained: its items were loaded by `openStorage`
+    outside the queue and may predate a write, even one that settled before
+    it mounted (Corrective D, Low-1) **[verified: Jest]**.
   - Below that, **every statement and transaction on the shared connection
     goes through one FIFO** (`serializeDatabase`, wrapped in `openStorage`).
   - op-sqlite only serializes `transaction()` calls with each other. A plain
@@ -672,7 +676,10 @@ implemented as a backup yet:
 - Each file has its own random key (DEK), wrapped by the device-bound
   `attachments` key. `AttachmentFormat.rewrap` re-wraps only the 48-byte DEK
   under another key and copies the encrypted body byte for byte
-  **[verified: JVM]**. A backup can wrap DEKs under its passphrase-derived key
+  **[verified: JVM]**. It takes the file's exact length, copies exactly that
+  many bytes and then requires the end of its input; an input that ends
+  early or continues fails with `CORRUPTED`, so a backup section can't be
+  copied past its end (Corrective D) **[verified: JVM]**. A backup can wrap DEKs under its passphrase-derived key
   without decrypting any file, and a restore can wrap them under the new
   device's `attachments` key.
 - The `attachments` rows carry `size_bytes`, `sha256` and `format_version`,
@@ -1183,9 +1190,11 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   database opens, so this runs even when opening fails (a missing key, a
   damaged file), and before any view of this process exists. It deletes only
   files in the view directory that no screen holds (`purgeInactive`, so a copy
-  being written is kept), never `.tza` files or share copies; a directory that
-  can't be listed removes nothing **[verified: JVM; the module glue and the
-  creation time are not verified on a device]**.
+  being written is kept) and share copies older than 24 hours
+  (`ShareFiles.purgeExpired`; active and recent shares stay, Corrective D),
+  never `.tza` files; a directory that can't be listed removes nothing
+  **[verified: JVM; the module glue and the creation time are not verified
+  on a device]**.
 - Random names mean the image memory cache never reuses a copy. Fresco keeps
   decoded bitmaps in memory only, and its disk cache is for network images,
   not local files. This is from Fresco's design and has not been checked on a

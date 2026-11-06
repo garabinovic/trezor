@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   ([viewsDone]). The module runs it as its first task, so no view of this process can
  *   exist yet; files handed out are kept anyway ([AttachmentViews.purgeInactive]). It runs
  *   even when the database can't be opened, so a killed process's plaintext copies don't
- *   wait for a launch that succeeds. Encrypted files and share copies are not touched.
+ *   wait for a launch that succeeds. Expired share copies (older than
+ *   [ShareFiles.RETENTION_MS]) go too, for the same reason; active and recent shares are
+ *   kept ([ShareFiles.purgeExpired]). Encrypted files are not touched.
  * - [atStartup]: removes view copies, expired shares, unfinished imports and `.tza` files
  *   no database row refers to (except kept ones), **at most once per process** ([done] is
  *   process-wide in production). Removing files without a row is only safe while no import
@@ -33,10 +35,10 @@ class AttachmentCleanup(
     private val viewsDone: AtomicBoolean = PROCESS_VIEWS_DONE,
 ) {
 
-  /** View files removed, or null when this already ran in this process. */
+  /** View files and expired shares removed, or null when this already ran in this process. */
   fun atModuleStart(): Int? {
     if (!viewsDone.compareAndSet(false, true)) return null
-    return views.purgeInactive()
+    return views.purgeInactive() + shares.purgeExpired()
   }
 
   /** Returns how many ids are kept. Throws [AttachmentStore.StoreException]. */

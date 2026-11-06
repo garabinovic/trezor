@@ -345,6 +345,24 @@ describe('two React roots on one repository', () => {
     ]);
   });
 
+  test('Low-1: a second root whose items predate a write that settled before it mounted shows that write', async () => {
+    const repo = new GatedRepository([note('a')]);
+    const first = await mount(repo, await repo.listAll());
+    // openStorage loads the new root's items outside the item queue…
+    const loadedForSecond = await repo.listAll();
+    // …and the first root's write lands and settles before the new root mounts.
+    await first.run(c => c.saveItem(note('x', 'Saved just before')));
+    await settle();
+    await first.unmount();
+    repo.log = [];
+
+    const second = await mount(repo, loadedForSecond);
+    await settle();
+
+    expect(repo.log).toEqual(['listAll']);
+    expect(second.titles()).toEqual(['a:a', 'x:Saved just before']);
+  });
+
   test('a second root mounted with nothing queued does not reload', async () => {
     const repo = new GatedRepository([note('a')]);
     await mount(repo, await repo.listAll());

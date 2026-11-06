@@ -74,6 +74,27 @@ jest.mock('../../src/storage/openStorage', () => ({
   },
 }));
 
+/** When true, the editor's saveItem rejects (an unexpected throw, Low-3). */
+let mockSaveThrows = false;
+jest.mock('../../src/data/ItemsProvider', () => {
+  const actual = jest.requireActual('../../src/data/ItemsProvider');
+  return {
+    ...actual,
+    useItems: () => {
+      const value = actual.useItems();
+      return {
+        ...value,
+        // Checked when called, so a render from before the flag was set
+        // still throws.
+        saveItem: (item: unknown) =>
+          mockSaveThrows
+            ? Promise.reject(new Error('unexpected'))
+            : value.saveItem(item),
+      };
+    },
+  };
+});
+
 const receipt: DocumentItem = {
   id: 'doc-r',
   type: 'document',
@@ -173,6 +194,7 @@ async function addScanToGroceries() {
 
 beforeEach(async () => {
   fakeAttachments.reset();
+  mockSaveThrows = false;
   mockHold = null;
   mockItemWrites = [];
   mockDb = createNodeSqliteDatabase();
@@ -333,5 +355,52 @@ describe('draft attachment files and a failed save', () => {
     expect(doc.attachments.map(a => a.id)).toEqual([scan.id]);
     expect(fakeAttachments.deleted).toEqual([]);
     expect(fakeAttachments.files.has(scan.id)).toBe(true);
+  });
+});
+
+describe('an unexpected throw while saving (Low-3)', () => {
+  test('the editor is never left stuck: Save works again and leaving asks to discard', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await launch();
+    await newNote('Throws');
+    mockSaveThrows = true;
+
+    await pressText(app, 'Save');
+    await settle();
+
+    expect(hasText(app, 'New note')).toBe(true);
+    expect(inputValue('Title')).toBe('Throws');
+    expect(warn).toHaveBeenCalledWith('[editor] save failed');
+    // Leaving is no longer blocked: it asks to discard, as for any unsaved draft.
+    await pressLabel(app, 'Cancel');
+    expect(hasText(app, 'Discard changes?')).toBe(true);
+    await pressText(app, 'Keep editing');
+
+    // Save is enabled again and works once saving works.
+    mockSaveThrows = false;
+    await pressText(app, 'Save');
+    await settle();
+    expect(hasText(app, 'New note')).toBe(false);
+    expect((await stored().listAll()).some(i => i.title === 'Throws')).toBe(
+      true,
+    );
+    warn.mockRestore();
+  });
+
+  test('a file added before the throw belongs to the editor again: discarding deletes it', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await launch();
+    await addScanToGroceries();
+    mockSaveThrows = true;
+    await pressText(app, 'Save');
+    await settle();
+    expect(fakeAttachments.deleted).toEqual([]);
+
+    await pressLabel(app, 'Cancel');
+    await pressText(app, 'Discard');
+    await settle();
+
+    expect(fakeAttachments.deleted).toEqual([scan.id]);
+    warn.mockRestore();
   });
 });

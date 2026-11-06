@@ -344,6 +344,43 @@ class AttachmentCleanupTest {
   }
 
   @Test
+  fun d_expiredSharesOfAnEarlierProcessAreRemovedAtModuleStartActiveAndRecentOnesKept() {
+    val a = stored(1)
+    val sha = store.verify(a).sha256
+    // Left by an earlier process more than 24 hours ago.
+    val old = shares.prepare(a, 1_000, sha, "old.pdf", MediaTypes.PDF).also(shares::release)
+    clock += ShareFiles.RETENTION_MS + 1
+    val recent = shares.prepare(a, 1_000, sha, "recent.pdf", MediaTypes.PDF).also(shares::release)
+    val active = shares.prepare(a, 1_000, sha, "active.pdf", MediaTypes.PDF)
+    val tzaBytes = File(root, "$a${AttachmentStore.SUFFIX}").readBytes()
+
+    // No view left over, one expired share: one file removed, and no database needed.
+    assertEquals(1, process().atModuleStart())
+
+    assertTrue(!old.exists())
+    assertTrue(recent.exists() && active.exists())
+    assertArrayEquals(tzaBytes, File(root, "$a${AttachmentStore.SUFFIX}").readBytes())
+  }
+
+  @Test
+  fun d_aShareDirectoryThatCantBeListedRemovesNothingAndViewsStillGo() {
+    assumeFalse("root can list anything", System.getProperty("user.name") == "root")
+    val a = stored(1)
+    val old = shares.prepare(a, 1_000, store.verify(a).sha256, "old.pdf", MediaTypes.PDF).also(shares::release)
+    clock += ShareFiles.RETENTION_MS + 1
+    val leftover = leftoverView()
+    val shareDir = File(folder.root, "cache/attachments/share")
+    assertTrue(shareDir.setReadable(false))
+    try {
+      assertEquals(1, process().atModuleStart())
+    } finally {
+      shareDir.setReadable(true)
+    }
+    assertTrue(!leftover.exists())
+    assertTrue(old.exists())
+  }
+
+  @Test
   fun l2_itRunsOncePerProcess() {
     val viewsDone = AtomicBoolean(false)
     leftoverView()

@@ -279,8 +279,13 @@ object AttachmentFormat {
 
   /**
    * Re-wraps attachment [id]'s DEK from [oldKey] to [newKey] and copies the body unchanged
-   * (backup export and restore). Doesn't authenticate the body: callers verify with
-   * [decrypt] under the new key.
+   * (backup export and restore). [fileBytes] is the complete length of the file in [input]
+   * (header and body). Exactly that many bytes are copied, and [input] must then be at its
+   * end: one that ends early or continues fails with CORRUPTED (a backup section is read
+   * through a stream limited to the section's length, so a wrong length is detected
+   * instead of copying into the next section). On failure [output] holds a partial file
+   * the caller discards. Doesn't authenticate the body: callers verify with [decrypt]
+   * under the new key.
    */
   fun rewrap(
       input: InputStream,
@@ -288,16 +293,31 @@ object AttachmentFormat {
       id: String,
       oldKey: ByteArray,
       newKey: ByteArray,
+      fileBytes: Long,
       random: SecureRandom = SecureRandom(),
   ) {
     requireKey(oldKey)
     requireKey(newKey)
+    // The smallest file is a header and one empty chunk (its tag).
+    if (fileBytes < HEADER_BYTES + TAG_BYTES) {
+      throw FormatException(FormatException.Code.CORRUPTED, "Attachment truncated")
+    }
     val header = readHeader(input)
     val dek = unwrapDek(oldKey, id, header)
     try {
       val (wrapIv, wrappedDek) = wrapDek(newKey, id, dek, random)
       Header(header.chunkSize, wrapIv, wrappedDek, header.noncePrefix).write(output)
-      input.copyTo(output)
+      var remaining = fileBytes - HEADER_BYTES
+      val buffer = ByteArray(CHUNK_SIZE)
+      while (remaining > 0) {
+        val n = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+        if (n < 0) throw FormatException(FormatException.Code.CORRUPTED, "Attachment truncated")
+        output.write(buffer, 0, n)
+        remaining -= n
+      }
+      if (input.read() != -1) {
+        throw FormatException(FormatException.Code.CORRUPTED, "Attachment longer than expected")
+      }
     } finally {
       dek.fill(0)
     }

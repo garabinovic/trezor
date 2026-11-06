@@ -62,6 +62,8 @@ interface WriteQueue {
   tail: Promise<void>;
   /** Item writes queued and not settled yet, from any provider. */
   pending: number;
+  /** Item writes ever queued, from any provider. */
+  started: number;
 }
 
 const queues = new WeakMap<ItemRepository, WriteQueue>();
@@ -69,7 +71,7 @@ const queues = new WeakMap<ItemRepository, WriteQueue>();
 function queueFor(repository: ItemRepository): WriteQueue {
   let queue = queues.get(repository);
   if (!queue) {
-    queue = { tail: Promise.resolve(), pending: 0 };
+    queue = { tail: Promise.resolve(), pending: 0, started: 0 };
     queues.set(repository, queue);
   }
   return queue;
@@ -137,10 +139,12 @@ export function ItemsProvider({
     [queue, setItems],
   );
 
-  // Writes of another root were still queued when this root's items were
-  // loaded: show what is stored once they have settled.
+  // Another root has written through this queue, so this root's items (loaded
+  // by openStorage outside the queue) may predate some of those writes, even
+  // ones that settled before this mount: show what is stored once the queue
+  // has drained.
   useEffect(() => {
-    if (queue.pending > 0) {
+    if (queue.started > 0) {
       stale.current = true;
       queue.tail = queue.tail.then(() => reloadIfDrained(repository));
     }
@@ -162,6 +166,7 @@ export function ItemsProvider({
       setItems(next);
       generation.current += 1;
       queue.pending += 1;
+      queue.started += 1;
       queue.tail = queue.tail
         .then(async () => {
           const removed = await write(repo);
