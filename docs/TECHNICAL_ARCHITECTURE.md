@@ -502,7 +502,14 @@ Candidate names are `trezor.pre-migration-v<N>.db`, then `….2.db` … `….9.d
    - schema (`sqlite_master`) and every row of every table (paged, rowid order)
      equal the live database.
 6. Only then, **atomic rename** to the free final name. The native
-   `renameNoReplace` refuses to replace an existing file.
+   `renameNoReplace` refuses to replace an existing file, and returns only
+   after `fsync` of the database directory, so the new name is durable
+   (syncing the file doesn't persist its name; SQLite syncs a directory only
+   for new journals). If that sync fails, the error is reported and the
+   renamed snapshot stays under its final name, never deleted; a retry
+   verifies it (step 1) and reuses it **[verified: JVM, Jest; not on a
+   device]**. Deleting a temporary file isn't synced: a reappearing
+   `.partial.db` is never trusted.
 7. **On any failure in 3–6:** delete only this attempt's temporary file. The
    native `deleteTemporary` refuses any name not ending in `.partial.db`.
    Throw `SNAPSHOT_FAILED`; the migration never starts.

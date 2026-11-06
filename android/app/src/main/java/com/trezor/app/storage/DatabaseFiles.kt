@@ -1,5 +1,6 @@
 package com.trezor.app.storage
 
+import com.trezor.app.attachments.DirectorySync
 import java.io.File
 import java.io.IOException
 
@@ -10,7 +11,11 @@ import java.io.IOException
  * listing proves the file is not there, so an I/O or permission problem can never be
  * mistaken for a missing database (which would lead to a new key being created).
  */
-class DatabaseFiles(private val dir: File) {
+class DatabaseFiles(
+    private val dir: File,
+    /** Makes a rename in [dir] durable (`fsync` of the directory); replaceable in tests. */
+    private val syncDirectory: (File) -> Unit = DirectorySync::sync,
+) {
 
   enum class State {
     PRESENT,
@@ -35,18 +40,31 @@ class DatabaseFiles(private val dir: File) {
     return State.ABSENT
   }
 
-  /** Atomic rename within the directory. Never replaces an existing target. */
+  /**
+   * Atomic rename within the directory. Never replaces an existing target. Returns only
+   * once the new name is durable: the directory is synced after the rename (syncing the
+   * file alone doesn't persist its name). If that sync fails, IOException is thrown and
+   * the file stays under [to]; it is never deleted here, so a caller that retries finds
+   * it (the snapshot code verifies an existing snapshot before reusing it).
+   */
   fun renameNoReplace(from: String, to: String) {
     val source = File(dir, validName(from))
     val target = File(dir, validName(to))
     if (state(to) != State.ABSENT) throw IOException("$to already exists")
     if (state(from) != State.PRESENT) throw IOException("$from does not exist")
     if (!source.renameTo(target)) throw IOException("Could not rename $from")
+    try {
+      syncDirectory(dir)
+    } catch (e: Exception) {
+      throw IOException("Renamed $from to $to, but the directory could not be synced", e)
+    }
   }
 
   /**
    * Deletes a temporary file (and its SQLite side files). Refuses any name that is not a
    * temporary snapshot, so a real database or verified snapshot can never be deleted here.
+   * The directory is not synced: a temporary file that reappears after a crash is never
+   * trusted or reused (its name is random), so the deletion needn't be durable.
    */
   fun deleteTemporary(name: String) {
     require(TEMPORARY_PATTERN.matches(validName(name))) { "Not a temporary file name" }

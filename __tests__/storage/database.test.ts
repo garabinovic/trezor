@@ -8,6 +8,10 @@ let mockFake: FakeSqlCipher;
 const mockKeys = new Map<string, string>();
 let mockKeyOverride: unknown;
 let mockFileStateFailure: Error | null = null;
+/** The native rename succeeds, then its directory sync fails (once). */
+let mockRenameSyncFails = false;
+/** deleteTemporary fails (cleanup after a failed snapshot). */
+let mockDeleteFails = false;
 
 jest.mock('@op-engineering/op-sqlite', () => ({
   open: (params: never) => mockFake.open(params),
@@ -58,8 +62,19 @@ jest.mock('../../src/native/NativeTrezorDatabaseFiles', () => {
         // The emulated "encryption" travels with the file.
         mockFake.keys.set(at(to), mockFake.keys.get(at(from)) ?? null);
         mockFake.keys.delete(at(from));
+        if (mockRenameSyncFails) {
+          mockRenameSyncFails = false;
+          // As DatabaseFiles.renameNoReplace reports it: renamed, not durable.
+          throw Object.assign(
+            new Error('Renamed, but the directory could not be synced'),
+            { code: 'DATABASE_STATE_UNKNOWN' },
+          );
+        }
       }),
       deleteTemporary: jest.fn(async (name: string) => {
+        if (mockDeleteFails) {
+          throw Object.assign(new Error('EIO'), { code: 'STORAGE_ERROR' });
+        }
         if (!name.endsWith('.partial.db')) {
           throw new Error('refused');
         }
@@ -124,6 +139,8 @@ beforeEach(() => {
   mockKeys.clear();
   mockKeyOverride = undefined;
   mockFileStateFailure = null;
+  mockRenameSyncFails = false;
+  mockDeleteFails = false;
   jest.clearAllMocks();
 });
 
@@ -309,6 +326,39 @@ describe('M2: snapshots before migrating', () => {
     retry.db.close();
     expect(snapshotsAndTemps()).toEqual([SNAP]);
     expect(fs.readFileSync(mockFake.pathOf(SNAP))).toEqual(firstSnapshot);
+  });
+
+  test('a snapshot whose rename was not made durable blocks the migration, keeps the original error, and is reused on retry', async () => {
+    await seedCurrent();
+    mockRenameSyncFails = true;
+    // The cleanup of the (already renamed) temporary file fails too.
+    mockDeleteFails = true;
+
+    const failure = await openTrezorDatabase({
+      migrationList: [...migrations, v2],
+    }).catch(e => e);
+
+    expect(failure).toMatchObject({ code: 'SNAPSHOT_FAILED' });
+    // The original error, not the cleanup failure.
+    expect(failure.message).toContain('directory could not be synced');
+    expect(failure.message).not.toContain('EIO');
+    // The renamed snapshot is kept, never deleted; the database is not migrated.
+    expect(snapshotsAndTemps()).toEqual([SNAP]);
+    const kept = fs.readFileSync(mockFake.pathOf(SNAP));
+    mockDeleteFails = false;
+    const unchanged = await openTrezorDatabase();
+    expect(unchanged.schemaVersion).toBe(CURRENT);
+    unchanged.db.close();
+
+    // Retry: the existing snapshot verifies and is reused; no second one is made.
+    const retry = await openTrezorDatabase({
+      migrationList: [...migrations, v2],
+    });
+    expect(retry.snapshot).toBe(SNAP);
+    expect(retry.schemaVersion).toBe(NEXT);
+    retry.db.close();
+    expect(snapshotsAndTemps()).toEqual([SNAP]);
+    expect(fs.readFileSync(mockFake.pathOf(SNAP))).toEqual(kept);
   });
 
   test('an invalid existing snapshot is never trusted, overwritten or deleted', async () => {
