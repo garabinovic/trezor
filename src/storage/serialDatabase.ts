@@ -7,6 +7,14 @@ export interface SerialDatabase extends SqlDatabase {
    * queued later fail as on any closed connection.
    */
   closeWhenIdle(): Promise<void>;
+  /**
+   * Runs `fn` as one operation of the queue, with the connection itself: work queued
+   * before it runs first, and work queued after it waits (it is not refused) until `fn`
+   * has settled, success or failure. No transaction is opened, so `fn` may ATTACH.
+   * Inside `fn`, use the executor it receives; the outer database would wait for `fn`
+   * itself and deadlock. The backup gate (Phase 6 spec v2.4 §6.1).
+   */
+  exclusive<T>(fn: (db: SqlExecutor) => Promise<T>): Promise<T>;
 }
 
 /**
@@ -42,5 +50,12 @@ export function serializeDatabase(db: SqlDatabase): SerialDatabase {
     ) => enqueue(() => db.transaction(fn, options)),
     close: () => db.close(),
     closeWhenIdle: () => enqueue(async () => db.close()),
+    exclusive: <T>(fn: (raw: SqlExecutor) => Promise<T>) =>
+      enqueue(() =>
+        fn({
+          execute: (sql: string, params?: SqlValue[]) =>
+            db.execute(sql, params),
+        }),
+      ),
   };
 }

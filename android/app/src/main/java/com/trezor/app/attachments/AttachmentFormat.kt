@@ -278,6 +278,31 @@ object AttachmentFormat {
   }
 
   /**
+   * The 76-byte header of attachment [id] with its DEK re-wrapped from [oldKey] to [newKey]
+   * (a new random wrap IV; chunk size and nonce prefix unchanged), for a caller that then
+   * streams the unchanged body itself (backup sections). Doesn't authenticate the body.
+   */
+  fun rewrapHeader(
+      header: ByteArray,
+      id: String,
+      oldKey: ByteArray,
+      newKey: ByteArray,
+      random: SecureRandom = SecureRandom(),
+  ): ByteArray {
+    requireKey(oldKey)
+    requireKey(newKey)
+    require(header.size == HEADER_BYTES) { "A TZA header is $HEADER_BYTES bytes" }
+    val parsed = readHeader(header.inputStream())
+    val dek = unwrapDek(oldKey, id, parsed)
+    try {
+      val (wrapIv, wrappedDek) = wrapDek(newKey, id, dek, random)
+      return ByteArrayOutputStream().also { Header(parsed.chunkSize, wrapIv, wrappedDek, parsed.noncePrefix).write(it) }.toByteArray()
+    } finally {
+      dek.fill(0)
+    }
+  }
+
+  /**
    * Re-wraps attachment [id]'s DEK from [oldKey] to [newKey] and copies the body unchanged
    * (backup export and restore). [fileBytes] is the complete length of the file in [input]
    * (header and body). Exactly that many bytes are copied, and [input] must then be at its

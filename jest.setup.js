@@ -23,3 +23,21 @@ jest.mock('./src/native/NativeTrezorAttachments', () => ({
   __esModule: true,
   default: require('./test-utils/fakeAttachments').fakeAttachments.module,
 }));
+
+// Backup creation and Check backup are native-only; flow tests pass a fake platform.
+jest.mock('./src/native/NativeTrezorBackup', () => ({
+  __esModule: true,
+  default: new Proxy(
+    {},
+    {
+      get: (_, name) =>
+        name === '__esModule'
+          ? undefined
+          : jest.fn(async () => {
+              throw Object.assign(new Error('native backup in Jest'), {
+                code: 'BACKUP_FAILED',
+              });
+            }),
+    },
+  ),
+}));

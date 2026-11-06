@@ -21,6 +21,7 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.UiThreadUtil
 import com.trezor.app.attachments.ModuleTasks.Lane.RENDERER
 import com.trezor.app.attachments.ModuleTasks.Lane.WORKER
+import com.trezor.app.backup.BackupGate
 import com.trezor.app.vault.KeyVault
 import com.trezor.app.vault.NativeTrezorAttachmentsSpec
 import com.trezor.app.vault.VaultException
@@ -79,6 +80,9 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
 
   init {
     reactContext.addActivityEventListener(this)
+    BackupGate.deleter = { ids ->
+      tasks.submit(WORKER, { _, _ -> }) { ids.forEach { runCatching { store.delete(it) } } }
+    }
     // The first task on WORKER, before any call from JS: decrypted views of an earlier
     // process go even if the database never opens. Nothing to settle; failures are
     // ignored (the startup and foreground cleanups try again).
@@ -260,7 +264,10 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     }
     submit(WORKER, promise) {
       try {
-        promise.resolve(list.count { store.delete(it!!) }.toDouble())
+        // While a backup holds the gate, files it still needs are deleted when it ends
+        // (BackupGate, Phase 6 spec §6.1); the others go now.
+        val now = BackupGate.filterDeletion(list.map { it!! })
+        promise.resolve(now.count { store.delete(it) }.toDouble())
       } catch (e: Exception) {
         promise.reject("IO_FAILED", "Could not delete attachment files")
       }

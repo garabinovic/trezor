@@ -5,7 +5,7 @@ import {
 import type { Item } from '../data/types';
 import { openTrezorDatabase } from './database';
 import { ItemRepository } from './ItemRepository';
-import { serializeDatabase } from './serialDatabase';
+import { SerialDatabase, serializeDatabase } from './serialDatabase';
 import {
   SettingsRepository,
   SettingValues,
@@ -16,6 +16,8 @@ import { SqliteItemRepository } from './SqliteItemRepository';
 export interface OpenedStorage {
   items: ItemRepository;
   settings: SettingsRepository;
+  /** The one serialized live connection (its exclusive operation is the backup gate). */
+  database: SerialDatabase;
   /** Loaded up front so the first screen renders complete, without a flash. */
   initialItems: Item[];
   initialTheme: SettingValues['theme.preference'];
@@ -24,11 +26,12 @@ export interface OpenedStorage {
   initialExactAlarmRequested: boolean;
 }
 
-type InitialData = Omit<OpenedStorage, 'items' | 'settings'>;
+type InitialData = Omit<OpenedStorage, 'items' | 'settings' | 'database'>;
 
 interface Initialized {
   items: ItemRepository;
   settings: SettingsRepository;
+  database: SerialDatabase;
   /** Loaded during initialization, for the caller that started it. */
   first: InitialData;
 }
@@ -74,10 +77,10 @@ export async function openStorage(
       }
     });
   }
-  const { items, settings, first } = await attempt;
+  const { items, settings, database, first } = await attempt;
   // A later root must not start from data the first one has changed since.
   const initial = started ? first : await loadInitial(items, settings);
-  return { items, settings, ...initial };
+  return { items, settings, database, ...initial };
 }
 
 async function initialize(
@@ -103,7 +106,7 @@ async function initialize(
         `[attachments] cleanup failed: ${String(code ?? 'UNKNOWN')}`,
       );
     }
-    return { items, settings, first };
+    return { items, settings, database: db, first };
   } catch (e) {
     // No connection is left without an owner: statements already queued
     // settle first, then it closes. The original error is reported.

@@ -110,6 +110,10 @@ class TzbkReader private constructor(
 
   private val mac = TzbkWriter.macFor(keys)
   private var read = Tzbk.HEADER_BYTES.toLong()
+
+  /** The verified 32-byte trailer, once [finish] has succeeded (spec §8.3 compares it). */
+  var trailer: ByteArray? = null
+    private set
   private var next = 0
   private val counting =
       object : InputStream() {
@@ -170,7 +174,14 @@ class TzbkReader private constructor(
     if (!MessageDigest.isEqual(expected, trailer)) corrupt("Trailer does not match")
     if (input.read() != -1) corrupt("Data after the trailer")
     next++
+    this.trailer = trailer
   }
+
+  /** The attachment DEK wrapping key of this backup (spec §3.5); caller zeroes it. */
+  fun attachmentWrapKey(): ByteArray = keys.attachmentWrap()
+
+  /** The SQLCipher artifact key of this backup (spec §3.5, §5); caller zeroes it. */
+  fun sqlcipherKey(): ByteArray = keys.sqlcipher()
 
   override fun close() = keys.close()
 
@@ -206,14 +217,25 @@ class TzbkReader private constructor(
       val header = TzbkHeader.read(input)
       val kek = TzbkCrypto.kek(password, header, memory)
       try {
-        val bmk = TzbkCrypto.unwrapBmk(kek, header)
-        try {
-          return TzbkReader(input, header, TzbkKeys(bmk, header.backupId))
-        } finally {
-          bmk.fill(0)
-        }
+        return withKek(input, header, kek)
       } finally {
         kek.fill(0)
+      }
+    }
+
+    /**
+     * Reads a file this process just wrote, with the KEK it derived for it (the read-back
+     * after creation, spec §6.2 step 7): the header is still parsed and validated, and the
+     * BMK unwrapped against it, so every byte is checked; only Argon2 isn't repeated.
+     */
+    fun openWithKek(input: InputStream, kek: ByteArray): TzbkReader = withKek(input, TzbkHeader.read(input), kek)
+
+    private fun withKek(input: InputStream, header: TzbkHeader, kek: ByteArray): TzbkReader {
+      val bmk = TzbkCrypto.unwrapBmk(kek, header)
+      try {
+        return TzbkReader(input, header, TzbkKeys(bmk, header.backupId))
+      } finally {
+        bmk.fill(0)
       }
     }
   }
