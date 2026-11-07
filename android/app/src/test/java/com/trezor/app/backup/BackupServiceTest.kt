@@ -115,8 +115,20 @@ class BackupServiceTest {
       }
     }
 
-    override fun openForRead(): InputStream =
-        ByteArrayInputStream(readBack?.invoke(written.toByteArray()) ?: written.toByteArray())
+    /** Read streams opened and not yet closed. */
+    var openReads = 0
+
+    override fun openForRead(): InputStream {
+      openReads++
+      return object : ByteArrayInputStream(readBack?.invoke(written.toByteArray()) ?: written.toByteArray()) {
+        private var closed = false
+
+        override fun close() {
+          if (!closed) openReads--
+          closed = true
+        }
+      }
+    }
 
     override fun delete(): Boolean {
       if (!deletable) return false
@@ -155,6 +167,7 @@ class BackupServiceTest {
     assertTrue(File(noBackupDir, "backup/pending-destination").exists())
 
     val staged = service.readBack(begun.sessionId)
+    assertEquals("the read-back stream is closed", 0, dest.openReads)
     assertArrayEquals(exportBytes, staged.result.incoming.readBytes())
     assertEquals(listOf(id(1), id(2), id(3)), staged.result.manifest.attachments.map { it.id })
     assertEquals(64, staged.result.trailer.length)
@@ -341,6 +354,7 @@ class BackupServiceTest {
       } catch (e: BackupFormatException) {
         assertEquals(BackupFormatException.Code.BACKUP_CORRUPT, e.code)
       }
+      assertEquals("the read-back stream is closed", 0, dest.openReads)
       assertTrue("no staged check is left", File(databaseDir, "check").listFiles().orEmpty().isEmpty())
       assertEquals("deleted", service.abort(begun.sessionId))
       assertTrue(dest.deleted)

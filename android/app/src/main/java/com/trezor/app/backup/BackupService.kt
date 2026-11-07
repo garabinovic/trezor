@@ -154,7 +154,9 @@ class BackupService(
     val s = synchronized(this) { current(sessionId) }
     val destination = s.destination ?: throw IllegalStateException("No destination")
     return stage { dir ->
-      BackupChecker(dir, files::requireFree).check(destination.openForRead()) { TzbkReader.openWithKek(it, s.kek) }
+      destination.openForRead().use { input ->
+        BackupChecker(dir, files::requireFree).check(input) { TzbkReader.openWithKek(it, s.kek) }
+      }
     }
   }
 
