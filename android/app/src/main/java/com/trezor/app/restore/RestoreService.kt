@@ -60,7 +60,10 @@ class RestoreService(
   )
 
   private class Session(val id: String, val input: InputStream, val reader: TzbkReader, val manifest: BackupManifest) {
+    /** The journal this session writes, set before its first durable write is attempted. */
     var journal: RestoreJournal? = null
+    /** Whether that first write completed (the file may exist on disk even if it didn't). */
+    var journalWritten = false
     var staged = false
   }
 
@@ -174,7 +177,8 @@ class RestoreService(
     s.input.use {
       s.reader.use { reader ->
         if (!layout.liveDb.isFile) throw RestoreException(RestoreException.STATE_UNKNOWN, "No database file")
-        if (layout.journal.exists() || layout.restoreDbDir.exists() || layout.stagedAttachments.exists()) {
+        // Anything under N/restore or D/restore now belongs to an earlier restore, not this one.
+        if (layout.restoreDir.exists() || layout.restoreDbDir.exists()) {
           throw RestoreException(RestoreException.STATE_UNKNOWN, "Restore files exist")
         }
         // Step 3. hadDatabase is always true (§8.1 precondition 5).
@@ -187,9 +191,12 @@ class RestoreService(
                 scheduleSaved = RestoreJournal.Schedule.PENDING,
                 createdAt = now(),
             )
+        // Tracked before the write: a failure part-way (directory created, temp file left,
+        // or renamed but not synced) is then still this session's to clean up in abort.
+        s.journal = journal
         ops.mkdirDurable(layout.restoreDir)
         journals.write(journal)
-        s.journal = journal
+        s.journalWritten = true
         // Step 4.
         ops.mkdirDurable(layout.stagedAttachments)
         ops.mkdirDurable(layout.restoreDbDir)
@@ -327,38 +334,60 @@ class RestoreService(
   /**
    * The pre-swap failure path: restore the schedule (§8.11), delete `D/restore`,
    * `N/restore/attachments` and `N/quarantine/<restoreId>`, then the journal (and `N/restore`
-   * once it is empty). In Step 3 every preparation ends here. Without a journal (a failure
-   * before step 3) nothing was written. A failing action stops at once and keeps the journal:
-   * `RESTORE_RECOVERY_RETRY` (Step 4's startup recovery then takes over).
+   * once it is empty). In Step 3 every preparation ends here.
+   *
+   * - An unknown session is refused (IllegalStateException), never reported as done.
+   * - Without a journal on disk: if this session started writing one, only what that write
+   *   leaves (an empty `N/restore`, `restore.json.tmp`) is removed; anything else under
+   *   `N/restore` or `D/restore` is not this session's to judge: `RESTORE_RECOVERY_RETRY`.
+   * - A failing action stops at once and keeps the journal and every remaining file:
+   *   `RESTORE_RECOVERY_RETRY`. The session is kept, so calling [abort] again resumes from
+   *   the files (every action is idempotent); it is forgotten only once cleanup succeeded.
    */
   fun abort(sessionId: String, schedule: ScheduleRestore) {
-    val s = synchronized(this) { session?.takeIf { it.id == sessionId } } ?: return
+    val s = synchronized(this) { current(sessionId) }
     try {
       runCatching { s.reader.close() }
       runCatching { s.input.close() }
-      val journal = journals.read() ?: return
-      if (journal.restoreId != s.journal?.restoreId) {
-        throw RestoreException(RestoreException.STATE_UNKNOWN, "Journal belongs to another restore")
+      val journal = journals.read()
+      if (journal == null) {
+        // Only if this session's first journal write never completed: a journal it did
+        // write that is now gone is ambiguous, so nothing is deleted then.
+        if (s.journal != null && !s.journalWritten) removeUnwrittenJournal()
+        if (layout.restoreDir.exists() || layout.restoreDbDir.exists()) {
+          throw RestoreException(RestoreException.RECOVERY_RETRY, "Restore files without a journal")
+        }
+      } else {
+        if (journal.restoreId != s.journal?.restoreId) {
+          throw RestoreException(RestoreException.STATE_UNKNOWN, "Journal belongs to another restore")
+        }
+        schedule.restoreAndRearm(
+            when (journal.scheduleSaved) {
+              RestoreJournal.Schedule.PENDING -> ScheduleRestore.Saved.PENDING
+              RestoreJournal.Schedule.SAVED -> ScheduleRestore.Saved.SAVED
+              RestoreJournal.Schedule.ABSENT -> ScheduleRestore.Saved.ABSENT
+            })
+        ops.deleteRecursively(layout.restoreDbDir)
+        ops.deleteRecursively(layout.stagedAttachments)
+        ops.deleteRecursively(layout.quarantine(journal.restoreId), journal.restoreId)
+        if (layout.incomingAttachment.exists() && !layout.incomingAttachment.delete()) throw IOException("Could not delete a staged section")
+        journals.delete()
+        if (layout.restoreDir.listFiles()?.isEmpty() == true) ops.deleteRecursively(layout.restoreDir)
       }
-      schedule.restoreAndRearm(
-          when (journal.scheduleSaved) {
-            RestoreJournal.Schedule.PENDING -> ScheduleRestore.Saved.PENDING
-            RestoreJournal.Schedule.SAVED -> ScheduleRestore.Saved.SAVED
-            RestoreJournal.Schedule.ABSENT -> ScheduleRestore.Saved.ABSENT
-          })
-      ops.deleteRecursively(layout.restoreDbDir)
-      ops.deleteRecursively(layout.stagedAttachments)
-      ops.deleteRecursively(layout.quarantine(journal.restoreId), journal.restoreId)
-      if (layout.incomingAttachment.exists() && !layout.incomingAttachment.delete()) throw IOException("Could not delete a staged section")
-      journals.delete()
-      if (layout.restoreDir.listFiles()?.isEmpty() == true) ops.deleteRecursively(layout.restoreDir)
     } catch (e: RestoreException) {
-      throw if (e.code == RestoreException.STATE_UNKNOWN) e else RestoreException(RestoreException.RECOVERY_RETRY, "Restore cleanup failed", e)
+      throw if (e.code == RestoreException.STATE_UNKNOWN || e.code == RestoreException.RECOVERY_RETRY) e
+      else RestoreException(RestoreException.RECOVERY_RETRY, "Restore cleanup failed", e)
     } catch (e: Exception) {
       throw RestoreException(RestoreException.RECOVERY_RETRY, "Restore cleanup failed", e)
-    } finally {
-      synchronized(this) { if (session === s) session = null }
     }
+    synchronized(this) { if (session === s) session = null }
+  }
+
+  /** What a failed first journal write of this session can leave: `restore.json.tmp`, an empty `N/restore`. */
+  private fun removeUnwrittenJournal() {
+    if (!layout.restoreDir.exists()) return
+    if (layout.journalTmp.exists() && !layout.journalTmp.delete()) throw IOException("Could not delete the journal temp file")
+    if (layout.restoreDir.listFiles()?.isEmpty() == true) ops.deleteRecursively(layout.restoreDir)
   }
 
   /** Closes the session's file (module shutdown). Leaves files and journal as they are. */

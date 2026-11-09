@@ -131,8 +131,21 @@ export function RemindersProvider({
     return () => clearTimeout(timer);
   }, [items, showDetails, requestReconcile]);
 
-  // A restore that ended before its swap asks for a normal reconcile (§8.2).
-  useEffect(() => onReconcileReleased(requestReconcile), [requestReconcile]);
+  // A restore that ended before its swap (§8.2): reminders it completed in the
+  // database (step 9) are reloaded into the item state, so a later edit can't
+  // write the old "not completed" back; then a normal reconcile.
+  useEffect(
+    () =>
+      onReconcileReleased(({ completed }) => {
+        if (completed.length > 0) {
+          completeStoredReminders(completed).catch(() =>
+            console.warn('[reminders] reload after restore failed'),
+          );
+        }
+        requestReconcile();
+      }),
+    [requestReconcile, completeStoredReminders],
+  );
 
   // Back in the foreground: fired reminders, permission changes made in
   // Android settings, and clock or zone changes are picked up.

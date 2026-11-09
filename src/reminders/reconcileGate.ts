@@ -11,7 +11,13 @@ let holds = 0;
 let running = 0;
 let opened: (() => void)[] = [];
 let idle: (() => void)[] = [];
-const releasedListeners = new Set<() => void>();
+/** What the holder changed in the live database while it held the gate. */
+export interface ReconcileRelease {
+  /** Reminders marked completed directly (restore §8.2 step 9). */
+  completed: string[];
+}
+
+const releasedListeners = new Set<(release: ReconcileRelease) => void>();
 
 function settle(list: (() => void)[]) {
   for (const resolve of list.splice(0)) {
@@ -37,16 +43,19 @@ export async function runReconcile<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * Takes the gate once no reconcile is running; returns its release. Releasing
- * lets waiting reconciles run and notifies listeners (who request a normal
- * reconcile, §8.2 pre-swap failure step 4). Release is idempotent.
+ * lets waiting reconciles run and notifies listeners, who reload what the
+ * holder changed and request a normal reconcile (§8.2 pre-swap failure step
+ * 4). Release is idempotent.
  */
-export async function holdReconcile(): Promise<() => void> {
+export async function holdReconcile(): Promise<
+  (release?: ReconcileRelease) => void
+> {
   holds += 1;
   while (running > 0) {
     await new Promise<void>(resolve => idle.push(resolve));
   }
   let released = false;
-  return () => {
+  return (release = { completed: [] }) => {
     if (released) {
       return;
     }
@@ -54,15 +63,19 @@ export async function holdReconcile(): Promise<() => void> {
     holds -= 1;
     if (holds === 0) {
       settle(opened);
-      releasedListeners.forEach(listener => listener());
+      releasedListeners.forEach(listener => listener(release));
     }
   };
 }
 
 /** Called after every final release (the reminders provider requests a reconcile). */
-export function onReconcileReleased(listener: () => void): () => void {
+export function onReconcileReleased(
+  listener: (release: ReconcileRelease) => void,
+): () => void {
   releasedListeners.add(listener);
-  return () => releasedListeners.delete(listener);
+  return () => {
+    releasedListeners.delete(listener);
+  };
 }
 
 /** Tests only. */

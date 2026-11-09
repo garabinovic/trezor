@@ -48,6 +48,7 @@ class RestoreServiceTest {
   private var free = Long.MAX_VALUE
   private var failSync: (File) -> Boolean = { false }
   private val events = mutableListOf<String>()
+  private var rearmFailures = 0
   private lateinit var schedule: ScheduleRestore
 
   private fun id(n: Int) = "01a1a0dd-991f-783c-9531-3fab9ef4%04d".format(n)
@@ -83,7 +84,13 @@ class RestoreServiceTest {
               layout.schedule.writeBytes(byteArrayOf(0))
             },
             isEmpty = { true },
-            rearm = { events += "rearm" },
+            rearm = {
+              if (rearmFailures > 0) {
+                rearmFailures--
+                throw java.io.IOException("alarm service")
+              }
+              events += "rearm"
+            },
         )
   }
 
@@ -357,6 +364,139 @@ class RestoreServiceTest {
     }
     // Stopped at once: the journal is still there for recovery (Step 4).
     assertTrue(layout.journal.exists())
+    // Retrying in the same session resumes and finishes.
+    failSync = { false }
+    service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+  }
+
+  // --- Review corrections: M1 / L1 -----------------------------------------------------------
+
+  @Test
+  fun aFailedRearmKeepsEverythingAndARetryInTheSameSessionFinishes() {
+    val b = backup(1)
+    val schedule0 = layout.schedule.readBytes()
+    val begun = begin(b)
+    service.stage(begun.sessionId, null, null).sqlcipherKey.fill(0)
+    jsStep6(begun.sessionId)
+    service.saveAndClearSchedule(begun.sessionId, schedule)
+    rearmFailures = 1
+    try {
+      service.abort(begun.sessionId, schedule)
+      fail("rearm failure hidden")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.RECOVERY_RETRY, e.code)
+    }
+    // Nothing deleted: the journal (saved), the saved schedule and the staging stay.
+    assertEquals(RestoreJournal.Schedule.SAVED, service.journals.read()!!.scheduleSaved)
+    assertTrue(layout.savedSchedule.isFile)
+    assertTrue(layout.restoreDbDir.isDirectory)
+    service.abort(begun.sessionId, schedule)
+    assertArrayEquals(schedule0, layout.schedule.readBytes())
+    assertNothingLeft()
+  }
+
+  @Test
+  fun anUnknownOrFinishedSessionIsRefusedNotReportedAsDone() {
+    try {
+      service.abort("0".repeat(32), schedule)
+      fail("unknown session accepted")
+    } catch (e: IllegalStateException) {
+      // expected
+    }
+    val begun = begin(backup(0))
+    service.stage(begun.sessionId, null, null).sqlcipherKey.fill(0)
+    service.abort(begun.sessionId, schedule)
+    try {
+      service.abort(begun.sessionId, schedule)
+      fail("finished session accepted again")
+    } catch (e: IllegalStateException) {
+      // expected
+    }
+  }
+
+  @Test
+  fun aJournalWriteThatFailsBeforeTheRenameIsCleanedUpAsThisSessionsOwn() {
+    val begun = begin(backup(1))
+    // Creating N/restore syncs N: fail it, so no journal is ever renamed into place.
+    failSync = { it == layout.noBackupDir }
+    try {
+      service.stage(begun.sessionId, null, null)
+      fail("journal failure hidden")
+    } catch (e: java.io.IOException) {
+      // expected
+    }
+    assertTrue(layout.restoreDir.isDirectory)
+    assertFalse(layout.journal.exists())
+    // A temp file a failed write can leave.
+    layout.journalTmp.writeText("{")
+    failSync = { false }
+    service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+    // The schedule was never touched.
+    assertArrayEquals(byteArrayOf(1, 2, 3, 4), layout.schedule.readBytes())
+  }
+
+  @Test
+  fun aDirectorySyncFailureAfterTheJournalRenameIsCleanedUpThroughThatJournal() {
+    val begun = begin(backup(1))
+    var syncs = 0
+    // The journal's own directory sync (after its rename) fails, once.
+    failSync = { it == layout.restoreDir && syncs++ == 0 }
+    try {
+      service.stage(begun.sessionId, null, null)
+      fail("sync failure hidden")
+    } catch (e: java.io.IOException) {
+      // expected
+    }
+    assertEquals(RestoreJournal.Phase.PREPARED, service.journals.read()!!.phase)
+    service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+  }
+
+  @Test
+  fun restoreFilesWithoutAJournalAreNeverJudgedDone() {
+    val begun = begin(backup(1))
+    failSync = { it == layout.noBackupDir }
+    try {
+      service.stage(begun.sessionId, null, null)
+      fail("journal failure hidden")
+    } catch (e: java.io.IOException) {
+      // expected
+    }
+    failSync = { false }
+    // Something under N/restore this session didn't write: not deleted, not "done".
+    val stranger = File(layout.restoreDir, "unexplained").also { it.writeText("x") }
+    try {
+      service.abort(begun.sessionId, schedule)
+      fail("leftover reported as cleaned up")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.RECOVERY_RETRY, e.code)
+    }
+    assertTrue(stranger.exists())
+    stranger.delete()
+    service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+  }
+
+  @Test
+  fun earlierRestoreFilesBlockStaging() {
+    layout.restoreDir.mkdirs()
+    val begun = begin(backup(0))
+    try {
+      service.stage(begun.sessionId, null, null)
+      fail("staged over earlier restore files")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.STATE_UNKNOWN, e.code)
+    }
+    // Not this session's files: abort neither deletes them nor reports success.
+    try {
+      service.abort(begun.sessionId, schedule)
+      fail("leftover reported as cleaned up")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.RECOVERY_RETRY, e.code)
+    }
+    assertTrue(layout.restoreDir.isDirectory)
   }
 
   @Test

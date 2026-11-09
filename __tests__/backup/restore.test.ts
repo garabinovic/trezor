@@ -6,7 +6,10 @@ import { BackupError } from '../../src/backup/platform';
 import {
   prepareRestore,
   PrepareOptions,
+  resetRestoreForTests,
+  restoreCleanupPending,
   restoreEntryFor,
+  retryRestoreCleanup,
 } from '../../src/backup/restore';
 import {
   RestoreError,
@@ -14,6 +17,8 @@ import {
   RestoreStaged,
 } from '../../src/backup/restorePlatform';
 import {
+  onReconcileReleased,
+  ReconcileRelease,
   resetReconcileGateForTests,
   runReconcile,
 } from '../../src/reminders/reconcileGate';
@@ -76,6 +81,7 @@ async function setting(db: SqlDatabase, key: string, value: unknown) {
 
 beforeEach(async () => {
   resetReconcileGateForTests();
+  resetRestoreForTests();
   mockFake = new FakeSqlCipher();
   // The live database, under the device key.
   liveRaw = openFake({ name: 'trezor.db', encryptionKey: rawKey(DEVICE_KEY) });
@@ -462,18 +468,101 @@ describe('prepareRestore (steps 1–12, then the pre-swap failure path)', () => 
     await expectCode(prepare(platform), 'BACKUP_INCONSISTENT');
   });
 
-  test('a failing pre-swap failure path is reported as not cleaned up', async () => {
+  test('a failed cleanup keeps both gates held and starts no reconcile; a retry releases them only once it succeeds', async () => {
+    let abortFails = 2;
     const { platform, calls } = fakePlatform({
-      purgeCaches: async () => {
+      saveAndClearSchedule: async () => {
+        calls.push('schedule');
         throw Object.assign(new Error(), { code: 'RESTORE_FAILED' });
       },
       abortRestore: async () => {
-        throw Object.assign(new Error(), { code: 'RESTORE_RECOVERY_RETRY' });
+        calls.push('abort');
+        if (abortFails-- > 0) {
+          // e.g. restoreAndRearm failing: the native side keeps journal and files.
+          throw Object.assign(new Error(), { code: 'RESTORE_RECOVERY_RETRY' });
+        }
+        fs.rmSync(restoreDir(), { recursive: true, force: true });
       },
     });
+    const released: ReconcileRelease[] = [];
+    onReconcileReleased(r => released.push(r));
+
     const e = await expectCode(prepare(platform), 'RESTORE_RECOVERY_RETRY');
     expect(e.cleanedUp).toBe(false);
-    expect(calls[calls.length - 1]).toBe('release');
+    expect(restoreCleanupPending()).toBe(true);
+    // Native gate never released, reconcile gate never released.
+    expect(calls).not.toContain('release');
+    expect(released).toEqual([]);
+    const reconcile = jest.fn(async () => undefined);
+    const waiting = runReconcile(reconcile);
+    await new Promise<void>(r => setTimeout(() => r(), 20));
+    expect(reconcile).not.toHaveBeenCalled();
+    // The database queue is free (the live database was never touched).
+    expect(await live.execute('SELECT 1 AS one')).toEqual([{ one: 1 }]);
+    // No new preparation while the cleanup is pending.
+    await expectCode(
+      prepare(fakePlatform().platform),
+      'RESTORE_RECOVERY_RETRY',
+    );
+
+    // A retry that fails again keeps everything held.
+    await expect(retryRestoreCleanup()).rejects.toMatchObject({
+      code: 'RESTORE_RECOVERY_RETRY',
+      cleanedUp: false,
+    });
+    expect(calls.filter(c => c === 'release')).toEqual([]);
+    expect(reconcile).not.toHaveBeenCalled();
+
+    // A successful retry: native gate, then reconcile gate, then one reconcile.
+    await retryRestoreCleanup();
+    expect(calls.slice(-2)).toEqual(['abort', 'release']);
+    expect(restoreCleanupPending()).toBe(false);
+    await waiting;
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(released).toEqual([{ completed: ['fired'] }]);
+    // Nothing left to retry.
+    await expect(retryRestoreCleanup()).rejects.toMatchObject({
+      code: 'INVALID_STATE',
+    });
+  });
+
+  test('a native gate that fails to release is retried without repeating the cleanup', async () => {
+    let releaseFails = true;
+    const { platform, calls } = fakePlatform({
+      releaseGate: async () => {
+        calls.push('release');
+        if (releaseFails) {
+          releaseFails = false;
+          throw Object.assign(new Error(), { code: 'RESTORE_FAILED' });
+        }
+      },
+    });
+    const e = await expectCode(prepare(platform), 'RESTORE_FAILED');
+    expect(e.cleanedUp).toBe(false);
+    await retryRestoreCleanup();
+    expect(calls.filter(c => c === 'abort')).toEqual(['abort']);
+    expect(calls.filter(c => c === 'release')).toEqual(['release', 'release']);
+  });
+
+  test('releasing after a cleanup reports the reminders step 9 completed', async () => {
+    const released: ReconcileRelease[] = [];
+    onReconcileReleased(r => released.push(r));
+    await prepare(fakePlatform().platform);
+    expect(released).toEqual([{ completed: ['fired'] }]);
+    // And after a failure past step 9 too.
+    released.length = 0;
+    await expectCode(
+      prepare(
+        fakePlatform({
+          purgeCaches: async () => {
+            throw Object.assign(new Error(), { code: 'RESTORE_FAILED' });
+          },
+        }).platform,
+        { firedOnceIds: async () => [] },
+      ),
+      'RESTORE_FAILED',
+    );
+    expect(released).toEqual([{ completed: [] }]);
   });
 
   test('a wrong password stops before the gate', async () => {

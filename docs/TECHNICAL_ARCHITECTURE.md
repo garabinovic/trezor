@@ -873,14 +873,38 @@ and attachment root are never moved, renamed or overwritten**.
 12. Decrypted caches purged on the attachments module's lanes: PDFs closed,
    every view and share deleted, both directories confirmed empty.
 
-**Pre-swap failure path** (always taken in Step 3): the schedule restored
-and re-armed by `scheduleSaved` (`saved` → copied back unless an earlier
-attempt already did, `absent` → schedule deleted, `pending` → left as is;
-then `rearmAll`, then the saved copy deleted), then `D/restore`,
-`N/restore/attachments` and `N/quarantine/<restoreId>` deleted, then the
-journal (and the empty `N/restore`), then the gates released, which
-requests a normal reconcile. If any of it fails, it stops at once, keeps the
-journal and reports `RESTORE_RECOVERY_RETRY`.
+**Pre-swap failure path** (always taken in Step 3):
+1. The schedule is restored and re-armed by `scheduleSaved`:
+   - `saved` → copied back, unless an earlier attempt already did;
+   - `absent` → the schedule is deleted;
+   - `pending` → left as is;
+   - then `rearmAll`, then the saved copy is deleted.
+2. `D/restore`, `N/restore/attachments` and `N/quarantine/<restoreId>` are
+   deleted.
+3. The journal is deleted, and `N/restore` once it is empty.
+4. The native gate is released, then the reconcile gate. Its release
+   carries the ids step 9 completed: the reminders provider reloads them into
+   the item state (so an edit can't write "not completed" back) and requests
+   a normal reconcile.
+
+Without a journal on disk, only what this session's own failed journal
+write can leave (an empty `N/restore`, `restore.json.tmp`) is removed.
+Anything else under `N/restore` or `D/restore` is reported, never deleted
+and never called done. An unknown session is refused.
+
+**When the failure path itself fails** (review M1):
+- It stops at once and keeps the journal and every remaining file
+  (`RESTORE_RECOVERY_RETRY`, `cleanedUp = false`).
+- Only the database queue is released; the live database was never touched.
+- **The native gate and the reconcile gate stay held.** Attachment work stays
+  refused and **no reconcile runs**, so nothing rebuilds the schedule while
+  the journal still says it is saved and cleared.
+- `retryRestoreCleanup()` (JS) resumes it in the same process. The native
+  session survives the failure, and every action is idempotent.
+- The gates are released only once the cleanup has succeeded, and a new
+  preparation is refused until then.
+- If the process ends meanwhile, the journal and files stay for Step 4's
+  recovery.
 
 **Other parts:**
 - **Preconditions** (`RestoreService.preflight`, §8.1 of the spec):
@@ -912,12 +936,28 @@ journal and reports `RESTORE_RECOVERY_RETRY`.
   `MainActivity` only if it is the current activity and RESUMED, then
   finishes the task and kills the process. It is not called before Step 4.
 
-**What Step 4 must add before Step 5 may call this:** the startup recovery
-of §8.5 (including the "no journal" guard and the `prepared` row). Until
-then a process killed during a preparation would leave a journal that only
-blocks further restores (`RESTORE_STATE_UNKNOWN`). Its schedule would be
-rebuilt by the next reconcile, but a pending ONCE alarm and `fired` would
-be lost. No live data would be at risk.
+**Process death during a preparation (accepted temporary limitation, not a
+defect):** Step 3 deliberately has no startup recovery. The complete recovery
+of §8.5, every row including the "no journal" guard and the `prepared` row,
+is a **Step 4 requirement**, and Step 5 must not call the preparation before
+it exists. Nothing calls it today. If the process ended mid-preparation, the
+next normal launch would do this:
+- **The live data opens normally.** It is unchanged; step 9's completions
+  are the same a reconcile would make.
+- **Restores are blocked.** The journal and staging stay, and every further
+  restore is refused (`RESTORE_STATE_UNKNOWN`). Staged files are encrypted;
+  until Step 4 they only take space, and quarantine links take none.
+- **Alarms stop if the schedule had been cleared** (steps 10–11 or later):
+  - no reminder alarm fires until the app is opened again, ONCE or
+    recurring, and an occurrence due in that window is never notified (an
+    overdue ONCE shows as overdue);
+  - the next reconcile then rebuilds the schedule from the database;
+  - only `fired` entries recorded **after step 9** are lost (those ONCE
+    reminders show as not completed);
+  - nothing is duplicated or wrongly completed.
+- **After a failed cleanup** (above), restarting the app releases the in-process
+  gates. Reconciliation resumes then, while the journal and files stay for
+  Step 4.
 
 ### 8.8 Not verified yet
 
@@ -968,6 +1008,7 @@ be lost. No live data would be at risk.
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
 | Phase 6 Step 3 (restore preparation, without the swap) | JVM +35 in 7 new classes and 1 extended: `RestoreServiceTest` 9 (real backups from `BackupService` restored on a device with another key: every step, `S_att` readable only with the target key, quarantine link, schedule saved and restored, live files byte-identical; zero attachments; wrong password, short password and too little space write nothing; changed backup → `BACKUP_CHANGED`; damaged and truncated sections; a failing cleanup keeps the journal → `RESTORE_RECOVERY_RETRY`; a journal blocks; every §8.1 precondition), `RestoreJournalTest` 4, `RestoreFileOpsTest` 4, `QuarantineTest` 5 (`kept-ids` absent, valid with a missing file, damaged → all, unlistable root, no overwrite), `AttachmentLocationsTest` 3, `ScheduleRestoreTest` 7 (order, every `scheduleSaved` case, idempotence, failed re-arm keeps the copy, the `ScheduleStore` monitor held throughout), `RestoreGateAndRestartTest` 2, `ShareFilesTest` +1. Jest +16: `restore.test.ts` 13 (step order, `S_db` under the device key with the settings rewrite, invalid settings and unreadable live settings, error-screen mode, queued writes and reconciles wait, shares wait/cancel, a failure at every step undoes and releases, schema and manifest mismatch, failed cleanup reported, wrong password, error-code entries), `reconcileGate.test.ts` 3. Real SQLCipher 4.19.0 harness +2 (export to the device key, settings rewrite and §B.4 on `S_db`; keys not interchangeable, files encrypted), run in band with Step 2's 6 and Phase 4's 4 | **JVM 262/262, Jest 432/432, real SQLCipher 12/12** |
+| Step 3 review corrections (M1, L1, L3) | JVM `RestoreServiceTest` +6 (a failed re-arm keeps journal, saved schedule and staging, and a retry in the same session finishes; unknown and finished sessions refused; journal write failing before its rename and directory sync failing after it, both cleaned up; files without a journal never deleted or called done; earlier restore files block staging), and the failing-cleanup test now retries. Jest +3: `restore.test.ts` (3 tests replacing the one that expected the gates to be released: a failed cleanup keeps the native and reconcile gates held, runs no reconcile, refuses a new preparation, survives a second failure, and a successful retry releases native then reconcile gate then reconciles once; a failed gate release retried without repeating the cleanup; the release carries step 9's ids), `restoreReminderState.test.tsx` (app level: a reminder completed by step 9 stays completed after an edit; fails without the reload), `reconcileGate.test.ts` checks the release payload | **JVM 268/268, Jest 435/435, real SQLCipher 12/12** |
 | Attachments verified before the destination is opened | `BackupServiceTest` +1 (a deletion requested while attachments are verified waits for the gate); the unreadable-attachment, key-unavailable and over-limit tests now also require that the destination was never opened, and the success test that it was opened once. With verification moved back inside the open destination, 6 tests fail | **JVM 86/86 backup** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |

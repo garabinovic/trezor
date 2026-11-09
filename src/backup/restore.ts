@@ -1,4 +1,4 @@
-import { holdReconcile } from '../reminders/reconcileGate';
+import { holdReconcile, ReconcileRelease } from '../reminders/reconcileGate';
 import type { StorageErrorCode } from '../storage/errors';
 import type { SerialDatabase } from '../storage/serialDatabase';
 import type { SqlExecutor } from '../storage/sql';
@@ -185,12 +185,19 @@ export interface PrepareOptions {
  * this restore's quarantine deleted, journal deleted, gates released (which
  * requests a normal reconcile). Step 4 replaces "then" with the swap.
  *
- * Resolves with what was prepared, or rejects with a RestoreError whose
- * `cleanedUp` is false only if the pre-swap failure path itself failed.
+ * Resolves with what was prepared, or rejects with a RestoreError. Its
+ * `cleanedUp` is false only if the pre-swap failure path itself failed: then
+ * the journal and files stay, the native and reconcile gates stay held (no
+ * reconcile runs), and `retryRestoreCleanup()` resumes the cleanup and
+ * releases them once it succeeds. A new preparation is refused meanwhile.
  */
 export async function prepareRestore(
   options: PrepareOptions,
 ): Promise<PreparedRestore> {
+  if (pendingCleanup) {
+    // A failed pre-swap cleanup still holds the gates: finish it first.
+    throw new RestoreError('RESTORE_RECOVERY_RETRY', false);
+  }
   const platform = options.platform ?? nativeRestorePlatform;
   const deviceKey =
     options.deviceKey ??
@@ -206,76 +213,147 @@ export async function prepareRestore(
       throw RestoreError.from(e);
     });
 
-  const releaseReconcile = await holdReconcile();
-  try {
-    const run = async (live: SqlExecutor | undefined) => {
-      let prepared: PreparedRestore | undefined;
-      let failure: unknown;
-      let gate = false;
-      try {
-        await platform.acquireGate();
-        gate = true;
-        for (;;) {
-          const active = await platform.activeShareCount();
-          if (active === 0) {
-            break;
-          }
-          const decision = options.whileSharesActive
-            ? await options.whileSharesActive(active)
-            : 'cancel';
-          if (decision === 'cancel') {
-            throw new RestoreError('RESTORE_CANCELLED');
-          }
+  const cleanup: Cleanup = {
+    platform,
+    sessionId: begun.sessionId,
+    gate: false,
+    cleaned: false,
+    completed: [],
+    releaseReconcile: await holdReconcile(),
+  };
+  let prepared: PreparedRestore | undefined;
+  let failure: unknown;
+  let cleanupFailure: RestoreError | undefined;
+  const run = async (live: SqlExecutor | undefined) => {
+    try {
+      await platform.acquireGate();
+      cleanup.gate = true;
+      for (;;) {
+        const active = await platform.activeShareCount();
+        if (active === 0) {
+          break;
         }
-        const staged = await platform.stageRestore(
-          begun.sessionId,
-          options.expected,
+        const decision = options.whileSharesActive
+          ? await options.whileSharesActive(active)
+          : 'cancel';
+        if (decision === 'cancel') {
+          throw new RestoreError('RESTORE_CANCELLED');
+        }
+      }
+      const staged = await platform.stageRestore(
+        begun.sessionId,
+        options.expected,
+      );
+      await stageDatabase(staged, await deviceKey(), live);
+      await platform.deleteIncoming(begun.sessionId);
+      const retained = await platform.preserveRetained(begun.sessionId);
+      if (live && options.firedOnceIds) {
+        cleanup.completed = await completeFired(
+          live,
+          await options.firedOnceIds(),
         );
-        await stageDatabase(staged, await deviceKey(), live);
-        await platform.deleteIncoming(begun.sessionId);
-        const retained = await platform.preserveRetained(begun.sessionId);
-        const completed =
-          live && options.firedOnceIds
-            ? await completeFired(live, await options.firedOnceIds())
-            : [];
-        const schedule = await platform.saveAndClearSchedule(begun.sessionId);
-        await platform.purgeCaches();
-        prepared = {
-          restoreId: staged.restoreId,
-          backupId: staged.backupId,
-          trailer: staged.trailer,
-          attachments: staged.attachments.length,
-          retained,
-          schedule,
-          completedFired: completed,
-        };
-        await options.onPrepared?.(prepared, live);
-      } catch (e) {
-        failure = e;
       }
-      // Step 3 has no swap: the pre-swap failure path always follows.
-      try {
-        await platform.abortRestore(begun.sessionId);
-      } catch (e) {
-        if (gate) {
-          await platform.releaseGate().catch(() => undefined);
-        }
-        throw RestoreError.from(e, false);
-      }
-      if (gate) {
-        await platform.releaseGate().catch(e => {
-          throw RestoreError.from(e);
-        });
-      }
-      if (failure !== undefined || !prepared) {
-        throw RestoreError.from(failure);
-      }
-      return prepared;
-    };
-    return options.database
-      ? await options.database.exclusive(live => run(live))
-      : await run(undefined);
-  } finally {
-    releaseReconcile();
+      const schedule = await platform.saveAndClearSchedule(begun.sessionId);
+      await platform.purgeCaches();
+      prepared = {
+        restoreId: staged.restoreId,
+        backupId: staged.backupId,
+        trailer: staged.trailer,
+        attachments: staged.attachments.length,
+        retained,
+        schedule,
+        completedFired: cleanup.completed,
+      };
+      await options.onPrepared?.(prepared, live);
+    } catch (e) {
+      failure = e;
+    }
+    // Step 3 has no swap: the pre-swap failure path always follows, still
+    // inside the database gate.
+    try {
+      await cleanUp(cleanup);
+    } catch (e) {
+      cleanupFailure = RestoreError.from(e, false);
+    }
+  };
+  if (options.database) {
+    await options.database.exclusive(live => run(live));
+  } else {
+    await run(undefined);
   }
+  if (cleanupFailure) {
+    // The journal and files stay; the native gate and the reconcile gate stay
+    // held, so no reconcile runs on a schedule that wasn't restored. Only the
+    // database queue is released (the live database is untouched).
+    // retryRestoreCleanup() resumes from the files.
+    pendingCleanup = cleanup;
+    throw cleanupFailure;
+  }
+  releaseAfterCleanup(cleanup);
+  if (failure !== undefined || !prepared) {
+    throw RestoreError.from(failure);
+  }
+  return prepared;
+}
+
+/** One preparation's pre-swap failure path, resumable after a failure. */
+interface Cleanup {
+  platform: RestorePlatform;
+  sessionId: string;
+  /** The native gate is held. */
+  gate: boolean;
+  /** The native cleanup (schedule, files, journal) has succeeded. */
+  cleaned: boolean;
+  /** Step 9's completions, reloaded by the reminders provider on release. */
+  completed: string[];
+  releaseReconcile: (release?: ReconcileRelease) => void;
+}
+
+/** A cleanup that failed and still holds the native and reconcile gates. */
+let pendingCleanup: Cleanup | null = null;
+
+/** §8.2 pre-swap failure steps 1–3 (native), then the native gate. */
+async function cleanUp(c: Cleanup): Promise<void> {
+  if (!c.cleaned) {
+    await c.platform.abortRestore(c.sessionId);
+    c.cleaned = true;
+  }
+  if (c.gate) {
+    await c.platform.releaseGate();
+    c.gate = false;
+  }
+}
+
+/** Step 4: the reconcile gate last; its listeners reload and reconcile. */
+function releaseAfterCleanup(c: Cleanup) {
+  c.releaseReconcile({ completed: c.completed });
+}
+
+/** Whether a failed pre-swap cleanup is waiting for retryRestoreCleanup(). */
+export function restoreCleanupPending(): boolean {
+  return pendingCleanup !== null;
+}
+
+/**
+ * Retries a failed pre-swap cleanup from the journal and files (every native
+ * action is idempotent). The gates are released only once it has succeeded;
+ * on another failure everything stays held and this can be called again.
+ */
+export async function retryRestoreCleanup(): Promise<void> {
+  const c = pendingCleanup;
+  if (!c) {
+    throw new RestoreError('INVALID_STATE');
+  }
+  try {
+    await cleanUp(c);
+  } catch (e) {
+    throw RestoreError.from(e, false);
+  }
+  pendingCleanup = null;
+  releaseAfterCleanup(c);
+}
+
+/** Tests only. */
+export function resetRestoreForTests() {
+  pendingCleanup = null;
 }

@@ -43,10 +43,11 @@ describe('reconcile gate (restore, spec §8.7)', () => {
     const waiting = runReconcile(ran);
     await tick();
     expect(ran).not.toHaveBeenCalled();
-    release();
+    release({ completed: ['r1'] });
     release(); // idempotent
     await expect(waiting).resolves.toBe('ok');
     expect(heard).toHaveBeenCalledTimes(1);
+    expect(heard).toHaveBeenCalledWith({ completed: ['r1'] });
   });
 
   test('a failing reconcile still lets a hold through', async () => {
