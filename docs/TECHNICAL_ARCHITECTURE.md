@@ -729,14 +729,17 @@ JSON; errors are codes, and only `BACKUP_ATTACHMENT_UNREADABLE`
 4. **Write** (native, still under the gate):
    - format limits (25 MiB per attachment, 20 000 attachments, 4 GiB in
      total) are checked first;
-   - **every attachment file is verified before the first byte is written**:
+   - **every attachment file is verified before the destination is opened**:
      exact TZA size, header, full authenticated decryption, plaintext size and
      SHA-256 against its row. A missing, damaged (including under another
      key) or mismatching file fails the whole backup with
      `BACKUP_ATTACHMENT_UNREADABLE`; there is no partial backup without it.
      Attachments without the device `attachments` key fail with
-     `KEY_UNAVAILABLE` (the key is never created);
-   - the file is written through `"wt"` (else `"w"`), flushed, `fsync`ed and
+     `KEY_UNAVAILABLE` (the key is never created). Such a failure never opens
+     the destination: Android 16's Downloads provider crashes when a document
+     is opened, closed and deleted in quick succession, and Android may kill
+     the app with it (seen on the emulator before this order was used);
+   - only then is the file written through `"wt"` (else `"w"`), flushed, `fsync`ed and
      closed; any failure there fails the backup. The size the provider then
      reports must equal the bytes written (unknown or different:
      `DESTINATION_UNVERIFIED`). Each attachment body is hashed again while it
@@ -816,9 +819,14 @@ BMK. The app's own backup exclusions (§3) still exclude every file.
 
 ### 8.8 Not verified yet
 
-- Nothing of Step 2 has run on a device or emulator: the pickers, SAF
-  providers (`"wt"`, `fsync`, reported sizes, deletion), `StatFs`, the
-  Keystore `attachments` key and op-sqlite's `location` option on Android.
+- Step 2 has run only on an isolated Android 16 emulator (API 36, Google
+  APIs image), as a temporary QA release build (debug builds don't start in
+  that environment, a React Native dev-path problem). There: creation with
+  six attachments to the Downloads provider, its reported size, read-back,
+  Check (valid, wrong password, truncated, altered header, database,
+  attachment and trailer, trailing data), a damaged attachment, a non-empty
+  destination, cleanup and unchanged live data. Not on a physical device,
+  and no other storage provider.
 - The export and artifact checks ran on real SQLCipher 4.19.0 (op-sqlite's
   amalgamation) on macOS, not on Android (§9).
 - The module glue (`TrezorBackupModule`, the `deleteFiles` hook) has no
@@ -852,6 +860,7 @@ BMK. The app's own backup exclusions (§3) still exclude every file.
 | F9 database lifecycle | Jest 370/370 in 22 suites. `openStorage` +5: roots mounting together share one initialization, connection and repositories; a later root loads its own data and initializes nothing; a failure after opening closes the connection after its queued statements; Retry opens a fresh one; a failing attempt is joined, never replaced, and doesn't clear its successor. `migrations` +3 on two real connections to one file: a step another connection completed is skipped (schema and an interval reminder unchanged), a control shows a deferred transaction still reads the old version, and while another connection runs a step this one fails without running one. `serialDatabase` +2 (`closeWhenIdle` order, options passed on), new `opSqliteAdapter` 5 (`BEGIN IMMEDIATE` first, rollback keeps the original error, failed `COMMIT` rolls back, no lock runs nothing, default unchanged). Each fix removed once on purpose fails a test, except the check that only the failed attempt clears the slot: no path can replace the slot while an attempt is failing, so that check is defensive | **Jest 370/370, JVM 107/107** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
+| Attachments verified before the destination is opened | `BackupServiceTest` +1 (a deletion requested while attachments are verified waits for the gate); the unreadable-attachment, key-unavailable and over-limit tests now also require that the destination was never opened, and the success test that it was opened once. With verification moved back inside the open destination, 6 tests fail | **JVM 86/86 backup** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |
 | Android instrumentation after the exact-alarm change | + `withExactAlarmsAllowedEachOccurrenceIsOneExactAlarm` | **Not run** — emulator unusable; running it on the phone uninstalls the app |

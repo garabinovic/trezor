@@ -49,28 +49,42 @@ class BackupCreator(
     }
   }
 
+  /** The rows, sorted by id, each with the SHA-256 of its file's verified (encrypted) bytes. */
+  class Verified internal constructor(val rows: List<Row>, internal val digests: Map<String, ByteArray>)
+
   /**
-   * Writes the backup to [output] (not closed) and returns its length. [deviceKey] is the
-   * device `attachments` key (only needed when there are rows; zeroed by the caller).
+   * The format's limits, then every attachment file decrypted and authenticated under
+   * [deviceKey] and compared with its row. Called before the destination is opened, so a
+   * missing, damaged or mismatching file fails the backup before anything is opened or
+   * written. [deviceKey] is the device `attachments` key (only needed when there are rows;
+   * zeroed by the caller).
    */
-  fun write(
-      output: OutputStream,
-      header: TzbkHeader,
-      keys: TzbkKeys,
-      export: File,
-      rows: List<Row>,
-      app: BackupManifest.App,
-      createdAt: Long,
-      deviceKey: ByteArray?,
-  ): Long {
+  fun verify(rows: List<Row>, deviceKey: ByteArray?): Verified {
     val sorted = rows.sortedBy { it.id }
     if (sorted.isNotEmpty()) requireNotNull(deviceKey) { "Attachments need the device key" }
     // The format's limits (spec §3.8), before any file is read.
     if (sorted.size > Tzbk.MAX_ATTACHMENTS) tooLarge("Too many attachments")
     if (sorted.any { it.sizeBytes !in 0..Tzbk.MAX_ATTACHMENT_BYTES }) tooLarge("Attachment too large")
     if (sorted.sumOf { it.sizeBytes } > Tzbk.MAX_ATTACHMENT_TOTAL_BYTES) tooLarge("Attachments exceed 4 GiB")
-    // Every file first: a bad one fails before a single byte is written.
-    val digests = sorted.associate { it.id to verify(it, deviceKey!!) }
+    return Verified(sorted, sorted.associate { it.id to verify(it, deviceKey!!) })
+  }
+
+  /**
+   * Writes the backup of [verified] to [output] (not closed) and returns its length. Each
+   * attachment section must hash to what [verify] authenticated. [deviceKey] as for [verify].
+   */
+  fun write(
+      output: OutputStream,
+      header: TzbkHeader,
+      keys: TzbkKeys,
+      export: File,
+      verified: Verified,
+      app: BackupManifest.App,
+      createdAt: Long,
+      deviceKey: ByteArray?,
+  ): Long {
+    val sorted = verified.rows
+    val digests = verified.digests
 
     val databaseBytes = export.length()
     if (databaseBytes > Tzbk.MAX_DATABASE_BYTES) tooLarge("Database too large")

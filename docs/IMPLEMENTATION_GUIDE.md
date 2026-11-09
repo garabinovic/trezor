@@ -600,8 +600,9 @@ real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
 or a physical device, and no instrumentation test was run.
 
 Phase 6 Steps 1–2 are at the automated level too (JVM, Jest and the one-off
-real-SQLCipher backup check on macOS). Backup creation and Check backup have
-not run on an emulator or a device (TA §8.8).
+real-SQLCipher backup check on macOS). Backup creation and Check backup also
+ran on an isolated Android 16 emulator as a temporary QA release build (TA
+§8.8); not on a physical device.
 
 ---
 

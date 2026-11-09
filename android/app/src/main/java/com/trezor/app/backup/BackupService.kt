@@ -12,8 +12,9 @@ import java.security.SecureRandom
  * 1. [begin]: password rules, free space, Argon2id, a new BMK, header and keys. Returns the
  *    SQLCipher artifact key for the JS export (the narrow exception of §5).
  * 2. [setDestination]: the picked document must report size 0.
- * 3. [write]: under [BackupGate], the complete file from the export and its rows; then
- *    `fsync`, close and the final size, which must equal the bytes written.
+ * 3. [write]: under [BackupGate], every attachment verified first, then the destination
+ *    opened and the complete file written from the export and its rows; then `fsync`,
+ *    close and the final size, which must equal the bytes written.
  * 4. [readBack]: the file read back completely ([BackupChecker], with the session's KEK);
  *    JS then checks the staged database.
  * 5. [complete] or [abort] (deletes the destination where the provider allows it).
@@ -114,6 +115,9 @@ class BackupService(
   /**
    * Writes the backup (spec §6.2 steps 5–6) and makes it durable; returns its length. The
    * gate protects every exported attachment from deletion until the output is closed.
+   * Every attachment is verified before the destination is opened: a provider must not
+   * see an open, close and delete for a backup that was never going to be written (the
+   * Downloads provider of Android 16 crashes on that sequence).
    */
   fun write(sessionId: String, rows: List<BackupCreator.Row>): Long {
     val s = synchronized(this) { current(sessionId) }
@@ -123,11 +127,11 @@ class BackupService(
     try {
       val key = if (rows.isEmpty()) null else attachmentsKey() ?: throw DestinationException(KEY_UNAVAILABLE, "Attachment key missing")
       try {
+        val creator = BackupCreator(fileOf, random)
+        val verified = creator.verify(rows, key)
         val length =
             destination.openForWrite().use { out ->
-              val n =
-                  BackupCreator(fileOf, random)
-                      .write(out.stream, s.header, s.keys, export, rows, app, now(), key)
+              val n = creator.write(out.stream, s.header, s.keys, export, verified, app, now(), key)
               out.stream.flush()
               out.sync()
               n

@@ -36,6 +36,8 @@ class BackupServiceTest {
   private lateinit var store: AttachmentStore
   private var free = Long.MAX_VALUE
   private var keyAvailable = true
+  /** Runs whenever the backup looks up an attachment file (verification and writing). */
+  private var onFileLookup: (() -> Unit)? = null
   private lateinit var files: BackupFiles
   private lateinit var service: BackupService
   private val exportBytes = ByteArray(5000) { (it * 7).toByte() }
@@ -53,7 +55,10 @@ class BackupServiceTest {
         BackupService(
             files = files,
             attachmentsKey = { if (keyAvailable) deviceKey.copyOf() else null },
-            fileOf = { File(File(noBackupDir, "attachments"), "$it.tza") },
+            fileOf = {
+              onFileLookup?.invoke()
+              File(File(noBackupDir, "attachments"), "$it.tza")
+            },
             app = BackupManifest.App("android", "1.0", 1),
             liveDatabaseBytes = { File(databaseDir, "trezor.db").length() },
             now = { 1793000000000 },
@@ -81,6 +86,8 @@ class BackupServiceTest {
     /** Runs once, at the first byte written (while the creator holds the gate). */
     var onFirstWrite: (() -> Unit)? = null
     private var opened = false
+    /** How often [openForWrite] was called. */
+    var openedForWrite = 0
 
     override fun size(): Long? {
       if (!opened) return reported
@@ -90,6 +97,7 @@ class BackupServiceTest {
 
     override fun openForWrite(): BackupService.Destination.Output {
       opened = true
+      openedForWrite++
       return object : BackupService.Destination.Output {
         override val stream: OutputStream =
             object : OutputStream() {
@@ -161,6 +169,7 @@ class BackupServiceTest {
     val (begun, dest) = begin()
 
     val length = service.write(begun.sessionId, rows)
+    assertEquals(1, dest.openedForWrite)
     assertEquals(dest.written.size().toLong(), length)
     // The export is gone once written; the pending record stays until complete().
     assertFalse(File(begun.exportDir, begun.exportName).exists())
@@ -204,6 +213,7 @@ class BackupServiceTest {
     } catch (e: BackupService.DestinationException) {
       assertEquals(BackupService.KEY_UNAVAILABLE, e.code)
     }
+    assertEquals(0, dest.openedForWrite)
     assertEquals(0, dest.written.size())
   }
 
@@ -247,12 +257,16 @@ class BackupServiceTest {
       assertEquals(item, e.itemId)
       assertEquals(reason, e.reason)
     }
-    // Nothing was written: every file is checked before the first byte. The picked
-    // (empty) document is deleted.
+    // Every file is checked before the destination is opened: it was never opened, so
+    // nothing was written. The gate is released and the export already deleted.
+    assertEquals(0, dest.openedForWrite)
     assertEquals(0, dest.written.size())
+    assertFalse(BackupGate.isHeld())
+    assertTrue(files.exportDir.listFiles().orEmpty().isEmpty())
+    // Abort deletes the (empty) document the picker created, and forgets it.
     assertEquals("deleted", service.abort(begun.sessionId))
     assertTrue(dest.deleted)
-    assertFalse(BackupGate.isHeld())
+    assertFalse(File(noBackupDir, "backup/pending-destination").exists())
   }
 
   @Test
@@ -383,6 +397,30 @@ class BackupServiceTest {
       // Without a gate, nothing is deferred.
       assertEquals(listOf(id(2)), BackupGate.filterDeletion(listOf(id(2))))
     } finally {
+      BackupGate.deleter = null
+    }
+  }
+
+  @Test
+  fun deletingAnExportedAttachmentWhileItIsVerifiedWaitsForTheGate() {
+    // Verification runs before the destination is opened; the gate already holds then.
+    val rows = listOf(attachment(1), attachment(2))
+    val deletedLater = mutableListOf<String>()
+    BackupGate.deleter = { deletedLater += it }
+    try {
+      val asked = mutableListOf<List<String>>()
+      val dest = Destination()
+      val (begun, _) = begin(dest)
+      onFileLookup = { if (dest.openedForWrite == 0 && asked.isEmpty()) asked += BackupGate.filterDeletion(listOf(id(1))) }
+      service.write(begun.sessionId, rows)
+      onFileLookup = null
+      assertEquals(listOf(emptyList<String>()), asked)
+      assertEquals(listOf(id(1)), deletedLater)
+      assertFalse(BackupGate.isHeld())
+      // The backup holds both attachments.
+      assertEquals(2, service.readBack(begun.sessionId).result.manifest.attachments.size)
+    } finally {
+      onFileLookup = null
       BackupGate.deleter = null
     }
   }
@@ -548,6 +586,7 @@ class BackupServiceTest {
     } catch (e: BackupFormatException) {
       assertEquals(BackupFormatException.Code.BACKUP_TOO_LARGE, e.code)
     }
+    assertEquals(0, dest.openedForWrite)
     assertEquals(0, dest.written.size())
     assertFalse(BackupGate.isHeld())
   }
