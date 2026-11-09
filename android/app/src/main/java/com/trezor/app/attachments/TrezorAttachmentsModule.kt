@@ -47,7 +47,8 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
   private val store: AttachmentStore =
       AttachmentStore(File(reactContext.noBackupFilesDir, "attachments")) { keys.obtain() }
   // Throws when it can't tell whether files exist, so no key is created over unreadable files.
-  private val keys = AttachmentKeys.of(vault) { store.hasAnyFile() }
+  // Every location counts (spec §8.6): live, restore staging and previous roots, quarantine.
+  private val keys = AttachmentKeys.of(vault) { AttachmentLocations.hasAnyFile(reactContext.noBackupFilesDir) }
   private val importer = AttachmentImporter(store)
   // Decrypted copies for display live only in the private cache, never in shared storage.
   private val views = AttachmentViews(store, File(reactContext.cacheDir, "attachments/view"))
@@ -83,6 +84,26 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     BackupGate.deleter = { ids ->
       tasks.submit(WORKER, { _, _ -> }) { ids.forEach { runCatching { store.delete(it) } } }
     }
+    RestoreGate.hooks =
+        object : RestoreGate.Hooks {
+          override fun drain() {
+            onLane(WORKER) {}
+            onLane(RENDERER) {}
+          }
+
+          override fun activeShares(): Int = shares.activeCount()
+
+          override fun purgeCaches(): Boolean {
+            onLane(RENDERER) { pdfs.closeAll() }
+            var empty = false
+            onLane(WORKER) {
+              views.purge()
+              val sharesEmpty = shares.purgeAll()
+              empty = sharesEmpty && views.isEmpty()
+            }
+            return empty
+          }
+        }
     // The first task on WORKER, before any call from JS: decrypted views of an earlier
     // process go even if the database never opens. Nothing to settle; failures are
     // ignored (the startup and foreground cleanups try again).
@@ -103,8 +124,31 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
    * Runs [task] on [lane]. [promise] is rejected with IO_FAILED if the module has shut
    * down, or if the task throws anything (an OutOfMemoryError included) before settling it.
    */
-  private fun submit(lane: ModuleTasks.Lane, promise: Promise, task: () -> Unit) =
-      tasks.submit(lane, { code, message -> promise.reject(code, message) }, task)
+  private fun submit(lane: ModuleTasks.Lane, promise: Promise, task: () -> Unit) {
+    // Under the restore gate nothing new is accepted from JS (spec §8.7).
+    if (RestoreGate.isHeld()) {
+      promise.reject(RestoreGate.IN_PROGRESS, "A restore is in progress")
+      return
+    }
+    tasks.submit(lane, { code, message -> promise.reject(code, message) }, task)
+  }
+
+  /** Runs [task] on [lane], past the restore gate, and waits for it (restore coordinator). */
+  private fun onLane(lane: ModuleTasks.Lane, task: () -> Unit) {
+    val done = java.util.concurrent.CountDownLatch(1)
+    var failure: Throwable? = null
+    tasks.submit(lane, { _, message -> failure = IllegalStateException(message); done.countDown() }) {
+      try {
+        task()
+      } catch (e: Throwable) {
+        failure = e
+      } finally {
+        done.countDown()
+      }
+    }
+    done.await()
+    failure?.let { throw it }
+  }
 
   override fun pick(source: String, imagesOnly: Boolean, maxCount: Double, promise: Promise) {
     val max = maxCount.toInt()
@@ -178,6 +222,11 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     // for the result, so nothing is imported.
     val pick = pending ?: return
     pending = null
+    // A result arriving under the restore gate is refused; nothing is imported (spec §8.7).
+    if (RestoreGate.isHeld()) {
+      pick.promise.reject(RestoreGate.IN_PROGRESS, "A restore is in progress")
+      return
+    }
     val uris =
         try {
           pick.parse(resultCode, data).distinct()
@@ -205,6 +254,13 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
     try {
       val accepted = uris.take(pick.maxCount)
       val outcomes = importer.importAll(accepted.map { uri -> { sourceOf(uri) } }, pick.imagesOnly)
+      // The restore gate was taken while this import ran: its files are deleted and the
+      // pick refused, so nothing can refer to them (spec §8.7).
+      if (RestoreGate.isHeld()) {
+        outcomes.filterIsInstance<AttachmentImporter.Outcome.Imported>().forEach { runCatching { store.delete(it.id) } }
+        pick.promise.reject(RestoreGate.IN_PROGRESS, "A restore is in progress")
+        return
+      }
       pick.promise.resolve(resultJson(outcomes, uris.size - accepted.size))
     } catch (e: Exception) {
       pick.promise.reject("IO_FAILED", "Could not import files")

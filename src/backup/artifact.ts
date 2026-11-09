@@ -168,3 +168,144 @@ export function requireSameAttachments(
     throw inconsistent();
   }
 }
+
+// --- Restore (Phase 6 spec v2.4 §8.2 step 6) -----------------------------------
+
+/** Settings that travel with a backup (§8.8 steps 1–2) and their valid values. */
+const KEPT_SETTINGS: Record<string, (value: unknown) => boolean> = {
+  'theme.preference': v => v === 'system' || v === 'light' || v === 'dark',
+  'notifications.showDetails': v => typeof v === 'boolean',
+};
+
+/** Device-local settings taken from the live database instead (§8.8 step 3). */
+const DEVICE_SETTINGS = [
+  'notifications.permissionRequested',
+  'notifications.exactAlarmRequested',
+] as const;
+
+export type DeviceSettings = Partial<
+  Record<(typeof DEVICE_SETTINGS)[number], boolean>
+>;
+
+function parseJson(text: unknown): unknown {
+  try {
+    return JSON.parse(String(text));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The device-local settings of the live database, read through the gate's
+ * callback (§5). Only valid booleans; nothing if the database can't be read.
+ */
+export async function readDeviceSettings(
+  live: SqlExecutor,
+): Promise<DeviceSettings> {
+  const result: DeviceSettings = {};
+  try {
+    const rows = await live.execute(
+      `SELECT key, value FROM settings WHERE key IN (${DEVICE_SETTINGS.map(
+        () => '?',
+      ).join(', ')})`,
+      [...DEVICE_SETTINGS],
+    );
+    for (const row of rows) {
+      const value = parseJson(row.value);
+      const key = String(row.key) as (typeof DEVICE_SETTINGS)[number];
+      if (DEVICE_SETTINGS.includes(key) && typeof value === 'boolean') {
+        result[key] = value;
+      }
+    }
+  } catch {
+    return {};
+  }
+  return result;
+}
+
+/**
+ * Annex B §B.5: exports the verified artifact `incomingName` (artifact key) to
+ * a new database `stagedName` in the same directory under the device key, with
+ * `user_version = 3`. The connection isn't opened `failOnCreate`: an attached
+ * database inherits the open flags, and the staged file doesn't exist yet. The
+ * artifact key never becomes a device key.
+ */
+export async function exportToDevice(
+  location: string,
+  incomingName: string,
+  artifactKeyHex: string,
+  stagedName: string,
+  deviceKeyHex: string,
+): Promise<void> {
+  const db = openEncrypted(incomingName, artifactKeyHex, { location });
+  try {
+    await db.execute('PRAGMA journal_mode = DELETE');
+    await db.execute('ATTACH DATABASE ? AS staged KEY ?', [
+      `${location}/${stagedName}`,
+      rawKey(deviceKeyHex),
+    ]);
+    let failed = false;
+    try {
+      await db.execute("SELECT sqlcipher_export('staged')");
+      await db.execute(`PRAGMA staged.user_version = ${BACKUP_SCHEMA_VERSION}`);
+    } catch (e) {
+      failed = true;
+      throw e;
+    } finally {
+      try {
+        await db.execute('DETACH DATABASE staged');
+      } catch (e) {
+        if (!failed) {
+          throw e;
+        }
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * §8.8 on the staged database: only `theme.preference` and
+ * `notifications.showDetails` are kept from the backup, and only with valid
+ * values; the device-local settings come from the live database (`device`),
+ * when it gave valid values. Everything else is deleted (defaults apply).
+ */
+export async function rewriteSettings(
+  location: string,
+  stagedName: string,
+  deviceKeyHex: string,
+  device: DeviceSettings,
+): Promise<void> {
+  const db = openEncrypted(stagedName, deviceKeyHex, {
+    failOnCreate: true,
+    location,
+  });
+  try {
+    await db.execute('PRAGMA journal_mode = DELETE');
+    const kept = Object.keys(KEPT_SETTINGS);
+    await db.execute(
+      `DELETE FROM settings WHERE key NOT IN (${kept
+        .map(() => '?')
+        .join(', ')})`,
+      kept,
+    );
+    for (const row of await db.execute('SELECT key, value FROM settings')) {
+      const key = String(row.key);
+      if (!KEPT_SETTINGS[key](parseJson(row.value))) {
+        await db.execute('DELETE FROM settings WHERE key = ?', [key]);
+      }
+    }
+    for (const key of DEVICE_SETTINGS) {
+      const value = device[key];
+      if (typeof value === 'boolean') {
+        await db.execute('INSERT INTO settings (key, value) VALUES (?, ?)', [
+          key,
+          JSON.stringify(value),
+        ]);
+      }
+    }
+  } finally {
+    db.close();
+  }
+}

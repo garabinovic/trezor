@@ -68,6 +68,9 @@ class AttachmentViews(private val store: AttachmentStore, private val dir: File)
         file.isFile && name !in active && file.delete()
       } ?: 0
 
+  /** Whether the view directory holds no file (restore confirms the purge, spec §8.9). */
+  @Synchronized fun isEmpty(): Boolean = dir.listFiles().isNullOrEmpty()
+
   /** Deletes every copy (startup, when nothing can be showing one). */
   @Synchronized
   fun purge(): Int {

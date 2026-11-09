@@ -263,4 +263,20 @@ class ShareFilesTest {
 
   private fun children(element: Element): List<Element> =
       (0 until element.childNodes.length).map { element.childNodes.item(it) }.filterIsInstance<Element>()
+
+  /** Restore (spec v2.4 §8.7, §8.9): waits for active shares, then deletes every share. */
+  @Test
+  fun purgeAllRefusesWhileAShareIsActiveThenDeletesEvenRecentOnes() {
+    val active = prepare()
+    assertEquals(1, shares.activeCount())
+    assertFalse(shares.purgeAll())
+    assertTrue(active.isFile)
+    shares.release(active)
+    val recent = prepare("Other.pdf").also { shares.release(it) }
+    assertEquals(0, shares.activeCount())
+    assertTrue(shares.purgeAll())
+    assertFalse(active.exists())
+    assertFalse(recent.exists())
+    assertTrue(dir.listFiles().isNullOrEmpty())
+  }
 }

@@ -106,6 +106,20 @@ class ShareFiles(
     }
   }
 
+  /** Shares being prepared or launched now (the restore gate waits for none, spec §8.7). */
+  @Synchronized fun activeCount(): Int = active.size
+
+  /**
+   * Deletes every share, recent ones included (restore, spec §8.9); refuses while a share
+   * is active. True only if the share directory is empty afterwards.
+   */
+  @Synchronized
+  fun purgeAll(): Boolean {
+    if (active.isNotEmpty()) return false
+    dir.listFiles()?.forEach { it.deleteRecursively() }
+    return dir.listFiles().isNullOrEmpty()
+  }
+
   /** Deletes shares older than [RETENTION_MS], except active ones; returns how many. */
   @Synchronized
   fun purgeExpired(): Int {

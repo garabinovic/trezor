@@ -60,7 +60,8 @@ Rules:
 | `src/storage/vault.ts` | TS wrapper; maps native rejections to `StorageError` |
 | `android/app/src/main/java/com/trezor/app/storage/` | `DatabaseFiles`: definite file state, no-replace rename, temp-only delete (database directory only) |
 | `android/app/src/main/java/com/trezor/app/backup/` | Phase 6. Step 1: the TZBK v1 backup format library (header, Argon2id via BouncyCastle 1.79, HKDF, chunked AES-GCM sections, trailer HMAC, strict manifest, password rules with the Unicode 8.0 table; reference and vectors in `tools/backup-format/`). Step 2: backup creation and Check backup, native half (`BackupService`, `BackupCreator`, `BackupChecker`, `BackupGate`, `BackupFiles`, module `TrezorBackup`), §8. No UI yet |
-| `src/backup/` | Phase 6 Step 2: the JS half of backup creation and Check backup (`createBackup`, `checkBackup`; SQLCipher export and artifact verification in `artifact.ts`), §8. Not called by any screen yet |
+| `android/app/src/main/java/com/trezor/app/restore/` | Phase 6 Step 3: restore preparation, native half (`RestoreService`, `RestoreJournal`/`JournalStore`, `Quarantine`, `RestoreFileOps`, `RestoreLayout`, `ProcessRestart`, module `TrezorRestore`), §8.7. Never replaces live data; no swap, no recovery (Step 4), no UI (Step 5) |
+| `src/backup/` | Phase 6 Steps 2–3: the JS half of backup creation and Check backup (`createBackup`, `checkBackup`; SQLCipher export and artifact verification in `artifact.ts`) and of restore preparation (`restore.ts`: `prepareRestore`, `restoreEntryFor`; step 6 helpers in `artifact.ts`), §8. Not called by any screen yet |
 | `src/native/NativeTrezorDatabaseFiles.ts`, `src/storage/databaseFiles.ts` | Spec and TS wrapper for the above |
 | `src/storage/database.ts` | Startup matrix, verification, snapshot, migrations |
 | `src/storage/sqlcipher.ts` | Key-format check, keyed `open()` (drops the key from op-sqlite's retained options), encryption/integrity verification |
@@ -803,19 +804,120 @@ app's own migrations (`BACKUP_INCONSISTENT`). A wrong key or damage is
 None of these is plaintext; staged artifacts are useless without the backup's
 BMK. The app's own backup exclusions (§3) still exclude every file.
 
-### 8.7 What a restore will need (not implemented)
+### 8.7 Restore preparation (Step 3)
 
-- The database stores no file paths; a file is found by its attachment id
-  (UUIDv7, `<id>.tza`), so ids survive a restore unchanged.
-- `AttachmentFormat.rewrap` copies exactly a file's length and then requires
-  the end of its input (Corrective D) **[verified: JVM]**, so a section can't
-  be copied past its end; a restore wraps each DEK under the new device's
-  `attachments` key.
-- Files must be staged and verified before the database swap and moved in
-  only after it: startup garbage collection deletes `.tza` files without a
-  row.
-- Decrypted view and share copies live only in `cacheDir` and are never part
-  of a backup.
+Spec §8.1–8.4, §8.6–8.11 and §9.2–9.3, **exercised without the swap**: the
+swap, the startup recovery of the state matrix (§8.5) and §8.2 steps 13–16
+(closing the live connection, the pre-swap state check, the swap renames,
+the restart call) are **Step 4**; the restore screens and the error-screen
+entry are Step 5. Nothing in the app calls the preparation yet. In this step
+every preparation ends in the pre-swap failure path, so **the live database
+and attachment root are never moved, renamed or overwritten**.
+
+**Flow** (`src/backup/restore.ts` `prepareRestore`, native steps in
+`restore/RestoreService.kt` via the `TrezorRestore` module):
+
+1. Password rules, memory pre-check, Argon2id, manifest and free space
+   (§9.6: `incoming.db` + `S_db` + Σ TZA sizes + the section in transit +
+   16 MiB, summed per filesystem by `st_dev`). Nothing is written.
+2. The restore gate (§8.7 of the spec), in this order:
+   - the **reconcile gate** (`src/reminders/reconcileGate.ts`): waits for a
+     reconcile already running, holds new ones until release (taken before
+     the database gate, so a reconcile waiting on a database read can't
+     deadlock it);
+   - one `exclusive` operation on the live database queue: later database
+     work (item writes, settings, reconcile reads) waits; the coordinator's
+     own statements run through the callback's executor;
+   - the **native gate** (`attachments/RestoreGate.kt`): the attachments
+     module refuses every new call with `RESTORE_IN_PROGRESS`; a picker
+     result that arrives is refused; an import that finishes under the gate
+     has its files deleted; work accepted before is drained; restore waits
+     while a share is active (`ShareFiles.activeCount`), asking the caller
+     to wait or cancel (`RESTORE_CANCELLED`).
+3. The journal `N/restore/restore.json` (`phase = prepared`, strict JSON,
+   temp file + `fsync` + rename + directory `fsync`; a `.tmp` is never read;
+   anything unparseable is `RESTORE_STATE_UNKNOWN`).
+4. `S_att` is created (always, also for zero attachments) and `N/restore`
+   synced; the database section goes to `D/restore/incoming.db` (size and
+   SHA-256 against the manifest, `fsync`). Each attachment section goes to
+   `N/restore/incoming-attachment.tmp` still under the backup's wrap key, is
+   verified (TZA header rules, whole body decrypted and authenticated, size
+   and SHA-256), rewrapped to the device `attachments` key into
+   `S_att/<id>.tza` (`AttachmentFormat.rewrap`, bounded) and that file is
+   decrypted again under the device key. Then the trailer and EOF. No
+   plaintext is written.
+5. If a Check ran on the file in this flow: the same backup ID and trailer,
+   else `BACKUP_CHANGED`.
+6. (JS) `incoming.db` verified (Annex B §B.4) and its rows compared with
+   the manifest; exported to `D/restore/trezor.db` (`S_db`) under the
+   **device** database key (Annex B §B.5, `exportToDevice`); settings
+   rewritten (§8.8: only valid `theme.preference` and
+   `notifications.showDetails` kept, the two device-local values taken from
+   the live database when valid, everything else dropped); `S_db` verified
+   again (§B.4 and rows); `incoming.db` deleted.
+7. Retained files (§9.2, `Quarantine`): `kept-ids` absent → none; valid → the
+   listed ids (a missing file is counted); damaged → **every** `.tza` in the
+   live root (fail closed); live root unlistable → `STORAGE_ERROR`. Each is
+   hard-linked (or copied) to `N/quarantine/<restoreId>/<id>.tza`; the
+   original stays; a target is never overwritten.
+8. `fsync` of `S_db`, every staged attachment and the staging, restore and
+   quarantine directories.
+9. (JS, live connection only) fired ONCE reminders that still exist and
+   aren't completed are completed, as a reconcile would.
+10–11. One native call under the `ScheduleStore` monitor
+   (`reminders/ScheduleRestore.kt`): the schedule copied byte for byte to
+   `N/restore/schedule.saved.bin` (durably), the journal's `scheduleSaved`
+   set, then the schedule cleared (`sync(entries = [])` and every shown
+   `reminder:` notification) and confirmed empty. An alarm or re-arm
+   arriving meanwhile waits for the whole section.
+12. Decrypted caches purged on the attachments module's lanes: PDFs closed,
+   every view and share deleted, both directories confirmed empty.
+
+**Pre-swap failure path** (always taken in Step 3): the schedule restored
+and re-armed by `scheduleSaved` (`saved` → copied back unless an earlier
+attempt already did, `absent` → schedule deleted, `pending` → left as is;
+then `rearmAll`, then the saved copy deleted), then `D/restore`,
+`N/restore/attachments` and `N/quarantine/<restoreId>` deleted, then the
+journal (and the empty `N/restore`), then the gates released, which
+requests a normal reconcile. If any of it fails, it stops at once, keeps the
+journal and reports `RESTORE_RECOVERY_RETRY`.
+
+**Other parts:**
+- **Preconditions** (`RestoreService.preflight`, §8.1 of the spec):
+  - no database file → no restore entry;
+  - the device database key must unwrap, else `RESTORE_UNAVAILABLE`;
+  - the attachments key must unwrap if it exists. If it doesn't exist, no
+    encrypted file may exist anywhere, else `RESTORE_UNAVAILABLE`;
+  - a journal or restore staging without one → `RESTORE_STATE_UNKNOWN`
+    (their recovery is Step 4);
+  - from the error screen, `trezor.db-journal` → `RESTORE_STATE_UNKNOWN`.
+
+  `restoreEntryFor` maps each storage error code to what the error screen
+  will offer: restore, `RESTORE_UNAVAILABLE`, update, or Retry only.
+- **Attachments key** (§8.6 of the spec): `AttachmentLocations.hasAnyFile`
+  covers the live root, `S_att`, `P_att` and every quarantine directory,
+  with the same fail-closed listing. The attachments module uses it for key
+  creation.
+- **Quarantine:** it is never cleaned up automatically, is never part of a
+  backup, and garbage collection never sees it (GC lists only the live
+  root). Only that restore's pre-swap failure deletes its directory.
+- **File operations** (`RestoreFileOps`, §9.3 of the spec):
+  - `syncDirectory`;
+  - `renameNoReplaceDurable`: the target must be absent; both parents are
+    synced;
+  - `linkOrCopyDurable`: a copy goes through a temp name;
+  - `deleteRecursively`: limited to `D/restore`, `D/backup`, `D/check/*`,
+    `N/restore` and the current journal's `N/quarantine/<restoreId>`.
+- **Restart** (`ProcessRestart`, §8.10 of the spec): it relaunches
+  `MainActivity` only if it is the current activity and RESUMED, then
+  finishes the task and kills the process. It is not called before Step 4.
+
+**What Step 4 must add before Step 5 may call this:** the startup recovery
+of §8.5 (including the "no journal" guard and the `prepared` row). Until
+then a process killed during a preparation would leave a journal that only
+blocks further restores (`RESTORE_STATE_UNKNOWN`). Its schedule would be
+rebuilt by the next reconcile, but a pending ONCE alarm and `fired` would
+be lost. No live data would be at risk.
 
 ### 8.8 Not verified yet
 
@@ -829,8 +931,13 @@ BMK. The app's own backup exclusions (§3) still exclude every file.
   and no other storage provider.
 - The export and artifact checks ran on real SQLCipher 4.19.0 (op-sqlite's
   amalgamation) on macOS, not on Android (§9).
-- The module glue (`TrezorBackupModule`, the `deleteFiles` hook) has no
+- The module glue (`TrezorBackupModule`, `TrezorRestoreModule`, the
+  attachments module's `deleteFiles` hook and restore-gate checks) has no
   automated test; the rules behind it are JVM-tested.
+- Restore preparation (Step 3) has not run on an emulator or device: hard
+  links (`Os.link`) in app storage, `Os.stat` device ids, the alarm and
+  notification clearing, the cache purge on the module lanes, and the
+  restart primitive are untested on Android.
 - Argon2id time and memory on a physical device have not been measured.
 
 ---
@@ -860,6 +967,7 @@ BMK. The app's own backup exclusions (§3) still exclude every file.
 | F9 database lifecycle | Jest 370/370 in 22 suites. `openStorage` +5: roots mounting together share one initialization, connection and repositories; a later root loads its own data and initializes nothing; a failure after opening closes the connection after its queued statements; Retry opens a fresh one; a failing attempt is joined, never replaced, and doesn't clear its successor. `migrations` +3 on two real connections to one file: a step another connection completed is skipped (schema and an interval reminder unchanged), a control shows a deferred transaction still reads the old version, and while another connection runs a step this one fails without running one. `serialDatabase` +2 (`closeWhenIdle` order, options passed on), new `opSqliteAdapter` 5 (`BEGIN IMMEDIATE` first, rollback keeps the original error, failed `COMMIT` rolls back, no lock runs nothing, default unchanged). Each fix removed once on purpose fails a test, except the check that only the failed attempt clears the slot: no path can replace the slot while an attempt is failing, so that check is defensive | **Jest 370/370, JVM 107/107** |
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
+| Phase 6 Step 3 (restore preparation, without the swap) | JVM +35 in 7 new classes and 1 extended: `RestoreServiceTest` 9 (real backups from `BackupService` restored on a device with another key: every step, `S_att` readable only with the target key, quarantine link, schedule saved and restored, live files byte-identical; zero attachments; wrong password, short password and too little space write nothing; changed backup → `BACKUP_CHANGED`; damaged and truncated sections; a failing cleanup keeps the journal → `RESTORE_RECOVERY_RETRY`; a journal blocks; every §8.1 precondition), `RestoreJournalTest` 4, `RestoreFileOpsTest` 4, `QuarantineTest` 5 (`kept-ids` absent, valid with a missing file, damaged → all, unlistable root, no overwrite), `AttachmentLocationsTest` 3, `ScheduleRestoreTest` 7 (order, every `scheduleSaved` case, idempotence, failed re-arm keeps the copy, the `ScheduleStore` monitor held throughout), `RestoreGateAndRestartTest` 2, `ShareFilesTest` +1. Jest +16: `restore.test.ts` 13 (step order, `S_db` under the device key with the settings rewrite, invalid settings and unreadable live settings, error-screen mode, queued writes and reconciles wait, shares wait/cancel, a failure at every step undoes and releases, schema and manifest mismatch, failed cleanup reported, wrong password, error-code entries), `reconcileGate.test.ts` 3. Real SQLCipher 4.19.0 harness +2 (export to the device key, settings rewrite and §B.4 on `S_db`; keys not interchangeable, files encrypted), run in band with Step 2's 6 and Phase 4's 4 | **JVM 262/262, Jest 432/432, real SQLCipher 12/12** |
 | Attachments verified before the destination is opened | `BackupServiceTest` +1 (a deletion requested while attachments are verified waits for the gate); the unreadable-attachment, key-unavailable and over-limit tests now also require that the destination was never opened, and the success test that it was opened once. With verification moved back inside the open destination, 6 tests fail | **JVM 86/86 backup** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |
 | Android instrumentation after Phase 3 (automated, emulator API 37) | `KeyVaultTest` 12, `DatabaseFilesTest` 9, `ReminderSchedulerTest` 15 | **36/36 pass** |

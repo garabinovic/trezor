@@ -41,3 +41,21 @@ jest.mock('./src/native/NativeTrezorBackup', () => ({
     },
   ),
 }));
+
+// Restore preparation is native-only; flow tests pass a fake platform.
+jest.mock('./src/native/NativeTrezorRestore', () => ({
+  __esModule: true,
+  default: new Proxy(
+    {},
+    {
+      get: (_, name) =>
+        name === '__esModule'
+          ? undefined
+          : jest.fn(async () => {
+              throw Object.assign(new Error('native restore in Jest'), {
+                code: 'RESTORE_FAILED',
+              });
+            }),
+    },
+  ),
+}));

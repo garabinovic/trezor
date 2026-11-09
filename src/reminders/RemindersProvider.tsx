@@ -13,6 +13,7 @@ import { Dialog } from '../components';
 import { useItems } from '../data';
 import type { SettingsRepository } from '../storage/SettingsRepository';
 import { nativeReminderPlatform, ReminderPlatform } from './platform';
+import { onReconcileReleased, runReconcile } from './reconcileGate';
 import { createReconcileQueue, reconcile } from './scheduler';
 
 /** Whether to show the in-app explanation before Android's permission prompt. */
@@ -73,9 +74,9 @@ export function RemindersProvider({
   const [notificationsEnabled, setNotificationsEnabled] = useState<
     boolean | null
   >(null);
-  const [exactAlarmsAllowed, setExactAlarmsAllowed] = useState<
-    boolean | null
-  >(null);
+  const [exactAlarmsAllowed, setExactAlarmsAllowed] = useState<boolean | null>(
+    null,
+  );
   const [scheduleFailed, setScheduleFailed] = useState(false);
   const [explaining, setExplaining] = useState(false);
   const [explainingExact, setExplainingExact] = useState(false);
@@ -87,11 +88,14 @@ export function RemindersProvider({
     () =>
       createReconcileQueue(async () => {
         try {
-          await reconcile(platform, {
-            readStored,
-            completeFired: completeStoredReminders,
-            showDetails: showDetailsRef.current,
-          });
+          // Waits while a restore holds the reconcile gate (spec §8.7).
+          await runReconcile(() =>
+            reconcile(platform, {
+              readStored,
+              completeFired: completeStoredReminders,
+              showDetails: showDetailsRef.current,
+            }),
+          );
           setScheduleFailed(false);
         } catch (e) {
           setScheduleFailed(true);
@@ -126,6 +130,9 @@ export function RemindersProvider({
     const timer = setTimeout(requestReconcile, RECONCILE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [items, showDetails, requestReconcile]);
+
+  // A restore that ended before its swap asks for a normal reconcile (§8.2).
+  useEffect(() => onReconcileReleased(requestReconcile), [requestReconcile]);
 
   // Back in the foreground: fired reminders, permission changes made in
   // Android settings, and clock or zone changes are picked up.

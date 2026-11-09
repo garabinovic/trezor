@@ -158,6 +158,23 @@ object ReminderScheduler {
     }
   }
 
+  /**
+   * [ScheduleRestore] wired to this app: clearing is `sync(entries = [])` plus every shown
+   * `reminder:` notification; re-arming is [rearmAll]; both under the `ScheduleStore` monitor.
+   */
+  fun restoreOps(context: Context, schedule: java.io.File, saved: java.io.File, syncDirectory: (java.io.File) -> Unit) =
+      ScheduleRestore(
+          schedule = schedule,
+          saved = saved,
+          syncDirectory = syncDirectory,
+          clear = {
+            sync(context, emptyList(), ScheduleStore.load(context).showDetails)
+            ReminderNotifications.cancelAllShown(context)
+          },
+          isEmpty = { ScheduleStore.load(context).let { it.entries.isEmpty() && it.fired.isEmpty() } },
+          rearm = { rearmAll(context) },
+      )
+
   /** After reboot, app update, clock or time-zone change: recompute every alarm. */
   fun rearmAll(context: Context) {
     val now = System.currentTimeMillis()

@@ -96,6 +96,14 @@ object ReminderNotifications {
     }
   }
 
+  /** Cancels every shown notification with a `reminder:` tag (restore, spec §8.2 step 10–11). */
+  fun cancelAllShown(context: Context) {
+    val manager = manager(context)
+    manager.activeNotifications
+        .filter { it.tag?.startsWith("reminder:") == true }
+        .forEach { manager.cancel(it.tag, it.id) }
+  }
+
   fun cancelShown(context: Context, id: String) {
     manager(context).cancel(tag(id), NOTIFICATION_ID)
   }

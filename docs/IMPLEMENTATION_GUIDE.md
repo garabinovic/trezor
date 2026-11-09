@@ -559,6 +559,10 @@ npm start / npm run android  # Metro + install (see README for another port)
   `BackupManifestTest`, `BackupPasswordTest`) and Step 2 (`BackupServiceTest`
   on a real `AttachmentStore` with an in-memory destination that can fail at
   every step, `BackupGateTest`, `BackupFilesTest`).
+- `restore/` (Step 3): `RestoreServiceTest` (real backups from
+  `BackupService` restored on a second "device"), `RestoreJournalTest`,
+  `RestoreFileOpsTest`, `QuarantineTest`, `RestoreGateAndRestartTest`; also
+  `attachments/AttachmentLocationsTest` and `reminders/ScheduleRestoreTest`.
 - Platform-free logic is extracted from Android classes so it can be tested
   here. Keep that pattern.
 
@@ -584,10 +588,13 @@ checks on the device (logged with `[SELFTEST]`). It reuses the production
 - Done again for Phase 6 Step 2 (`backup.check.ts`, same bridge with
   `location` and `:memory:`): the backup export with foreign keys on and every
   artifact check of TA §8.5, on production `artifact.ts` and `createBackup`.
+- Done again for Phase 6 Step 3 (`restore.check.ts`): the restore export to
+  the device key, the settings rewrite and the checks on `S_db`.
 - **The harness is not in the repository**, so repeating it means rebuilding
   it the same way, with isolated temporary files only. Run its suites in band
   (`jest -i`): the migration check deletes the shared temporary root when it
-  starts.
+  starts. It lives in the session's temporary directory, which macOS clears
+  periodically (its bridge script had to be restored for Step 3).
 
 **Verification levels:** always say which one was reached.
 - **Automated:** Jest/JVM.
@@ -599,10 +606,11 @@ Phase 4 has reached the automated level only (Jest, JVM and the one-off
 real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
 or a physical device, and no instrumentation test was run.
 
-Phase 6 Steps 1–2 are at the automated level too (JVM, Jest and the one-off
+Phase 6 Steps 1–3 are at the automated level too (JVM, Jest and the one-off
 real-SQLCipher backup check on macOS). Backup creation and Check backup also
 ran on an isolated Android 16 emulator as a temporary QA release build (TA
-§8.8); not on a physical device.
+§8.8); not on a physical device. Restore preparation (Step 3) has not run on
+an emulator or device.
 
 ---
 
@@ -615,11 +623,11 @@ ran on an isolated Android 16 emulator as a temporary QA release build (TA
 | 2 — Persistent items and search | Repository CRUD for all four types, pinning, filters and sorts, Unicode search, document expiry, debug sample data | TA §7 |
 | 3 — Reminders | Schema v2, six repeat modes, native alarms and notifications, notification privacy, reboot/time-change re-arming, exact alarms (`191ad7f`) | TA §13; commit `147699d` |
 | 4 — Cards, documents, attachments | Schema v3, TZA encrypted files, card issuer and front/back photos, up to 10 document files, viewer, save a copy, share, cleanup; review fixes | TA §14; steps `ade411f` … `3982135`, docs `1b15cf4`, review fixes `06004a0`, KeyVault hardening `04c4605`, UTF-8 export names `6786ceb`. Acceptance pending |
-| 6 — Encrypted backup (Steps 1–2 of 5) | TZBK v1 format library (`1dbcfae`); backup creation (SQLCipher export under the backup gate, attachment verification and DEK rewrap, SAF write with `fsync` and mandatory read-back) and non-destructive Check backup, as APIs without UI (`src/backup/backup.ts`) | TA §8 |
+| 6 — Encrypted backup (Steps 1–3 of 5) | TZBK v1 format library (`1dbcfae`); backup creation (SQLCipher export under the backup gate, attachment verification and DEK rewrap, SAF write with `fsync` and mandatory read-back) and non-destructive Check backup, as APIs without UI (`src/backup/backup.ts`); restore preparation (§8.2 steps 1–12: staging with rewrap, journal, quarantine, settings rewrite, schedule save/restore, cache purge, restore gate), exercised without the swap and always undone (swap, recovery and UI are Steps 4–5) | TA §8 |
 
 **Not implemented** (shown as "Not available yet" or not present):
 - app lock and biometrics;
-- restore, and any backup or Check backup UI (Phase 6 Steps 3–5; creation and Check exist as APIs only, TA §8);
+- the restore swap, its startup recovery and any backup, Check or restore UI (Phase 6 Steps 4–5; creation, Check and restore preparation exist as APIs only, TA §8);
 - delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;
