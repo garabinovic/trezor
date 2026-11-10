@@ -44,23 +44,28 @@ export interface Spec extends TurboModule {
   swapRestore(sessionId: string): Promise<string>;
   /** §8.10: ends the process (relaunching only from the foreground). */
   restartProcess(): Promise<void>;
-  /** v2.5 §5: takes the recovery side of the restore lock, else RESTORE_IN_PROGRESS. */
-  recoveryBegin(): Promise<void>;
+  /**
+   * v2.5 §5: starts a recovery run and returns its token, or rejects with
+   * RESTORE_IN_PROGRESS while any run or restore holds the lock. Every
+   * recovery call below takes that token.
+   */
+  recoveryBegin(): Promise<string>;
   /**
    * v2.5 §7: runs recovery rows until startup may continue, JSON { status:
    * 'done' } or { status: 'verify', location, name, attachmentIds }.
    */
-  recoveryRun(): Promise<string>;
+  recoveryRun(token: string): Promise<string>;
   /** 'pass' | 'fail' | 'retry' | 'unavailable' (v2.5 §1.3). */
-  finishVerification(outcome: string): Promise<void>;
+  finishVerification(token: string, outcome: string): Promise<void>;
   /**
    * v2.5 §2.1: JSON { location, name, attachmentIds } of the previous data,
    * or RESTORE_CANCEL_UNAVAILABLE.
    */
-  previousData(): Promise<string>;
+  previousData(token: string): Promise<string>;
   /** v2.5 §2.2: writes `rollingback`; the next recovery run rolls back. */
-  cancelRestore(): Promise<void>;
-  recoveryEnd(): Promise<void>;
+  cancelRestore(token: string): Promise<void>;
+  /** Ends the run of `token`; another token changes nothing. */
+  recoveryEnd(token: string): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('TrezorRestore');

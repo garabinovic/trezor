@@ -32,14 +32,18 @@ export type RecoveryRun =
   | { status: 'done' }
   | ({ status: 'verify' } & DatabaseTarget);
 
-/** The native half (TrezorRestoreModule). Replaceable in tests. */
+/**
+ * The native half (TrezorRestoreModule). Replaceable in tests. A run holds
+ * the restore lock from `recoveryBegin` (its token, or RESTORE_IN_PROGRESS)
+ * to `recoveryEnd` with that token; only its holder can use or end it.
+ */
 export interface RecoveryPlatform {
-  recoveryBegin(): Promise<void>;
-  recoveryRun(): Promise<RecoveryRun>;
-  finishVerification(outcome: Verification): Promise<void>;
-  previousData(): Promise<DatabaseTarget>;
-  cancelRestore(): Promise<void>;
-  recoveryEnd(): Promise<void>;
+  recoveryBegin(): Promise<string>;
+  recoveryRun(token: string): Promise<RecoveryRun>;
+  finishVerification(token: string, outcome: Verification): Promise<void>;
+  previousData(token: string): Promise<DatabaseTarget>;
+  cancelRestore(token: string): Promise<void>;
+  recoveryEnd(token: string): Promise<void>;
 }
 
 const json = async <T>(text: Promise<string>): Promise<T> =>
@@ -47,12 +51,12 @@ const json = async <T>(text: Promise<string>): Promise<T> =>
 
 export const nativeRecoveryPlatform: RecoveryPlatform = {
   recoveryBegin: () => NativeTrezorRestore.recoveryBegin(),
-  recoveryRun: () => json(NativeTrezorRestore.recoveryRun()),
-  finishVerification: outcome =>
-    NativeTrezorRestore.finishVerification(outcome),
-  previousData: () => json(NativeTrezorRestore.previousData()),
-  cancelRestore: () => NativeTrezorRestore.cancelRestore(),
-  recoveryEnd: () => NativeTrezorRestore.recoveryEnd(),
+  recoveryRun: token => json(NativeTrezorRestore.recoveryRun(token)),
+  finishVerification: (token, outcome) =>
+    NativeTrezorRestore.finishVerification(token, outcome),
+  previousData: token => json(NativeTrezorRestore.previousData(token)),
+  cancelRestore: token => NativeTrezorRestore.cancelRestore(token),
+  recoveryEnd: token => NativeTrezorRestore.recoveryEnd(token),
 };
 
 /** The device database key; rejects (a StorageError) if it can't be had. Never creates one. */
@@ -187,19 +191,20 @@ export async function recoverRestore(
   platform: RecoveryPlatform = nativeRecoveryPlatform,
   deviceKey: DeviceKey = deviceDatabaseKey,
 ): Promise<void> {
+  let token: string;
   try {
-    await platform.recoveryBegin();
+    token = await platform.recoveryBegin();
   } catch (e) {
     throw recoveryError(e);
   }
   try {
     for (let i = 0; i < MAX_VERIFICATIONS; i++) {
-      const run = await platform.recoveryRun();
+      const run = await platform.recoveryRun(token);
       if (run.status === 'done') {
         return;
       }
       const outcome = await verifyRestoredDatabase(run, deviceKey);
-      await platform.finishVerification(outcome);
+      await platform.finishVerification(token, outcome);
       if (outcome === 'retry') {
         throw new StorageError('RESTORE_VERIFY_RETRY', 'Restore not verified');
       }
@@ -211,7 +216,7 @@ export async function recoverRestore(
   } catch (e) {
     throw recoveryError(e);
   } finally {
-    await platform.recoveryEnd().catch(() => undefined);
+    await platform.recoveryEnd(token).catch(() => undefined);
   }
 }
 
@@ -282,17 +287,21 @@ export async function canCancelRestore(
   platform: RecoveryPlatform = nativeRecoveryPlatform,
   deviceKey: DeviceKey = deviceDatabaseKey,
 ): Promise<boolean> {
+  let token: string;
   try {
-    await platform.recoveryBegin();
+    token = await platform.recoveryBegin();
   } catch {
     return false;
   }
   try {
-    return await checkPreviousData(await platform.previousData(), deviceKey);
+    return await checkPreviousData(
+      await platform.previousData(token),
+      deviceKey,
+    );
   } catch {
     return false;
   } finally {
-    await platform.recoveryEnd().catch(() => undefined);
+    await platform.recoveryEnd(token).catch(() => undefined);
   }
 }
 
@@ -306,22 +315,25 @@ export async function cancelRestore(
   platform: RecoveryPlatform = nativeRecoveryPlatform,
   deviceKey: DeviceKey = deviceDatabaseKey,
 ): Promise<void> {
+  let token: string;
   try {
-    await platform.recoveryBegin();
+    token = await platform.recoveryBegin();
   } catch (e) {
     throw recoveryError(e);
   }
   try {
-    if (!(await checkPreviousData(await platform.previousData(), deviceKey))) {
+    if (
+      !(await checkPreviousData(await platform.previousData(token), deviceKey))
+    ) {
       throw new StorageError(
         'RESTORE_VERIFY_RETRY',
         'Previous data not usable',
       );
     }
-    await platform.cancelRestore();
+    await platform.cancelRestore(token);
   } catch (e) {
     throw recoveryError(e);
   } finally {
-    await platform.recoveryEnd().catch(() => undefined);
+    await platform.recoveryEnd(token).catch(() => undefined);
   }
 }

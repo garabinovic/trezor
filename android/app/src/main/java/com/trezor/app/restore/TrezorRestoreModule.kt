@@ -47,8 +47,8 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
   private val schedule = ReminderScheduler.restoreOps(reactContext, layout.schedule, layout.savedSchedule, ops::syncDirectory)
   private val recovery = RestoreRecovery(layout, ops, AndroidPathTypes, schedule)
   private val tasks = ModuleTasks()
-  /** This module's JS holds the recovery side of [RestoreLock] (worker lane only). */
-  private var holdsRecovery = false
+  /** The recovery run this module started and hasn't ended (worker lane only), for [invalidate]. */
+  private var recoveryToken: String? = null
 
   override fun getName(): String = NAME
 
@@ -58,10 +58,8 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
     // flight has returned (v2.5 §5.3); a journal (if any) stays for recovery.
     val release = {
       service.release()
-      if (holdsRecovery) {
-        holdsRecovery = false
-        RestoreLock.PROCESS.endRecover()
-      }
+      recoveryToken?.let(RestoreLock.PROCESS::endRecover)
+      recoveryToken = null
       RestoreGate.end()
     }
     tasks.submit(WORKER, { _, _ -> release() }) { release() }
@@ -210,18 +208,17 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
 
   // --- Startup recovery and Cancel restore (v2.5 §2, §7) -------------------------------------
 
+  /** Refused (`RESTORE_IN_PROGRESS`) while any recovery run or restore session holds the lock. */
   override fun recoveryBegin(promise: Promise) =
       submit(promise) {
-        if (!holdsRecovery) {
-          RestoreLock.PROCESS.recover()
-          holdsRecovery = true
-        }
-        promise.resolve(null)
+        val token = RestoreLock.PROCESS.recover()
+        recoveryToken = token
+        promise.resolve(token)
       }
 
-  override fun recoveryRun(promise: Promise) =
+  override fun recoveryRun(token: String, promise: Promise) =
       submit(promise) {
-        requireRecovery()
+        requireRecovery(token)
         val json =
             when (val outcome = recovery.run()) {
               RestoreRecovery.Outcome.Done -> JSONObject().put("status", "done")
@@ -235,9 +232,9 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
         promise.resolve(json.toString())
       }
 
-  override fun finishVerification(outcome: String, promise: Promise) =
+  override fun finishVerification(token: String, outcome: String, promise: Promise) =
       submit(promise) {
-        requireRecovery()
+        requireRecovery(token)
         val result =
             RestoreRecovery.Verification.values().firstOrNull { it.name.equals(outcome, ignoreCase = true) }
                 ?: throw IllegalArgumentException("Unknown outcome")
@@ -245,9 +242,9 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
         promise.resolve(null)
       }
 
-  override fun previousData(promise: Promise) =
+  override fun previousData(token: String, promise: Promise) =
       submit(promise) {
-        requireRecovery()
+        requireRecovery(token)
         val ids = recovery.previousData()
         promise.resolve(
             JSONObject()
@@ -257,24 +254,23 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
                 .toString())
       }
 
-  override fun cancelRestore(promise: Promise) =
+  override fun cancelRestore(token: String, promise: Promise) =
       submit(promise) {
-        requireRecovery()
+        requireRecovery(token)
         recovery.cancel()
         promise.resolve(null)
       }
 
-  override fun recoveryEnd(promise: Promise) =
+  /** Ends the run of [token]; another token (a refused caller's) changes nothing. */
+  override fun recoveryEnd(token: String, promise: Promise) =
       submit(promise) {
-        if (holdsRecovery) {
-          holdsRecovery = false
-          RestoreLock.PROCESS.endRecover()
-        }
+        RestoreLock.PROCESS.endRecover(token)
+        if (recoveryToken == token) recoveryToken = null
         promise.resolve(null)
       }
 
-  private fun requireRecovery() {
-    if (!holdsRecovery) throw RestoreException(RestoreException.IN_PROGRESS, "Recovery not started")
+  private fun requireRecovery(token: String) {
+    if (!RestoreLock.PROCESS.isRecovering(token)) throw RestoreException(RestoreException.IN_PROGRESS, "Not the recovery run holding the lock")
   }
 
   override fun restartProcess(promise: Promise) {

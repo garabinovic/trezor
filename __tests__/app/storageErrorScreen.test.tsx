@@ -104,7 +104,69 @@ test('not offered when the previous data fails its check, or for any other code'
   }
 });
 
-test('a failed cancel still retries, and recovery decides', async () => {
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (e: unknown) => void;
+  const until = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { until, resolve, reject };
+};
+
+const disabled = (screen: ReturnType<typeof render>, label: string) =>
+  screen.buttons(label)[0].props.disabled === true;
+
+test('Retry is disabled while the Cancel availability check runs', async () => {
+  const check = deferred<boolean>();
+  const restoreCancel = {
+    available: jest.fn(() => check.until),
+    cancel: jest.fn(async () => undefined),
+  };
+  const screen = render('RESTORE_VERIFY_RETRY', restoreCancel);
+  await settle();
+  expect(disabled(screen, 'Try again')).toBe(true);
+  // Even a press that reaches it does nothing.
+  await screen.press('Try again');
+  expect(screen.onRetry).not.toHaveBeenCalled();
+  await ReactTestRenderer.act(async () => check.resolve(true));
+  await settle();
+  expect(disabled(screen, 'Try again')).toBe(false);
+  await screen.press('Try again');
+  expect(screen.onRetry).toHaveBeenCalledTimes(1);
+});
+
+test('while the confirmed cancel runs, Retry and Cancel are disabled and a second confirmation starts nothing', async () => {
+  const running = deferred<void>();
+  const restoreCancel = {
+    available: jest.fn(async () => true),
+    cancel: jest.fn(() => running.until),
+  };
+  const screen = render('RESTORE_VERIFY_RETRY', restoreCancel);
+  await settle();
+  await screen.press(CANCEL);
+  const confirm = screen.renderer.root.find(
+    (n: ReactTestInstance) => n.props.title === 'Cancel restore?',
+  ).props.onConfirm;
+  await ReactTestRenderer.act(async () => {
+    confirm();
+    confirm();
+  });
+  await settle();
+  expect(restoreCancel.cancel).toHaveBeenCalledTimes(1);
+  expect(screen.dialogVisible()).toBe(false);
+  expect(disabled(screen, 'Try again')).toBe(true);
+  expect(disabled(screen, CANCEL)).toBe(true);
+  await screen.press('Try again');
+  expect(screen.onRetry).not.toHaveBeenCalled();
+
+  await ReactTestRenderer.act(async () => running.resolve());
+  await settle();
+  // Done: the next recovery run rolls back.
+  expect(screen.onRetry).toHaveBeenCalledTimes(1);
+});
+
+test('a failed cancel leaves nothing disabled, checks availability again and does not retry by itself', async () => {
   const restoreCancel = cancel(true);
   restoreCancel.cancel.mockRejectedValueOnce(new Error('changed'));
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -112,7 +174,15 @@ test('a failed cancel still retries, and recovery decides', async () => {
   await settle();
   await screen.press(CANCEL);
   await screen.press('Return to previous data');
-  expect(screen.onRetry).toHaveBeenCalledTimes(1);
   expect(warn).toHaveBeenCalledWith('[restore] cancel not possible');
+  expect(screen.onRetry).not.toHaveBeenCalled();
+  expect(restoreCancel.available).toHaveBeenCalledTimes(2);
+  expect(disabled(screen, 'Try again')).toBe(false);
+  expect(disabled(screen, CANCEL)).toBe(false);
+  // And it can be tried again, once.
+  await screen.press(CANCEL);
+  await screen.press('Return to previous data');
+  expect(restoreCancel.cancel).toHaveBeenCalledTimes(2);
+  expect(screen.onRetry).toHaveBeenCalledTimes(1);
   warn.mockRestore();
 });

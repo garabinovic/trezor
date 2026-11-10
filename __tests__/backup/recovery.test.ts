@@ -294,17 +294,37 @@ describe('checkPreviousData (decision D4)', () => {
   });
 });
 
-/** The native half, scripted: each recoveryRun answer in turn. */
+const coded = (code: string) => Object.assign(new Error('x'), { code });
+
+/**
+ * The native half, scripted: each recoveryRun answer in turn. Its lock works
+ * like RestoreLock: one run at a time, owned by the token `recoveryBegin`
+ * returned; a call with another token is refused and changes nothing.
+ */
 function fakeRecovery(
   runs: (RecoveryRun | Error)[],
   overrides: Partial<RecoveryPlatform> = {},
 ) {
   const calls: string[] = [];
+  const lock = { holder: null as string | null, runs: 0 };
+  const owned = (token: string) => {
+    if (lock.holder !== token) {
+      calls.push('refused');
+      throw coded('RESTORE_IN_PROGRESS');
+    }
+  };
   const platform: RecoveryPlatform = {
     recoveryBegin: async () => {
+      if (lock.holder !== null) {
+        calls.push('begin refused');
+        throw coded('RESTORE_IN_PROGRESS');
+      }
       calls.push('begin');
+      lock.holder = `token-${++lock.runs}`;
+      return lock.holder;
     },
-    recoveryRun: async () => {
+    recoveryRun: async token => {
+      owned(token);
       calls.push('run');
       const next = runs.shift();
       if (!next) {
@@ -315,25 +335,29 @@ function fakeRecovery(
       }
       return next;
     },
-    finishVerification: async outcome => {
+    finishVerification: async (token, outcome) => {
+      owned(token);
       calls.push(`finish:${outcome}`);
     },
-    previousData: async () => {
+    previousData: async token => {
+      owned(token);
       calls.push('previous');
       return target('previous.db');
     },
-    cancelRestore: async () => {
+    cancelRestore: async token => {
+      owned(token);
       calls.push('cancel');
     },
-    recoveryEnd: async () => {
+    recoveryEnd: async token => {
+      if (lock.holder === token) {
+        lock.holder = null;
+      }
       calls.push('end');
     },
     ...overrides,
   };
-  return { platform, calls };
+  return { platform, calls, lock };
 }
-
-const coded = (code: string) => Object.assign(new Error('x'), { code });
 
 async function expectStorageCode(run: Promise<unknown>, code: string) {
   await expect(run).rejects.toBeInstanceOf(StorageError);
@@ -474,5 +498,80 @@ describe('Cancel restore (v2.5 §2)', () => {
     );
     expect(damaged.calls).not.toContain('cancel');
     expect(damaged.calls.at(-1)).toBe('end');
+  });
+});
+
+describe('one recovery run at a time (review: Retry during Cancel restore)', () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const until = new Promise<void>(r => (resolve = r));
+    return { until, resolve };
+  };
+
+  test('a Retry while the cancel runs is refused, and the cancel still completes and releases', async () => {
+    await database('previous.db');
+    await database('trezor.db');
+    const hold = deferred();
+    const { platform, calls, lock } = fakeRecovery(
+      [{ status: 'verify', ...target('trezor.db') }, { status: 'done' }],
+      {},
+    );
+    const previousData = platform.previousData;
+    platform.previousData = async token => {
+      await hold.until;
+      return previousData(token);
+    };
+    const cancel = cancelRestore(platform, key);
+    await new Promise<void>(r => setTimeout(() => r(), 5));
+    expect(lock.holder).toBe('token-1');
+
+    // Retry: refused, and its refusal releases nothing.
+    await expectStorageCode(
+      recoverRestore(platform, key),
+      'RESTORE_IN_PROGRESS',
+    );
+    expect(lock.holder).toBe('token-1');
+    // A Cancel availability check meanwhile is refused too.
+    expect(await canCancelRestore(platform, key)).toBe(false);
+    expect(lock.holder).toBe('token-1');
+
+    hold.resolve();
+    await cancel;
+    expect(calls).toEqual([
+      'begin',
+      'begin refused',
+      'begin refused',
+      'previous',
+      'cancel',
+      'end',
+    ]);
+    expect(lock.holder).toBeNull();
+
+    // Now a new run begins, with its own token.
+    await recoverRestore(platform, key);
+    expect(calls.slice(-5)).toEqual([
+      'begin',
+      'run',
+      'finish:pass',
+      'run',
+      'end',
+    ]);
+    expect(lock.runs).toBe(2);
+    expect(calls).not.toContain('refused');
+  });
+
+  test('a run that fails part-way still releases only its own lock', async () => {
+    const { platform, lock } = fakeRecovery([coded('RESTORE_STATE_UNKNOWN')]);
+    await expectStorageCode(
+      recoverRestore(platform, key),
+      'RESTORE_STATE_UNKNOWN',
+    );
+    expect(lock.holder).toBeNull();
+    // An end with a stale token changes nothing for the next run.
+    const token = await platform.recoveryBegin();
+    await platform.recoveryEnd('token-1');
+    expect(lock.holder).toBe(token);
+    await platform.recoveryEnd(token);
+    expect(lock.holder).toBeNull();
   });
 });

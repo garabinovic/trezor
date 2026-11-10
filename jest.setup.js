@@ -55,7 +55,7 @@ jest.mock('@op-engineering/op-sqlite', () => ({
 // Restore is native-only; flow tests pass a fake platform. Startup recovery
 // finds nothing to recover (no journal), as on a device that never restored.
 const mockRecoveryIdle = {
-  recoveryBegin: async () => undefined,
+  recoveryBegin: async () => 'recovery-jest',
   recoveryRun: async () => '{"status":"done"}',
   recoveryEnd: async () => undefined,
 };

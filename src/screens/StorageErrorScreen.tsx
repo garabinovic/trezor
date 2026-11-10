@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { LucideIcon, ShieldAlert, TriangleAlert } from 'lucide-react-native';
 import { canCancelRestore, cancelRestore } from '../backup/recovery';
@@ -88,7 +88,9 @@ interface StorageErrorScreenProps {
  * Shown when storage can't be opened. Offers retry; never erases data. After
  * a restore whose verification couldn't finish (`RESTORE_VERIFY_RETRY`), and
  * only when the data from before the restore checks out, it also offers to
- * cancel the restore and return to that data, after a confirmation.
+ * cancel the restore and return to that data, after a confirmation. While
+ * that check or the cancel runs, Retry is disabled (native recovery refuses
+ * a second run anyway, `RESTORE_IN_PROGRESS`), and a cancel runs only once.
  */
 export function StorageErrorScreen({
   error,
@@ -99,6 +101,13 @@ export function StorageErrorScreen({
   const copy = copyByCode[error.code] ?? generic;
   const [cancelOffered, setCancelOffered] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  /** Set synchronously, so a second confirmation can't start a second cancel. */
+  const cancelStarted = useRef(false);
+  /** Bumped after a failed cancel, to check availability again. */
+  const [recheck, setRecheck] = useState(0);
+  const busy = checking || cancelling;
 
   useEffect(() => {
     setCancelOffered(false);
@@ -106,27 +115,51 @@ export function StorageErrorScreen({
       return;
     }
     let current = true;
-    restoreCancel.available().then(
-      offered => {
+    setChecking(true);
+    restoreCancel
+      .available()
+      .then(
+        offered => {
+          if (current) {
+            setCancelOffered(offered);
+          }
+        },
+        () => undefined,
+      )
+      .finally(() => {
         if (current) {
-          setCancelOffered(offered);
+          setChecking(false);
         }
-      },
-      () => undefined,
-    );
+      });
     return () => {
       current = false;
     };
-  }, [error, restoreCancel]);
+  }, [error, restoreCancel, recheck]);
+
+  const retry = () => {
+    if (!busy && !cancelStarted.current) {
+      onRetry();
+    }
+  };
 
   const confirmCancel = () => {
     setConfirming(false);
-    setCancelOffered(false);
-    // Either way the next recovery run decides: a rollback, or this screen again.
-    restoreCancel
-      .cancel()
-      .catch(() => console.warn('[restore] cancel not possible'))
-      .finally(onRetry);
+    if (cancelStarted.current) {
+      return;
+    }
+    cancelStarted.current = true;
+    setCancelling(true);
+    restoreCancel.cancel().then(
+      // The next recovery run rolls back.
+      () => onRetry(),
+      () => {
+        // Nothing changed; the controls come back for what is possible now.
+        console.warn('[restore] cancel not possible');
+        cancelStarted.current = false;
+        setCancelling(false);
+        setRecheck(n => n + 1);
+      },
+    );
   };
 
   return (
@@ -140,13 +173,15 @@ export function StorageErrorScreen({
           title={copy.title}
           message={`${copy.message} ${KEEP_INSTALLED}`}
           actionLabel="Try again"
-          onActionPress={onRetry}
+          onActionPress={retry}
+          actionDisabled={busy}
         />
         {cancelOffered && (
           <Button
             label="Cancel restore and return to previous data"
             onPress={() => setConfirming(true)}
             variant="ghost"
+            disabled={cancelling}
           />
         )}
         <Text variant="caption" color="textTertiary" align="center">

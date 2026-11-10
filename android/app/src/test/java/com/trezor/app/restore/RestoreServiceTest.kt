@@ -388,10 +388,10 @@ class RestoreServiceTest {
   @Test
   fun aSessionHoldsTheRestoreLockUntilItsCleanupSucceeds() {
     val b = backup(1)
-    lock.recover()
+    val run = lock.recover()
     refusedInProgress { begin(b) }
     assertFalse(layout.restoreDir.exists())
-    lock.endRecover()
+    lock.endRecover(run)
 
     val begun = begin(b)
     refusedInProgress { lock.recover() }
@@ -408,15 +408,13 @@ class RestoreServiceTest {
     refusedInProgress { lock.recover() }
     failSync = { false }
     service.abort(begun.sessionId, schedule)
-    lock.recover()
-    lock.endRecover()
+    lock.endRecover(lock.recover())
 
     // Module shutdown releases it too (after the step in flight, v2.5 §5.3).
     begin(b)
     refusedInProgress { lock.recover() }
     service.release()
-    lock.recover()
-    lock.endRecover()
+    lock.endRecover(lock.recover())
     // A begin that fails releases it at once.
     try {
       begin(b, "wrong password here")
@@ -426,8 +424,7 @@ class RestoreServiceTest {
     } catch (e: BackupFormatException) {
       // expected
     }
-    lock.recover()
-    lock.endRecover()
+    lock.endRecover(lock.recover())
   }
 
   /** Steps 1–12 on real staging, then 13a–15 and startup recovery with a passing verification. */
@@ -446,12 +443,12 @@ class RestoreServiceTest {
     refusedInProgress { lock.recover() }
     service.release()
 
-    lock.recover()
+    val run = lock.recover()
     val verify = recovery.run() as RestoreRecovery.Outcome.Verify
     assertEquals(b.rows.map { it.id }.sorted(), verify.attachmentIds)
     recovery.finishVerification(RestoreRecovery.Verification.PASS)
     assertEquals(RestoreRecovery.Outcome.Done, recovery.run())
-    lock.endRecover()
+    lock.endRecover(run)
     assertArrayEquals(byteArrayOf(7, 7, 7), layout.liveDb.readBytes())
     assertEquals(b.rows.map { "${it.id}.tza" }.sorted(), liveRoot.list()!!.sorted())
     assertNothingLeft()

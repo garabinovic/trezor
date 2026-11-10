@@ -12,6 +12,7 @@ interface EmptyStateProps {
   message?: string;
   actionLabel?: string;
   onActionPress?: () => void;
+  actionDisabled?: boolean;
 }
 
 export function EmptyState({
@@ -20,6 +21,7 @@ export function EmptyState({
   message,
   actionLabel,
   onActionPress,
+  actionDisabled = false,
 }: EmptyStateProps) {
   const styles = useStyles(createStyles);
   return (
@@ -46,6 +48,7 @@ export function EmptyState({
             label={actionLabel}
             onPress={onActionPress}
             variant="secondary"
+            disabled={actionDisabled}
           />
         </View>
       )}
