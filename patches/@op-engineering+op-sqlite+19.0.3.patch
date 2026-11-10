@@ -1,0 +1,47 @@
+diff --git a/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.cpp b/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.cpp
+index 62ae476..2012364 100644
+--- a/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.cpp
++++ b/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.cpp
+@@ -12,6 +12,13 @@ WorkerThread::WorkerThread() : thread(&WorkerThread::do_work, this) {
+ WorkerThread::~WorkerThread() { shutdown(); }
+ 
+ void WorkerThread::shutdown() {
++  // Already joined: nothing left to stop. Checked first because thread_id is
++  // stale once the thread has exited, and the C++ runtime may hand the same id
++  // to a later thread (bionic does), e.g. the one that destroys this object.
++  if (joined.load(std::memory_order_acquire)) {
++    return;
++  }
++
+   // Checked before call_once: on the worker thread it could otherwise block on
+   // another caller's join of this very thread.
+   if (std::this_thread::get_id() == thread_id) {
+@@ -29,6 +36,7 @@ void WorkerThread::shutdown() {
+     }
+     work_pending.notify_one();
+     thread.join();
++    joined.store(true, std::memory_order_release);
+   });
+ }
+ 
+diff --git a/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.hpp b/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.hpp
+index 4321b7c..81d7e90 100644
+--- a/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.hpp
++++ b/node_modules/@op-engineering/op-sqlite/cpp/OPWorkerThread.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <atomic>
+ #include <condition_variable>
+ #include <functional>
+ #include <mutex>
+@@ -61,6 +62,9 @@ private:
+ 
+   std::once_flag shutdown_once;
+ 
++  // Set once shutdown() has joined the thread; thread_id is meaningless after.
++  std::atomic<bool> joined{false};
++
+   // Declared last so it starts only once everything above is constructed. If
+   // it fails to start, nothing else needs cleaning up.
+   std::thread thread;
