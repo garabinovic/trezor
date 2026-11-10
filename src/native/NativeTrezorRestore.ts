@@ -64,6 +64,12 @@ export interface Spec extends TurboModule {
   previousData(token: string): Promise<string>;
   /** v2.5 §2.2: writes `rollingback`; the next recovery run rolls back. */
   cancelRestore(token: string): Promise<void>;
+  /**
+   * Delete all data, file half (Phase 7): attachments (with `kept-ids` and
+   * `tmp`), quarantine, pre-migration snapshots, backup and Check staging,
+   * view and share caches. Only for the run holding the restore lock.
+   */
+  deleteAllFiles(token: string): Promise<void>;
   /** Ends the run of `token`; another token changes nothing. */
   recoveryEnd(token: string): Promise<void>;
 }

@@ -477,7 +477,7 @@ spacing; compose from `src/components`.
 - **Settings:**
   - Theme, Notification privacy and the delivery warnings;
   - App lock (Phase 5, TA §15), Back up, Check a backup and Restore (TA §8.9);
-  - delete-all shown as "Not available yet";
+  - Delete all data (Phase 7, TA §16);
   - a debug-only "Show sample data" switch.
 
 **Item UX:**
@@ -638,7 +638,6 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
 
 **Not implemented** (shown as "Not available yet" or not present):
 - App Lock on iOS (Android only, TA §15.6);
-- delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;
 - iOS.

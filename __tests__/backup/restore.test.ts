@@ -824,6 +824,7 @@ describe('restoreEntryFor (§8.1 storage-error screen)', () => {
       RESTORE_VERIFY_RETRY: 'retry',
       RESTORE_UNAVAILABLE: 'retry',
       RESTORE_IN_PROGRESS: 'retry',
+      WIPE_INCOMPLETE: 'retry',
       UNKNOWN: 'retry',
     };
     for (const [code, entry] of Object.entries(expected)) {

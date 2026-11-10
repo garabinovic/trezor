@@ -89,6 +89,12 @@ const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
     message:
       'The encryption key on this device is missing or no longer valid. All restore files are kept.',
   },
+  WIPE_INCOMPLETE: {
+    icon: TriangleAlert,
+    title: 'Deleting your data didn’t finish',
+    message:
+      'Some files couldn’t be removed yet. Try again to complete it; nothing is shown until it has.',
+  },
   RESTORE_IN_PROGRESS: {
     icon: TriangleAlert,
     title: 'A restore is still running',

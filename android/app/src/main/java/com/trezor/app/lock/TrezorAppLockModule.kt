@@ -70,6 +70,9 @@ class TrezorAppLockModule(private val reactContext: ReactApplicationContext) :
         promise.resolve(null)
       }
 
+  override fun confirm(title: String, promise: Promise) =
+      prompt(promise, title, "Confirm it’s you") { promise.resolve(null) }
+
   override fun setEnabled(enabled: Boolean, promise: Promise) {
     val available = availability() == "available"
     when {

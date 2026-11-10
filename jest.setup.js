@@ -51,6 +51,7 @@ jest.mock('./src/native/NativeTrezorAppLock', () => ({
     ),
     authenticate: jest.fn(async () => undefined),
     setEnabled: jest.fn(async () => undefined),
+    confirm: jest.fn(async () => undefined),
   },
 }));
 

@@ -66,10 +66,12 @@ class RestoreFileOps(
    * Deletes [dir] and everything in it, then syncs its parent. Only `D/restore`, `D/backup`,
    * `D/check/<id>`, `N/restore`, `N/restore/attachments` and `N/quarantine/<restoreId>` of
    * [journalRestoreId] (the current journal's restore) are allowed, and `P_att`
-   * (`N/restore/previous-attachments`) only for the `cleanup` row ([cleanup], spec v2.5 §8);
-   * anything else is refused. Throws if anything is left.
+   * (`N/restore/previous-attachments`) only for the `cleanup` row ([cleanup], spec v2.5 §8).
+   * Delete all data ([wipe], Phase 7) may also delete the live attachment root, the
+   * quarantine root, `D/check` and the view and share caches. Anything else is refused.
+   * Throws if anything is left.
    */
-  fun deleteRecursively(dir: File, journalRestoreId: String? = null, cleanup: Boolean = false) {
+  fun deleteRecursively(dir: File, journalRestoreId: String? = null, cleanup: Boolean = false, wipe: Boolean = false) {
     val path = dir.canonicalPath
     val allowed =
         mutableListOf(
@@ -80,6 +82,7 @@ class RestoreFileOps(
         )
     if (journalRestoreId != null) allowed += layout.quarantine(journalRestoreId)
     if (cleanup) allowed += layout.previousAttachments
+    if (wipe) allowed += listOfNotNull(layout.liveAttachments, layout.quarantineRoot, layout.checkStaging, layout.viewCache, layout.shareCache)
     val inCheck = dir.parentFile?.canonicalPath == File(layout.databaseDir, "check").canonicalPath
     require(inCheck || allowed.any { it.canonicalPath == path }) { "Deletion outside the restore paths refused" }
     if (!dir.exists()) return

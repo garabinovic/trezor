@@ -32,7 +32,7 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
 
   private val databaseDir = reactContext.getDatabasePath("placeholder.db").parentFile!!
   private val noBackupDir = reactContext.noBackupFilesDir
-  private val layout = RestoreLayout(databaseDir, noBackupDir)
+  private val layout = RestoreLayout(databaseDir, noBackupDir, reactContext.cacheDir)
   private val ops = RestoreFileOps(layout)
   private val vault = KeyVault(File(noBackupDir, "keys"))
   private val attachmentKeys = AttachmentKeys.of(vault) { AttachmentLocations.hasAnyFile(noBackupDir) }
@@ -258,6 +258,17 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
       submit(promise) {
         requireRecovery(token)
         recovery.cancel()
+        promise.resolve(null)
+      }
+
+  /**
+   * Delete all data, file half (Phase 7, [DataWipe]): only for the run holding the restore lock,
+   * so no restore or recovery runs meanwhile. Takes no path from JS.
+   */
+  override fun deleteAllFiles(token: String, promise: Promise) =
+      submit(promise) {
+        requireRecovery(token)
+        DataWipe(layout, ops, AndroidPathTypes).wipe()
         promise.resolve(null)
       }
 

@@ -99,12 +99,15 @@ function newProcess(): () => Promise<OpenedStorage> {
 let openStorage: () => Promise<OpenedStorage>;
 
 /** A new process whose startup recovery is `recover` (default: the native one, idle in Jest). */
-function newProcessWith(recover: () => Promise<void>) {
+function newProcessWith(
+  recover: () => Promise<void>,
+  wipe?: import('../../src/storage/deleteAll').WipePlatform,
+) {
   let open!: typeof import('../../src/storage/openStorage').openStorage;
   jest.isolateModules(() => {
     open = require('../../src/storage/openStorage').openStorage;
   });
-  return () => open(nativeAttachmentPlatform, recover);
+  return () => open(nativeAttachmentPlatform, recover, wipe);
 }
 
 function gate() {
@@ -389,5 +392,60 @@ describe('openStorage restore recovery (Phase 6 spec v2.5 §7)', () => {
     await open();
     await open();
     expect(recover).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('openStorage and an interrupted Delete all data (Phase 7)', () => {
+  function wipePlatform(failFiles = 0) {
+    const calls: string[] = [];
+    const seen = () => `gc=${fakeAttachments.gcRuns.length}`;
+    let failures = failFiles;
+    const platform = {
+      lock: async () => 'token',
+      unlock: async () => undefined,
+      acquireGate: async () => undefined,
+      releaseGate: async () => undefined,
+      purgeCaches: async () => undefined,
+      clearReminders: async () => {
+        calls.push(`clearReminders ${seen()}`);
+      },
+      deleteFiles: async () => {
+        calls.push(`deleteFiles ${seen()}`);
+        if (failures-- > 0) {
+          throw new Error('fs');
+        }
+      },
+      restartProcess: async () => undefined,
+    };
+    return { platform, calls };
+  }
+
+  const setMarker = () =>
+    mockDb.execute(
+      "INSERT INTO settings (key, value) VALUES ('wipe.pending', 'true')",
+    );
+
+  test('a pending wipe finishes before anything is loaded or collected', async () => {
+    await setMarker();
+    const { platform, calls } = wipePlatform();
+    const storage = await newProcessWith(async () => undefined, platform)();
+    expect(calls).toEqual(['clearReminders gc=0', 'deleteFiles gc=0']);
+    // The app opens empty, and GC ran afterwards with no known ids.
+    expect(storage.initialItems).toEqual([]);
+    expect(fakeAttachments.gcRuns).toEqual([[]]);
+    expect(
+      await mockDb.execute("SELECT 1 FROM settings WHERE key = 'wipe.pending'"),
+    ).toEqual([]);
+  });
+
+  test('a failed resume stops startup with WIPE_INCOMPLETE; Retry finishes it', async () => {
+    await setMarker();
+    const { platform } = wipePlatform(1);
+    const open = newProcessWith(async () => undefined, platform);
+    await expect(open()).rejects.toMatchObject({ code: 'WIPE_INCOMPLETE' });
+    // Nothing was collected or shown meanwhile.
+    expect(fakeAttachments.gcRuns).toEqual([]);
+    const storage = await open();
+    expect(storage.initialItems).toEqual([]);
   });
 });

@@ -19,6 +19,8 @@ interface AppLockContextValue {
   /** Shows the system prompt; the state follows what native decided. */
   unlock(): Promise<void>;
   setEnabled(enabled: boolean): Promise<void>;
+  /** The system prompt before a sensitive action (Delete all data). */
+  confirm(title: string): Promise<void>;
 }
 
 const AppLockContext = createContext<AppLockContextValue | null>(null);
@@ -54,6 +56,7 @@ export function AppLockProvider({
       state,
       unlock: () => platform.authenticate().finally(refresh),
       setEnabled: enabled => platform.setEnabled(enabled).finally(refresh),
+      confirm: title => platform.confirm(title),
     }),
     [state, platform, refresh],
   );

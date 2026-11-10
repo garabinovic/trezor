@@ -14,6 +14,9 @@ interface DialogProps {
   destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  /** An optional third action, shown before Cancel. */
+  secondaryLabel?: string;
+  onSecondary?: () => void;
 }
 
 /** Centered confirmation dialog. */
@@ -26,6 +29,8 @@ export function Dialog({
   destructive = false,
   onConfirm,
   onCancel,
+  secondaryLabel,
+  onSecondary,
 }: DialogProps) {
   const styles = useStyles(createStyles);
   return (
@@ -51,6 +56,14 @@ export function Dialog({
             </Text>
           )}
           <View style={styles.actions}>
+            {secondaryLabel && onSecondary && (
+              <Button
+                label={secondaryLabel}
+                onPress={onSecondary}
+                variant="ghost"
+                size="sm"
+              />
+            )}
             {cancelLabel !== null && (
               <Button
                 label={cancelLabel}
@@ -91,6 +104,7 @@ const createStyles = ({ colors, radius, spacing }: Theme) =>
     },
     actions: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'flex-end',
       gap: spacing.sm,
       marginTop: spacing.md,

@@ -29,6 +29,8 @@ export type StorageErrorCode =
   | 'RESTORE_VERIFY_RETRY'
   | 'RESTORE_UNAVAILABLE'
   | 'RESTORE_IN_PROGRESS'
+  // Delete all data that didn't finish (Phase 7)
+  | 'WIPE_INCOMPLETE'
   | 'UNKNOWN';
 
 const knownCodes = new Set<string>([
@@ -55,6 +57,7 @@ const knownCodes = new Set<string>([
   'RESTORE_VERIFY_RETRY',
   'RESTORE_UNAVAILABLE',
   'RESTORE_IN_PROGRESS',
+  'WIPE_INCOMPLETE',
   'UNKNOWN',
 ]);
 

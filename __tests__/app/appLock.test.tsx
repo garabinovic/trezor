@@ -56,6 +56,7 @@ jest.mock('../../src/native/NativeTrezorAppLock', () => ({
     getState: () => JSON.stringify(mockNative.state),
     authenticate: () => mockNative.authenticate(),
     setEnabled: (enabled: boolean) => mockNative.setEnabled(enabled),
+    confirm: async () => undefined,
   },
 }));
 

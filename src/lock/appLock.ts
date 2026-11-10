@@ -17,6 +17,8 @@ export interface AppLockPlatform {
   /** The system prompt; resolves only after it succeeded (and native unlocked). */
   authenticate(): Promise<void>;
   setEnabled(enabled: boolean): Promise<void>;
+  /** The system prompt before a sensitive action; changes no state. */
+  confirm(title: string): Promise<void>;
   onChange(listener: () => void): () => void;
 }
 
@@ -26,6 +28,7 @@ export const nativeAppLockPlatform: AppLockPlatform = {
   getState: () => JSON.parse(NativeTrezorAppLock.getState()) as AppLockState,
   authenticate: () => NativeTrezorAppLock.authenticate(),
   setEnabled: enabled => NativeTrezorAppLock.setEnabled(enabled),
+  confirm: title => NativeTrezorAppLock.confirm(title),
   onChange(listener) {
     const subscription = DeviceEventEmitter.addListener(
       APP_LOCK_EVENT,

@@ -19,6 +19,8 @@ export interface Spec extends TurboModule {
    * credential on the device needs no prompt.
    */
   setEnabled(enabled: boolean): Promise<void>;
+  /** The system prompt before a sensitive action (Delete all data); changes nothing itself. */
+  confirm(title: string): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('TrezorAppLock');

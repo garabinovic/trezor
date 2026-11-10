@@ -153,9 +153,11 @@ their own colours, font sizes or spacing.
   destructive actions.
 - **Destructive actions** always go through a confirmation dialog that names
   what will be deleted.
-- **Unavailable features are shown honestly.** Features that don't exist yet
-  (Delete all data) are listed but disabled and labelled "Not available yet".
-  Nothing pretends to work.
+- **Unavailable features are shown honestly.** A feature that doesn't exist
+  yet is listed but disabled and labelled "Not available yet". Nothing
+  pretends to work.
+- **Delete all data** (Phase 7) is one destructive dialog that says what is
+  deleted and that backup files outside Trezor stay, with "Back up first".
 - **App lock** (Phase 5) uses the device's own fingerprint, face or screen
   lock, with a plain lock screen ("Trezor is locked", Unlock); there is no
   separate Trezor PIN.

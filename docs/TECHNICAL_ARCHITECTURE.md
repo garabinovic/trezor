@@ -450,7 +450,7 @@ The full DDL is in `src/storage/migrations.ts`. Relationships:
 | `notifications.exactAlarmRequested` | Yes | Boolean; the "Deliver reminders on time?" explanation is shown at most once (§13.5) |
 | Show sample data | **No** — debug builds only, in memory | Not visible in release **[verified]** |
 | App lock | **No** — Android SharedPreferences `trezor.applock` (`enabled`) | Device-local, needed before JS runs, never in a backup (§15) |
-| Delete all | — | Shown as "Not available yet" (Phase 0 UI) |
+| `wipe.pending` | No | Internal marker of an unfinished Delete all data; removed when it completes (§16) |
 
 ---
 
@@ -1265,6 +1265,7 @@ dialog names it.
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
 | Phase 6 Step 3 (restore preparation, without the swap) | JVM +35 in 7 new classes and 1 extended: `RestoreServiceTest` 9 (real backups from `BackupService` restored on a device with another key: every step, `S_att` readable only with the target key, quarantine link, schedule saved and restored, live files byte-identical; zero attachments; wrong password, short password and too little space write nothing; changed backup → `BACKUP_CHANGED`; damaged and truncated sections; a failing cleanup keeps the journal → `RESTORE_RECOVERY_RETRY`; a journal blocks; every §8.1 precondition), `RestoreJournalTest` 4, `RestoreFileOpsTest` 4, `QuarantineTest` 5 (`kept-ids` absent, valid with a missing file, damaged → all, unlistable root, no overwrite), `AttachmentLocationsTest` 3, `ScheduleRestoreTest` 7 (order, every `scheduleSaved` case, idempotence, a failed re-arm retried safely (since the second review the saved copy is deleted before re-arming, see that row), the `ScheduleStore` monitor held throughout), `RestoreGateAndRestartTest` 2, `ShareFilesTest` +1. Jest +16: `restore.test.ts` 13 (step order, `S_db` under the device key with the settings rewrite, invalid settings and unreadable live settings, error-screen mode, queued writes and reconciles wait, shares wait/cancel, a failure at every step undoes and releases, schema and manifest mismatch, failed cleanup reported, wrong password, error-code entries), `reconcileGate.test.ts` 3. Real SQLCipher 4.19.0 harness +2 (export to the device key, settings rewrite and §B.4 on `S_db`; keys not interchangeable, files encrypted), run in band with Step 2's 6 and Phase 4's 4 | **JVM 262/262, Jest 432/432, real SQLCipher 12/12** |
 | Phase 6 Step 5 (backup, Check and restore screens) | Jest +12 (**482**): `backupFlows.test.tsx` 10 on the real app with the operations faked (backup: two passwords, blocking view with no back, success only when verified, cancelled picker, every error message including the named damaged or missing attachment and a remaining partial file; Check: valid with the file count, wrong password, damaged; restore: preflight refusal, Replace-only confirmation, dismissing starts nothing, blocking view from the swap on with the U1 text and no back, pre-swap failures back on the form, active share wait or cancel, failed cleanup held until a retry succeeds; the incomplete-backup notice once), `storageErrorScreen.test.tsx` +2 (restore entry per §8.1 code, `RESTORE_UNAVAILABLE` for key errors, restoring without a live database). JVM unchanged (298). Emulator (API 36, release): see §8.8 | **Jest 482/482, JVM 298/298** |
+| Phase 7 Delete all data | JVM +7 (**317**): `DataWipeTest` (attachments with `kept-ids` and `tmp`, quarantine, snapshots, staging and caches deleted, while the live database, keys, schedule, pending-destination record and unrelated caches stay; parent directories synced; idempotent; a partial failure retried; refused while a restore owns its files; the wipe permission covers only its paths; snapshot name rule). Jest +20 (**510**): `deleteAll.test.ts` 13 (the schema's tables are exactly the content tables plus settings; every content row and setting deleted except the notification-permission history, `user_version` and integrity kept, new data works; order of locks and steps; a reconcile waits and never runs before the restart; refused while a restore is pending or holds the lock; an authentication cancel or failure takes no lock; a failure before the commit rolls back and releases every gate; the marker is in the deleting transaction; an interruption after each step resumes at startup; resume failures keep the marker until a retry), `openStorage.test.ts` +2 (a pending wipe finishes before loading or garbage collection; a failed resume stops startup with `WIPE_INCOMPLETE`, then Retry), `deleteAllFlow.test.tsx` 5 (dialog text, Cancel, Back up first, one start only with the blocking view, the prompt only with App Lock on, messages). Emulator: §16.5 | **JVM 317/317, Jest 510/510** |
 | Phase 5 App Lock | JVM +12 (**310**): `AppLockPolicyTest` (disabled never locks or hides; enabled starts locked and only `unlock` unlocks; leaving locks and hides before the snapshot; a pause alone or a configuration change doesn't lock; losing window focus hides without locking; Trezor's own activities don't lock within the grace and do after it; the launch flag lasts only until the next resume and a failed launch clears it; turning on or off never leaves it locked; system error codes). Jest +8 (**490**): `appLock.test.tsx` on the real app with a native fake (locked at start: only the lock screen, one prompt, then the app; cancel quiet, Unlock retries; failure and lockout messages; a prompt that resolves without native unlocking stays locked; a later lock covers the mounted app and hides it from accessibility; without any credential the lock screen offers to turn it off; the Settings switch goes through native and a cancel changes nothing; without a screen lock it can't be turned on). Emulator: §15.5 | **JVM 310/310, Jest 490/490** |
 | Step 4 review correction (Retry during Cancel restore) | JVM +1 (**298**): `RestoreLockTest`: a second recovery run is refused while the first holds the lock; empty, guessed, stale or another run's tokens release nothing; the first ends its own run; a new run gets a new token. Jest +4 (**470**): `recovery.test.ts` +2 (a Retry and a Cancel check during a cancel are refused, and the cancel completes and releases; a failed run releases only its own lock), `storageErrorScreen.test.tsx` +3 replacing 1 (Retry disabled during the availability check; Retry and Cancel disabled during a cancel, and a double confirmation cancels once; a failed cancel re-enables both, checks again and doesn't retry by itself) | **JVM 298/298, Jest 470/470** |
 | Phase 6 Step 4 (swap, startup recovery, Cancel restore; spec v2.5) | JVM +25 (**297**): `RestoreRecoveryTest` 20 on real files with recorded, failing syncs and a JVM `lstat`:<br>- all 64 path combinations in every phase for both tables, against the spec's rows (anything else refused and nothing touched);<br>- a swap then a pass ends restored, a fail rolls back to the previous data and schedule, `prepared` at startup undoes the preparation for every `scheduleSaved`;<br>- a failure at **every** sync of the swap, and of recovery after it, converges to one complete outcome and never rolls forward after `rollingback`;<br>- a rename failing outright rolls back in process;<br>- the sync set before classifying and before every phase write, and `N` synced after `N/restore` goes;<br>- transient and key outcomes keep everything; D1 entries are unknown;<br>- Cancel restore offered only when every condition holds, and it rolls back;<br>- wrong types, symlinks and `lstat` errors; sidecars in every late phase; `pending` and sections in transit; temp journals;<br>- step 13a refusals.<br>Also `RestoreLockTest` 2, `RestoreServiceTest` +2 (the session holds the lock until its cleanup succeeded or it is released; steps 1–12 on real staging, then swap and recovery), `ModuleTasksTest` +1 (M2: work accepted before the gate and run after it does nothing), `RestoreFileOpsTest` (`P_att` only for cleanup).<br><br>Jest +29 (**466**):<br>- `recovery.test.ts` 18: classification of every code, numeric and in the message; a passing restored database; wrong key, ids, schema, version and damage deterministic; a missing file transient and not created; key outcomes; no key created; L6 with a mocked migration 4; D4 previous-data checks; the recovery loop and its codes; lock always released; Cancel availability and re-check;<br>- `restore.test.ts` +4 (now 20): success swaps and restarts and never settles; queued work and reconciles run after a pre-swap failure, never after a swap; failing swap or restart calls still restart holding every gate; `settleRestore` waits, and resumes a failed cleanup;<br>- `openStorage.test.ts` +4: recovery before the open, `keepUnreferenced` and GC; a recovery error stops startup and Retry recovers first again; again first after a JS reload; one recovery per runtime;<br>- `storageErrorScreen.test.tsx` 3: Cancel restore only when offered, only after confirming, then Retry.<br><br>Real SQLCipher 4.19.0 +5 (**17**, `recovery.check.ts`): a restored database passes and verification writes nothing; wrong key is SQLite 26 and deterministic; a damaged first or later page and a truncated file are deterministic; another id set deterministic; a missing file transient; D4 read-only on the previous database, left byte for byte | **JVM 297/297, Jest 466/466, real SQLCipher 17/17** |
@@ -1717,7 +1718,7 @@ SQLCipher (schema v3, §5); the bytes are in the app's no-backup directory.
   it can't be read, garbage collection removes only `.part` files and fails
   with `IO_FAILED`. Kept files still count for the key rule (§14.1)
   **[verified: JVM, Jest]**. They are manual-recovery material like
-  snapshots: nothing deletes them yet (delete-all, Phase 7, will). A genuine
+  snapshots: only Delete all data (Phase 7, §16) deletes them. A genuine
   first launch has no files, so nothing is written.
 - Files picked for a draft that is then discarded are deleted at once by the
   editor session (§14.5). Only a crash or a killed process leaves them for
@@ -2065,4 +2066,116 @@ backup, restore) exist for iOS yet. App Lock would need:
 
 It can only be built and tested with an iOS toolchain, and it depends on the
 iOS port of the other modules.
+
+---
+
+## 16. Delete all data (Phase 7, Android)
+
+Settings → Data → **Delete all data** removes every note, reminder, card,
+document and attached file on the device, and Trezor starts empty.
+
+**Approach.** The database is emptied in place (approach A). The database
+file and the keys (`N/keys`, the Keystore master key) stay, and nothing is
+crypto-shredded. External backup files are never touched.
+
+### 16.1 What is deleted, what stays
+
+| Deleted | Kept |
+| --- | --- |
+| Every row of `items`, `notes`, `reminders`, `cards`, `documents`, `attachments` | The database file and its schema (`user_version`) |
+| Settings `theme.preference`, `notifications.showDetails` and any other key (defaults apply) | `notifications.permissionRequested`, `notifications.exactAlarmRequested` (device facts) |
+| `N/attachments` (every `.tza`, `kept-ids`, `tmp/`) | `N/keys` (database, attachments and reminders keys) |
+| `N/quarantine` (files kept by earlier restores) | App Lock preference (`trezor.applock`) |
+| `D/trezor.pre-migration-v<n>[.<k>].db` snapshots | `N/backup/pending-destination` (a URI record only) |
+| `D/backup`, `D/check` staging | Backup files outside the app |
+| `C/attachments/view`, `C/attachments/share` | |
+| Every reminder alarm and shown notification (`ReminderScheduler.sync(entries = [])`); `schedule.bin` becomes an empty record | |
+
+The schema test fails if a new table is added without deciding whether it
+holds content.
+
+### 16.2 Order (`src/storage/deleteAll.ts`)
+
+1. **Refusals:** refused while a pre-swap cleanup is pending.
+2. **Authentication:** if App Lock is on, the system prompt (`confirm`). A
+   cancel or failure stops here, with no lock taken.
+3. **Locks**, in the restore's order:
+   - the restore lock (`recoveryBegin`; `RESTORE_IN_PROGRESS` while a restore
+     or recovery runs);
+   - the reconcile gate;
+   - the database gate (`exclusive`);
+   - the native attachment gate (`acquireGate` drains work already
+     accepted).
+4. **Before the content:** the reminder schedule is cleared and the
+   decrypted caches are purged.
+5. **One transaction** with `PRAGMA secure_delete = ON`: every content table
+   and every non-kept setting is deleted, and `wipe.pending` is inserted.
+6. **Files:** `deleteAllFiles` (`restore/DataWipe.kt`), through
+   `RestoreFileOps` with the `wipe` allow-list. No path comes from JS, and
+   it is refused while a restore owns its files.
+7. **Finish:** `VACUUM`, a check that every content table is empty, then the
+   marker is deleted.
+8. **Restart:** `restartProcess`.
+
+A failure before step 5 commits rolls everything back. The gates are
+released in reverse order, and the reconcile gate's release re-arms the
+reminders. Settings shows "Nothing was deleted".
+
+Once step 5 has committed, nothing returns to the old UI. The process
+restarts, also when step 6 or 7 failed.
+
+### 16.3 Interruption
+
+`wipe.pending` is the source of truth. It is written in the deleting
+transaction, so it exists exactly when the content is gone.
+
+Storage initialization (`resumeWipe`) runs right after the database opens,
+after restore recovery and before anything is loaded or collected. If the
+marker is set, it repeats the steps:
+- schedule cleared;
+- content deleted again (a no-op);
+- files deleted;
+- `VACUUM`;
+- the emptiness check;
+- the marker deleted.
+
+Every step is idempotent. If any step fails, the marker stays, and startup
+stops with `WIPE_INCOMPLETE` ("Deleting your data didn't finish", Retry
+only): the app is never shown half-cleaned.
+
+### 16.4 UI
+
+- **One destructive dialog:** "Delete all data?" It says that everything on
+  the device is permanently deleted and that backup files saved outside
+  Trezor are not affected.
+- **Actions:**
+  - **Delete everything**;
+  - **Back up first**, which opens the Back up screen;
+  - **Cancel**.
+- **While deleting:** a blocking "Deleting…" modal (Back does nothing). A
+  second start is ignored.
+- **Messages:** a cancelled prompt says nothing. A refusal or failure says
+  "Nothing was deleted".
+
+### 16.5 Verification
+
+- **Automated:** §9 (Phase 7 row).
+- **Emulator:** the dedicated API 36 AVD `Trezor_Step4_QA_API36`, release
+  build. The test data:
+  - two notes, a card, and a document with an image attachment;
+  - two reminders, one fired (its notification shown) and one daily
+    (scheduled);
+  - a planted pre-migration snapshot, a quarantined file and `kept-ids`;
+  - App Lock on with a test PIN.
+
+  Delete all data asked for the PIN, then restarted into a locked, empty
+  app. Afterwards:
+  - only `trezor.db`, the key envelopes and the schedule file were left;
+  - no reminder notification remained, and the daily alarm was cancelled;
+  - App Lock was still on;
+  - a new note saved at once;
+  - the external backup kept its SHA-256, and restoring it brought the
+    data back.
+- **Not verified on a device:** an interruption part-way. Covered by Jest
+  with the real SQL; the steps are too fast to hit with an external kill.
 

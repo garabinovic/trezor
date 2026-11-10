@@ -6,6 +6,7 @@ import { recoverRestore } from '../backup/recovery';
 import { settleRestore } from '../backup/restore';
 import type { Item } from '../data/types';
 import { openTrezorDatabase } from './database';
+import { nativeWipePlatform, resumeWipe, WipePlatform } from './deleteAll';
 import { ItemRepository } from './ItemRepository';
 import { SerialDatabase, serializeDatabase } from './serialDatabase';
 import {
@@ -61,6 +62,8 @@ let shared: Promise<Initialized> | null = null;
  *
  * Before any of that, an interrupted restore is recovered (Phase 6 spec
  * v2.5 §7): nothing opens, migrates or collects until its journal is gone.
+ * Right after the database opens, an interrupted Delete all data finishes
+ * (Phase 7) before anything is loaded or collected.
  *
  * A caller that arrives while initialization runs waits for it; one that
  * arrives later loads its own initial data from the shared connection. If
@@ -70,11 +73,12 @@ let shared: Promise<Initialized> | null = null;
 export async function openStorage(
   attachments: AttachmentPlatform = nativeAttachmentPlatform,
   recover: () => Promise<void> = recoverRestore,
+  wipe: WipePlatform = nativeWipePlatform,
 ): Promise<OpenedStorage> {
   let attempt = shared;
   const started = attempt === null;
   if (attempt === null) {
-    const mine = initialize(attachments, recover);
+    const mine = initialize(attachments, recover, wipe);
     shared = attempt = mine;
     // Frees the slot for a Retry; a newer attempt is never cleared.
     mine.catch(() => {
@@ -92,6 +96,7 @@ export async function openStorage(
 async function initialize(
   attachments: AttachmentPlatform,
   recover: () => Promise<void>,
+  wipe: WipePlatform,
 ): Promise<Initialized> {
   // A restore of this JS runtime finishes first (v2.5 §5.2), then recovery
   // runs before the database is opened or any attachment file is touched.
@@ -105,6 +110,9 @@ async function initialize(
   // Every read and write on the shared connection goes through one queue.
   const db = serializeDatabase(opened.db);
   try {
+    // An interrupted Delete all data finishes before anything is loaded or
+    // collected (Phase 7); otherwise WIPE_INCOMPLETE, with Retry.
+    await resumeWipe(db, wipe);
     const items = new SqliteItemRepository(db);
     const settings = new SqliteSettingsRepository(db);
     const first = await loadInitial(items, settings);

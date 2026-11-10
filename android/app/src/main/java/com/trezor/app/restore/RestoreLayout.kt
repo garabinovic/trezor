@@ -7,7 +7,7 @@ import java.io.File
  * no-backup directory. Paths are never stored in the journal; ids are validated before they
  * become file names.
  */
-class RestoreLayout(val databaseDir: File, val noBackupDir: File) {
+class RestoreLayout(val databaseDir: File, val noBackupDir: File, val cacheDir: File? = null) {
   /** `L_db`. */
   val liveDb = File(databaseDir, "trezor.db")
   val liveDbJournal = File(databaseDir, "trezor.db-journal")
@@ -35,6 +35,13 @@ class RestoreLayout(val databaseDir: File, val noBackupDir: File) {
 
   val quarantineRoot = File(noBackupDir, "quarantine")
   val schedule = File(noBackupDir, "reminders/schedule.bin")
+
+  /** `D/backup` and `D/check`: backup export and Check staging. */
+  val backupStaging = File(databaseDir, "backup")
+  val checkStaging = File(databaseDir, "check")
+  /** Decrypted view and share copies (`C/attachments/view`, `C/attachments/share`), if known. */
+  val viewCache = cacheDir?.let { File(it, "attachments/view") }
+  val shareCache = cacheDir?.let { File(it, "attachments/share") }
 
   /** `N/quarantine/<restoreId>`. */
   fun quarantine(restoreId: String): File = File(quarantineRoot, RestoreIds.restoreId(restoreId))
