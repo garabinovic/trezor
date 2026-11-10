@@ -51,45 +51,47 @@ export function CheckBackupScreen({ navigation }: Props) {
       }
       keyboardAware
     >
-      {phase.kind === 'running' && <Busy title="Checking the backup…" />}
-      {phase.kind === 'valid' && (
-        <View style={styles.form}>
-          <Text variant="headline">The backup is complete</Text>
-          <Text variant="callout" color="textSecondary">
-            {`Every part of the file was decrypted and verified${
-              phase.attachments > 0
-                ? `, including ${phase.attachments} attached ${
-                    phase.attachments === 1 ? 'file' : 'files'
-                  }`
-                : ''
-            }. It can be restored with this password. Nothing on this device was changed.`}
-          </Text>
-          <Button label="Done" onPress={navigation.goBack} />
-        </View>
-      )}
-      {phase.kind === 'form' && (
-        <View style={styles.form}>
-          <Text variant="callout" color="textSecondary">
-            Checks that a backup file is complete and that its password is
-            right. Nothing on this device is changed.
-          </Text>
-          <PasswordField
-            label="Backup password"
-            value={password}
-            onChangeText={setPassword}
-          />
-          {!!phase.error && (
-            <Text variant="callout" color="danger">
-              {phase.error}
+      <View style={styles.body}>
+        {phase.kind === 'running' && <Busy title="Checking the backup…" />}
+        {phase.kind === 'valid' && (
+          <View style={styles.form}>
+            <Text variant="headline">The backup is complete</Text>
+            <Text variant="callout" color="textSecondary">
+              {`Every part of the file was decrypted and verified${
+                phase.attachments > 0
+                  ? `, including ${phase.attachments} attached ${
+                      phase.attachments === 1 ? 'file' : 'files'
+                    }`
+                  : ''
+              }. It can be restored with this password. Nothing on this device was changed.`}
             </Text>
-          )}
-          <Button
-            label="Choose backup file"
-            onPress={start}
-            disabled={password.length === 0}
-          />
-        </View>
-      )}
+            <Button label="Done" onPress={navigation.goBack} />
+          </View>
+        )}
+        {phase.kind === 'form' && (
+          <View style={styles.form}>
+            <Text variant="callout" color="textSecondary">
+              Checks that a backup file is complete and that its password is
+              right. Nothing on this device is changed.
+            </Text>
+            <PasswordField
+              label="Backup password"
+              value={password}
+              onChangeText={setPassword}
+            />
+            {!!phase.error && (
+              <Text variant="callout" color="danger">
+                {phase.error}
+              </Text>
+            )}
+            <Button
+              label="Choose backup file"
+              onPress={start}
+              disabled={password.length === 0}
+            />
+          </View>
+        )}
+      </View>
     </Screen>
   );
 }

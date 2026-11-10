@@ -6,8 +6,8 @@ import {
   StorageErrorScreen,
 } from '../../src/screens/StorageErrorScreen';
 import { StorageError, StorageErrorCode } from '../../src/storage/errors';
-import { ThemeProvider } from '../../src/theme';
-import { settle } from '../../test-utils/appHarness';
+import { gutter, ThemeProvider } from '../../src/theme';
+import { insetLeft, settle } from '../../test-utils/appHarness';
 
 const mockPreflight = jest.fn();
 const mockRestoreBackup = jest.fn();
@@ -278,6 +278,8 @@ test('restoring from the error screen runs without a live database, and Cancel g
       n.props.accessibilityLabel === 'Backup password' &&
       typeof n.props.onChangeText === 'function',
   );
+  // The error screen's own gutter, not a second one.
+  expect(insetLeft(input)).toBe(gutter);
   await ReactTestRenderer.act(async () =>
     input.props.onChangeText('correct horse battery'),
   );

@@ -81,53 +81,55 @@ export function BackupScreen({ navigation }: Props) {
       }
       keyboardAware
     >
-      {phase.kind === 'running' && (
-        <Busy
-          title="Backing up…"
-          message="Your data is being written and then checked. Keep Trezor open until this is done."
-        />
-      )}
-      {phase.kind === 'done' && (
-        <View style={styles.form}>
-          <Text variant="headline">Backup saved and verified</Text>
-          <Text variant="callout" color="textSecondary">
-            {`The backup file (${formatSize(
-              phase.bytes,
-            )}) was read back and checked. Keep it somewhere safe, together with its password: without the password it can’t be restored.`}
-          </Text>
-          <Button label="Done" onPress={navigation.goBack} />
-        </View>
-      )}
-      {phase.kind === 'form' && (
-        <View style={styles.form}>
-          <Text variant="callout" color="textSecondary">
-            The backup file contains all your notes, reminders, cards, documents
-            and attached files, encrypted with the password you choose here.
-            Trezor can’t recover a forgotten password.
-          </Text>
-          <PasswordField
-            label="Backup password"
-            value={password}
-            onChangeText={setPassword}
-            helper="10 to 256 characters."
+      <View style={styles.body}>
+        {phase.kind === 'running' && (
+          <Busy
+            title="Backing up…"
+            message="Your data is being written and then checked. Keep Trezor open until this is done."
           />
-          <PasswordField
-            label="Repeat password"
-            value={confirmation}
-            onChangeText={setConfirmation}
-          />
-          {!!phase.error && (
-            <Text variant="callout" color="danger">
-              {phase.error}
+        )}
+        {phase.kind === 'done' && (
+          <View style={styles.form}>
+            <Text variant="headline">Backup saved and verified</Text>
+            <Text variant="callout" color="textSecondary">
+              {`The backup file (${formatSize(
+                phase.bytes,
+              )}) was read back and checked. Keep it somewhere safe, together with its password: without the password it can’t be restored.`}
             </Text>
-          )}
-          <Button
-            label="Choose where to save"
-            onPress={start}
-            disabled={password.length === 0 || confirmation.length === 0}
-          />
-        </View>
-      )}
+            <Button label="Done" onPress={navigation.goBack} />
+          </View>
+        )}
+        {phase.kind === 'form' && (
+          <View style={styles.form}>
+            <Text variant="callout" color="textSecondary">
+              The backup file contains all your notes, reminders, cards,
+              documents and attached files, encrypted with the password you
+              choose here. Trezor can’t recover a forgotten password.
+            </Text>
+            <PasswordField
+              label="Backup password"
+              value={password}
+              onChangeText={setPassword}
+              helper="10 to 256 characters."
+            />
+            <PasswordField
+              label="Repeat password"
+              value={confirmation}
+              onChangeText={setConfirmation}
+            />
+            {!!phase.error && (
+              <Text variant="callout" color="danger">
+                {phase.error}
+              </Text>
+            )}
+            <Button
+              label="Choose where to save"
+              onPress={start}
+              disabled={password.length === 0 || confirmation.length === 0}
+            />
+          </View>
+        )}
+      </View>
     </Screen>
   );
 }

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
+import { View } from 'react-native';
 import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BarHeader, Screen } from '../components';
 import { RootStackParamList } from '../navigation/types';
 import { useStorage } from '../storage/StorageProvider';
+import { styles } from './backup/parts';
 import { RestoreFlow } from './backup/RestoreFlow';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Restore'>;
@@ -27,12 +29,16 @@ export function RestoreScreen({ navigation }: Props) {
       }
       keyboardAware
     >
-      <RestoreFlow
-        database={state.status === 'ready' ? state.storage.database : undefined}
-        fromErrorScreen={false}
-        onBusyChange={setBusy}
-        onClose={navigation.goBack}
-      />
+      <View style={styles.body}>
+        <RestoreFlow
+          database={
+            state.status === 'ready' ? state.storage.database : undefined
+          }
+          fromErrorScreen={false}
+          onBusyChange={setBusy}
+          onClose={navigation.goBack}
+        />
+      </View>
     </Screen>
   );
 }

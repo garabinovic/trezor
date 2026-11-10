@@ -5,8 +5,10 @@ import type { DocumentItem } from '../../src/data/types';
 import { runMigrations } from '../../src/storage/migrations';
 import { SqliteItemRepository } from '../../src/storage/SqliteItemRepository';
 import type { SqlDatabase } from '../../src/storage/sql';
+import { gutter } from '../../src/theme';
 import {
   hasText,
+  insetLeft,
   pressLabel,
   pressText,
   settle,
@@ -244,6 +246,123 @@ describe('Back up to a file', () => {
       mockCreateBackup.mockRejectedValueOnce(error);
       await pressText(app, 'Choose where to save');
       expect(hasText(app, message)).toBe(true);
+    }
+  });
+});
+
+describe('Password fields and layout', () => {
+  /** The visible password input with this label. */
+  const input = (label: string) =>
+    app.root.find(
+      n =>
+        n.type === ('TextInput' as never) &&
+        n.props.accessibilityLabel === label,
+    );
+  /** The show/hide buttons, in field order. */
+  const eyes = () =>
+    app.root.findAll(
+      n =>
+        typeof n.props.onPress === 'function' &&
+        /^(Show|Hide) password$/.test(n.props.accessibilityLabel ?? ''),
+    );
+  const pressEye = async (index: number) => {
+    await ReactTestRenderer.act(async () => eyes()[index].props.onPress());
+    await settle();
+  };
+
+  test('hidden by default; Show and Hide toggle each field without changing what was typed', async () => {
+    await openSettingsEntry('Back up to a file');
+    for (const label of ['Backup password', 'Repeat password']) {
+      expect(input(label).props).toMatchObject({
+        secureTextEntry: true,
+        keyboardType: 'default',
+        autoCapitalize: 'none',
+        autoCorrect: false,
+        multiline: false,
+      });
+    }
+    expect(eyes().map(e => e.props.accessibilityLabel)).toEqual([
+      'Show password',
+      'Show password',
+    ]);
+    await typeInto(app, 'Backup password', 'correct horse battery');
+    await typeInto(app, 'Repeat password', 'correct horse battery');
+
+    await pressEye(0);
+    expect(input('Backup password').props).toMatchObject({
+      secureTextEntry: false,
+      // Android: no suggestions or learning while the text is shown.
+      keyboardType: 'visible-password',
+      value: 'correct horse battery',
+    });
+    expect(input('Repeat password').props.secureTextEntry).toBe(true);
+    expect(eyes()[0].props.accessibilityLabel).toBe('Hide password');
+
+    await pressEye(1);
+    expect(input('Repeat password').props).toMatchObject({
+      secureTextEntry: false,
+      value: 'correct horse battery',
+    });
+
+    await pressEye(0);
+    expect(input('Backup password').props).toMatchObject({
+      secureTextEntry: true,
+      keyboardType: 'default',
+      value: 'correct horse battery',
+    });
+    expect(eyes()[0].props.accessibilityLabel).toBe('Show password');
+    // The text is shown only in the field itself.
+    expect(texts(app).join(' ')).not.toContain('correct horse battery');
+
+    mockCreateBackup.mockReturnValue(new Promise(() => undefined));
+    await pressText(app, 'Choose where to save');
+    expect(mockCreateBackup.mock.calls[0][0]).toMatchObject({
+      password: 'correct horse battery',
+      confirmation: 'correct horse battery',
+    });
+  });
+
+  test('Check and Restore fields can be shown too, hidden again when reopened', async () => {
+    await openSettingsEntry('Check a backup');
+    await typeInto(app, 'Backup password', 'abc');
+    await pressEye(0);
+    expect(input('Backup password').props).toMatchObject({
+      secureTextEntry: false,
+      value: 'abc',
+    });
+    await pressLabel(app, 'Back');
+    await pressText(app, 'Restore from a backup');
+    expect(input('Backup password').props.secureTextEntry).toBe(true);
+    await pressEye(0);
+    expect(input('Backup password').props.secureTextEntry).toBe(false);
+  });
+
+  test('fields and buttons sit inside the app gutter, not edge to edge', async () => {
+    const screens: [string, string][] = [
+      ['Back up to a file', 'Choose where to save'],
+      ['Check a backup', 'Choose backup file'],
+      ['Restore from a backup', 'Choose backup file'],
+    ];
+    await pressLabel(app, 'Settings');
+    for (const [entry, button] of screens) {
+      await pressText(app, entry);
+      const buttonText = app.root
+        .findAll(
+          n =>
+            n.type === ('Text' as never) &&
+            ([] as unknown[]).concat(n.props.children).join('') === button,
+        )
+        .pop()!;
+      let pressable = buttonText.parent;
+      while (pressable && pressable.props.accessibilityRole !== 'button') {
+        pressable = pressable.parent;
+      }
+      expect([
+        entry,
+        insetLeft(input('Backup password')),
+        insetLeft(pressable!),
+      ]).toEqual([entry, gutter, gutter]);
+      await pressLabel(app, 'Back');
     }
   });
 });

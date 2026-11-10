@@ -2,6 +2,7 @@
 // with react-test-renderer. Storage is the real SQLite repository code on a
 // node:sqlite database; only the SQLCipher open step is replaced (see the
 // openStorage mock in each test file).
+import { StyleSheet } from 'react-native';
 import ReactTestRenderer, {
   ReactTestInstance,
   ReactTestRenderer as Renderer,
@@ -158,4 +159,19 @@ export function isSelected(r: Renderer, chipText: string): boolean {
   const node = visibleTextNodes(r).filter(n => textOf(n) === chipText)[0];
   const chip = node && pressable(node);
   return !!chip?.props.accessibilityState?.selected;
+}
+
+/**
+ * The left padding of a node's native ancestors: the content margin it sits
+ * in (each composite and host node share a style, so only hosts count).
+ */
+export function insetLeft(node: ReactTestInstance): number {
+  let total = 0;
+  for (let n = node.parent; n; n = n.parent) {
+    if (typeof n.type === 'string') {
+      const s = StyleSheet.flatten(n.props.style) ?? {};
+      total += Number(s.paddingLeft ?? s.paddingHorizontal ?? s.padding ?? 0);
+    }
+  }
+  return total;
 }
