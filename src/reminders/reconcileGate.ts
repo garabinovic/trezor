@@ -78,6 +78,29 @@ export function onReconcileReleased(
   };
 }
 
+const completedListeners = new Set<(ids: string[]) => void>();
+
+/**
+ * Reminders completed directly in the live database while the gate stays held
+ * (a restore whose pre-swap cleanup failed after its step 9, review L-C). The
+ * reminders provider reloads them into the item state, so an edit can't write
+ * "not completed" back. Nothing is reconciled: the gate is not released.
+ */
+export function announceCompleted(ids: string[]) {
+  if (ids.length > 0) {
+    completedListeners.forEach(listener => listener(ids));
+  }
+}
+
+export function onCompletedElsewhere(
+  listener: (ids: string[]) => void,
+): () => void {
+  completedListeners.add(listener);
+  return () => {
+    completedListeners.delete(listener);
+  };
+}
+
 /** Tests only. */
 export function resetReconcileGateForTests() {
   holds = 0;
@@ -85,4 +108,5 @@ export function resetReconcileGateForTests() {
   opened = [];
   idle = [];
   releasedListeners.clear();
+  completedListeners.clear();
 }

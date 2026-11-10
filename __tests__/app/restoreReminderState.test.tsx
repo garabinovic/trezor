@@ -7,8 +7,10 @@ import { serializeDatabase } from '../../src/storage/serialDatabase';
 import { SqliteItemRepository } from '../../src/storage/SqliteItemRepository';
 import type { SqlDatabase } from '../../src/storage/sql';
 import {
+  announceCompleted,
   holdReconcile,
   resetReconcileGateForTests,
+  runReconcile,
 } from '../../src/reminders/reconcileGate';
 import {
   hasText,
@@ -141,5 +143,39 @@ describe('after a restore preparation that completed reminders', () => {
     const after = await storedReminder('a');
     expect(after?.title).toBe('Renamed after restore');
     expect(after?.completed).toBe(true);
+  });
+
+  test('while a failed cleanup keeps the gate held, the item state reloads them too (review L-C)', async () => {
+    await seed([seedReminder({ id: 'b' })]);
+    await launch();
+    const release = await holdReconcile();
+    await mockDb.execute(
+      "UPDATE reminders SET completed = 1 WHERE item_id = 'b'",
+    );
+    // What prepareRestore does when its cleanup fails: announce, don't release.
+    await ReactTestRenderer.act(async () => {
+      announceCompleted(['b']);
+    });
+    await settle(100);
+    let reconciledMeanwhile = false;
+    const waiting = runReconcile(async () => {
+      reconciledMeanwhile = true;
+    });
+
+    await openTab(app, 'Reminders');
+    await pressText(app, 'Done');
+    await pressText(app, 'Reminder b');
+    await pressLabel(app, 'Edit');
+    await typeInto(app, 'Title', 'Edited while pending');
+    await pressText(app, 'Save');
+    await settle(100);
+
+    const after = await storedReminder('b');
+    expect(after?.title).toBe('Edited while pending');
+    expect(after?.completed).toBe(true);
+    // Still no reconcile: the gate wasn't released.
+    expect(reconciledMeanwhile).toBe(false);
+    await ReactTestRenderer.act(async () => release());
+    await waiting;
   });
 });

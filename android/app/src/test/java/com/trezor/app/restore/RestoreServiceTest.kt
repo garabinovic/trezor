@@ -387,11 +387,14 @@ class RestoreServiceTest {
     } catch (e: RestoreException) {
       assertEquals(RestoreException.RECOVERY_RETRY, e.code)
     }
-    // Nothing deleted: the journal (saved), the saved schedule and the staging stay.
+    // The journal (saved) and the staging stay. The schedule was copied back durably and
+    // its saved copy deleted before re-arming (review L-A), so the retry only re-arms.
     assertEquals(RestoreJournal.Schedule.SAVED, service.journals.read()!!.scheduleSaved)
-    assertTrue(layout.savedSchedule.isFile)
+    assertFalse(layout.savedSchedule.exists())
+    assertArrayEquals(schedule0, layout.schedule.readBytes())
     assertTrue(layout.restoreDbDir.isDirectory)
     service.abort(begun.sessionId, schedule)
+    assertEquals(1, events.count { it == "rearm" })
     assertArrayEquals(schedule0, layout.schedule.readBytes())
     assertNothingLeft()
   }
@@ -479,17 +482,43 @@ class RestoreServiceTest {
     assertNothingLeft()
   }
 
+  /** Review M-A: refused in step 1, before any session or gate, and left untouched. */
   @Test
-  fun earlierRestoreFilesBlockStaging() {
-    layout.restoreDir.mkdirs()
+  fun restoreFilesWithoutAJournalAreRefusedBeforeAnySession() {
+    val b = backup(0)
+    val marker = "earlier"
+    for (dirs in listOf(listOf(layout.restoreDir), listOf(layout.restoreDbDir), listOf(layout.restoreDir, layout.restoreDbDir))) {
+      dirs.forEach { File(it, "left.bin").also { f -> f.parentFile.mkdirs(); f.writeText(marker) } }
+      try {
+        begin(b)
+        fail("began over earlier restore files")
+      } catch (e: RestoreException) {
+        assertEquals(RestoreException.STATE_UNKNOWN, e.code)
+      }
+      // Untouched, nothing new written.
+      dirs.forEach { assertEquals(listOf("left.bin"), it.list()!!.toList()); assertEquals(marker, File(it, "left.bin").readText()) }
+      assertFalse(layout.journal.exists())
+      dirs.forEach { it.deleteRecursively() }
+    }
+    assertFalse(layout.restoreDir.exists() || layout.restoreDbDir.exists())
+    // No session was left behind: a clean begin works.
+    val begun = begin(b)
+    service.stage(begun.sessionId, null, null).sqlcipherKey.fill(0)
+    service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+  }
+
+  /** Staging still refuses them too (a backstop if they appear after step 1). */
+  @Test
+  fun restoreFilesAppearingAfterStep1BlockStaging() {
     val begun = begin(backup(0))
+    layout.restoreDir.mkdirs()
     try {
       service.stage(begun.sessionId, null, null)
       fail("staged over earlier restore files")
     } catch (e: RestoreException) {
       assertEquals(RestoreException.STATE_UNKNOWN, e.code)
     }
-    // Not this session's files: abort neither deletes them nor reports success.
     try {
       service.abort(begun.sessionId, schedule)
       fail("leftover reported as cleaned up")

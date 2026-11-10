@@ -13,7 +13,11 @@ import { Dialog } from '../components';
 import { useItems } from '../data';
 import type { SettingsRepository } from '../storage/SettingsRepository';
 import { nativeReminderPlatform, ReminderPlatform } from './platform';
-import { onReconcileReleased, runReconcile } from './reconcileGate';
+import {
+  onCompletedElsewhere,
+  onReconcileReleased,
+  runReconcile,
+} from './reconcileGate';
 import { createReconcileQueue, reconcile } from './scheduler';
 
 /** Whether to show the in-app explanation before Android's permission prompt. */
@@ -145,6 +149,18 @@ export function RemindersProvider({
         requestReconcile();
       }),
     [requestReconcile, completeStoredReminders],
+  );
+
+  // Completed while the reconcile gate stays held (a failed restore cleanup):
+  // reloaded only, no reconcile.
+  useEffect(
+    () =>
+      onCompletedElsewhere(ids => {
+        completeStoredReminders(ids).catch(() =>
+          console.warn('[reminders] reload after restore failed'),
+        );
+      }),
+    [completeStoredReminders],
   );
 
   // Back in the foreground: fired reminders, permission changes made in

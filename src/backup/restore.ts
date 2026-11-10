@@ -1,4 +1,8 @@
-import { holdReconcile, ReconcileRelease } from '../reminders/reconcileGate';
+import {
+  announceCompleted,
+  holdReconcile,
+  ReconcileRelease,
+} from '../reminders/reconcileGate';
 import type { StorageErrorCode } from '../storage/errors';
 import type { SerialDatabase } from '../storage/serialDatabase';
 import type { SqlExecutor } from '../storage/sql';
@@ -287,6 +291,9 @@ export async function prepareRestore(
     // database queue is released (the live database is untouched).
     // retryRestoreCleanup() resumes from the files.
     pendingCleanup = cleanup;
+    // Step 9's completions are in the live database; the item state reloads
+    // them now (the queue is free), while the reconcile gate stays held.
+    announceCompleted(cleanup.completed);
     throw cleanupFailure;
   }
   releaseAfterCleanup(cleanup);

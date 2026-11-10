@@ -116,7 +116,11 @@ class RestoreService(
   fun begin(input: InputStream, password: String): Begun {
     check(session == null) { "A restore is already running" }
     try {
-      if (layout.journal.exists()) throw RestoreException(RestoreException.STATE_UNKNOWN, "A restore journal exists")
+      // A journal, or restore files left without one (review M-A), belong to an earlier
+      // restore: refused before any session or gate exists, and left untouched.
+      if (layout.journal.exists() || layout.restoreDir.exists() || layout.restoreDbDir.exists()) {
+        throw RestoreException(RestoreException.STATE_UNKNOWN, "Restore files exist")
+      }
       val pw = BackupPassword.encode(password)
       val reader =
           try {

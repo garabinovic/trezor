@@ -17,6 +17,7 @@ import {
   RestoreStaged,
 } from '../../src/backup/restorePlatform';
 import {
+  onCompletedElsewhere,
   onReconcileReleased,
   ReconcileRelease,
   resetReconcileGateForTests,
@@ -486,10 +487,14 @@ describe('prepareRestore (steps 1–12, then the pre-swap failure path)', () => 
     });
     const released: ReconcileRelease[] = [];
     onReconcileReleased(r => released.push(r));
+    const reloaded: string[][] = [];
+    onCompletedElsewhere(ids => reloaded.push(ids));
 
     const e = await expectCode(prepare(platform), 'RESTORE_RECOVERY_RETRY');
     expect(e.cleanedUp).toBe(false);
     expect(restoreCleanupPending()).toBe(true);
+    // Review L-C: step 9's completion is announced for a reload, gate still held.
+    expect(reloaded).toEqual([['fired']]);
     // Native gate never released, reconcile gate never released.
     expect(calls).not.toContain('release');
     expect(released).toEqual([]);
@@ -563,6 +568,24 @@ describe('prepareRestore (steps 1–12, then the pre-swap failure path)', () => 
       'RESTORE_FAILED',
     );
     expect(released).toEqual([{ completed: [] }]);
+  });
+
+  test('restore files left without a journal are refused in step 1, holding nothing (review M-A)', async () => {
+    // RestoreService.begin refuses them natively (RestoreServiceTest covers the files).
+    const { platform, calls } = fakePlatform({
+      beginRestore: async () => {
+        calls.push('begin');
+        throw Object.assign(new Error(), { code: 'RESTORE_STATE_UNKNOWN' });
+      },
+    });
+    const e = await expectCode(prepare(platform), 'RESTORE_STATE_UNKNOWN');
+    expect(e.cleanedUp).toBe(true);
+    expect(calls).toEqual(['begin']);
+    expect(restoreCleanupPending()).toBe(false);
+    // Nothing held: the database queue, the reconcile gate and a new preparation work.
+    expect(await live.execute('SELECT 1 AS one')).toEqual([{ one: 1 }]);
+    await expect(runReconcile(async () => 'ran')).resolves.toBe('ran');
+    await prepare(fakePlatform().platform);
   });
 
   test('a wrong password stops before the gate', async () => {

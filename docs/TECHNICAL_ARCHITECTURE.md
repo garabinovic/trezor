@@ -874,11 +874,22 @@ and attachment root are never moved, renamed or overwritten**.
    every view and share deleted, both directories confirmed empty.
 
 **Pre-swap failure path** (always taken in Step 3):
-1. The schedule is restored and re-armed by `scheduleSaved`:
-   - `saved` → copied back, unless an earlier attempt already did;
-   - `absent` → the schedule is deleted;
-   - `pending` → left as is;
-   - then `rearmAll`, then the saved copy is deleted.
+1. The schedule is restored and re-armed by `scheduleSaved`, in this order
+   (`ScheduleRestore.restoreAndRearm`, under the `ScheduleStore` monitor):
+   1. `saved` → `schedule.saved.bin` copied back to `schedule.bin` durably
+      (temp file, `fsync`, rename, directory `fsync`), unless an earlier
+      attempt already did and deleted the copy; `absent` → the schedule is
+      deleted; `pending` → left as is;
+   2. `schedule.saved.bin` (and a stray temp copy) deleted, then its
+      directory synced;
+   3. `rearmAll`.
+
+   If the copy-back fails, the saved copy stays and nothing is armed; the
+   retry copies back again. If the deletion fails, nothing is armed either;
+   the retry finishes it. If `rearmAll` fails, the saved copy is already gone;
+   the retry finds `saved` without the file and only re-arms, so it never
+   copies the old schedule back over what an alarm recorded in between (see
+   "Clarification of v2.4" below).
 2. `D/restore`, `N/restore/attachments` and `N/quarantine/<restoreId>` are
    deleted.
 3. The journal is deleted, and `N/restore` once it is empty.
@@ -905,6 +916,10 @@ and never called done. An unknown session is refused.
   preparation is refused until then.
 - If the process ends meanwhile, the journal and files stay for Step 4's
   recovery.
+- If step 9 completed reminders, the item state reloads them at once
+  (`announceCompleted`), without releasing the reconcile gate and without a
+  reconcile (review L-C). So an edit made while the cleanup is pending can't
+  write "not completed" back.
 
 **Other parts:**
 - **Preconditions** (`RestoreService.preflight`, §8.1 of the spec):
@@ -913,7 +928,10 @@ and never called done. An unknown session is refused.
   - the attachments key must unwrap if it exists. If it doesn't exist, no
     encrypted file may exist anywhere, else `RESTORE_UNAVAILABLE`;
   - a journal or restore staging without one → `RESTORE_STATE_UNKNOWN`
-    (their recovery is Step 4);
+    (their recovery is Step 4). `RestoreService.begin` refuses the same
+    (review M-A), before any session or gate exists and without touching the
+    files, so a preparation never takes the gates over leftovers it can't
+    clean;
   - from the error screen, `trezor.db-journal` → `RESTORE_STATE_UNKNOWN`.
 
   `restoreEntryFor` maps each storage error code to what the error screen
@@ -958,6 +976,45 @@ next normal launch would do this:
 - **After a failed cleanup** (above), restarting the app releases the in-process
   gates. Reconciliation resumes then, while the journal and files stay for
   Step 4.
+
+**JS reload while a cleanup is pending (review L-B, accepted limitation):** if
+the React Native instance is torn down while the process lives on (a JS
+reload, a host teardown):
+- The JS state is lost: the pending cleanup and the reconcile-gate hold.
+- `TrezorRestoreModule.invalidate` releases the native gate, so attachment
+  work isn't refused for good.
+- The new JS instance then reconciles normally. That may rebuild
+  `schedule.bin` from the database, while the journal (`prepared`,
+  `scheduleSaved = saved`) and an older `schedule.saved.bin` stay behind and
+  further restores are refused.
+- This is not startup recovery, and it doesn't touch the live database or
+  attachment files.
+
+**Step 4 requirement:** recovery of a `prepared` journal must inspect the
+actual `ScheduleStore` and the journal and file state. It must not blindly
+copy `schedule.saved.bin` back when a normal reconcile may already have
+rebuilt the active schedule after a JS reload, since that could re-arm
+overdue entries of reminders deleted since. Step 4 must define and test the
+exact decision for this state before it builds the replacement workflow.
+
+**Known race, deferred (review L2):** `TrezorAttachmentsModule.submit` checks
+`RestoreGate.isHeld()` without synchronising with `RestoreGate.begin()` and the
+drain. A JS call that passes the check just before the gate is taken can
+still run under it. The window is microseconds. In Step 3 the effect is a view
+file that step 12 purges, or a deletion the database already agrees with
+(imports are re-checked when they finish). **Step 4 must close it before
+§8.2 step 13a.**
+
+**Clarification of v2.4 accepted during implementation (review L-A).** The
+approved spec (§8.11, `restoreAndRearmSchedule`) lists: 1 copy back,
+2 `rearmAll`, 3 delete `schedule.saved.bin`. The implementation deletes the
+saved copy (durably) **before** `rearmAll`, once the copy-back is durable. With
+the spec's order, a `rearmAll` that failed part-way left the saved copy in
+place. An alarm of the restored schedule could then fire before the retry,
+and the retry copied the old schedule back over that delivery, delivering the
+same occurrence twice. The spec's own "saved and absent → skip to step 2"
+branch makes the reordered steps idempotent. The v2.4 baseline document is
+not changed; this is recorded here and in the Step 3 commits.
 
 ### 8.8 Not verified yet
 
@@ -1008,6 +1065,7 @@ next normal launch would do this:
 | Real SQLCipher, schema v2 → v3 (Phase 4 step 8) | 4 checks with op-sqlite's SQLCipher 4.19.0 source compiled for macOS: the v2 file is encrypted and needs its key; migration keeps every row with a verified snapshot and passes integrity, foreign-key and cipher checks; an injected v3 failure rolls back to the intact v2 file; an untouched copy keeps its SHA-256 (§5) | **4/4 pass** (one-off harness, not in the repository) |
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
 | Phase 6 Step 3 (restore preparation, without the swap) | JVM +35 in 7 new classes and 1 extended: `RestoreServiceTest` 9 (real backups from `BackupService` restored on a device with another key: every step, `S_att` readable only with the target key, quarantine link, schedule saved and restored, live files byte-identical; zero attachments; wrong password, short password and too little space write nothing; changed backup → `BACKUP_CHANGED`; damaged and truncated sections; a failing cleanup keeps the journal → `RESTORE_RECOVERY_RETRY`; a journal blocks; every §8.1 precondition), `RestoreJournalTest` 4, `RestoreFileOpsTest` 4, `QuarantineTest` 5 (`kept-ids` absent, valid with a missing file, damaged → all, unlistable root, no overwrite), `AttachmentLocationsTest` 3, `ScheduleRestoreTest` 7 (order, every `scheduleSaved` case, idempotence, failed re-arm keeps the copy, the `ScheduleStore` monitor held throughout), `RestoreGateAndRestartTest` 2, `ShareFilesTest` +1. Jest +16: `restore.test.ts` 13 (step order, `S_db` under the device key with the settings rewrite, invalid settings and unreadable live settings, error-screen mode, queued writes and reconciles wait, shares wait/cancel, a failure at every step undoes and releases, schema and manifest mismatch, failed cleanup reported, wrong password, error-code entries), `reconcileGate.test.ts` 3. Real SQLCipher 4.19.0 harness +2 (export to the device key, settings rewrite and §B.4 on `S_db`; keys not interchangeable, files encrypted), run in band with Step 2's 6 and Phase 4's 4 | **JVM 262/262, Jest 432/432, real SQLCipher 12/12** |
+| Step 3 second-review corrections (M-A, L-A, L-C) | JVM: `RestoreServiceTest` (restore files without a journal: `N/restore`, `D/restore` and both refused in step 1, untouched, no session left; files appearing after step 1 still block staging; a failed re-arm leaves no saved copy and the retry only re-arms), `ScheduleRestoreTest` (copy back, delete, then re-arm; a retry after a failed re-arm never copies the stale schedule back, even after an alarm changed it; a failed copy-back keeps the saved copy and arms nothing; a failed deletion arms nothing and the retry finishes). Jest: `restore.test.ts` (a step-1 refusal holds no gate; a failed cleanup announces step 9's ids with the gate held), `restoreReminderState.test.tsx` (an edit while the cleanup is pending keeps the completion and starts no reconcile; fails without the reload) | **JVM 271/271, Jest 437/437, real SQLCipher 12/12** |
 | Step 3 review corrections (M1, L1, L3) | JVM `RestoreServiceTest` +6 (a failed re-arm keeps journal, saved schedule and staging, and a retry in the same session finishes; unknown and finished sessions refused; journal write failing before its rename and directory sync failing after it, both cleaned up; files without a journal never deleted or called done; earlier restore files block staging), and the failing-cleanup test now retries. Jest +3: `restore.test.ts` (3 tests replacing the one that expected the gates to be released: a failed cleanup keeps the native and reconcile gates held, runs no reconcile, refuses a new preparation, survives a second failure, and a successful retry releases native then reconcile gate then reconciles once; a failed gate release retried without repeating the cleanup; the release carries step 9's ids), `restoreReminderState.test.tsx` (app level: a reminder completed by step 9 stays completed after an edit; fails without the reload), `reconcileGate.test.ts` checks the release payload | **JVM 268/268, Jest 435/435, real SQLCipher 12/12** |
 | Attachments verified before the destination is opened | `BackupServiceTest` +1 (a deletion requested while attachments are verified waits for the gate); the unreadable-attachment, key-unavailable and over-limit tests now also require that the destination was never opened, and the success test that it was opened once. With verification moved back inside the open destination, 6 tests fail | **JVM 86/86 backup** |
 | JVM unit (automated) | `RecurrenceTest` (4) | **4/4 pass** |

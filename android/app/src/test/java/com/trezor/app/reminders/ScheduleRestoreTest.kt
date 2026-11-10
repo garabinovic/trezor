@@ -25,13 +25,18 @@ class ScheduleRestoreTest {
   private var emptyAfterClear = true
   private var failRearm = false
   private var onClear: () -> Unit = {}
+  /** A directory whose sync fails (by name), to fail a step part-way. */
+  private var failSyncOf: String? = null
   private val original = byteArrayOf(9, 8, 7, 6, 5)
 
   private fun ops() =
       ScheduleRestore(
           schedule = schedule,
           saved = saved,
-          syncDirectory = { events += "sync:${it.name}" },
+          syncDirectory = {
+            if (it.name == failSyncOf) throw IOException("fsync ${it.name}")
+            events += "sync:${it.name}"
+          },
           clear = {
             onClear()
             events += "clear"
@@ -88,7 +93,8 @@ class ScheduleRestoreTest {
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
     assertArrayEquals(original, schedule.readBytes())
     assertFalse(saved.exists())
-    assertEquals(listOf("sync:reminders", "rearm", "sync:restore"), events)
+    // Copy back durably, delete the saved copy durably, and only then re-arm (review L-A).
+    assertEquals(listOf("sync:reminders", "sync:restore", "rearm"), events)
     // Again (M-a): saved but absent means the copy-back already happened.
     events.clear()
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
@@ -112,8 +118,13 @@ class ScheduleRestoreTest {
     assertFalse(schedule.exists())
   }
 
+  /**
+   * Review L-A: re-arming fails after the copy-back, and an alarm of the restored schedule
+   * fires before the retry and records its delivery. The retry must not copy the stale saved
+   * schedule back over that (it would deliver the same occurrence again); it only re-arms.
+   */
   @Test
-  fun aFailedRearmKeepsTheSavedCopyForRetry() {
+  fun aRetryAfterAFailedRearmNeverRestoresTheStaleCopyAgain() {
     ops().saveAndClear {}
     failRearm = true
     try {
@@ -122,11 +133,79 @@ class ScheduleRestoreTest {
     } catch (e: IOException) {
       // expected
     }
-    assertTrue(saved.exists())
+    // The copy-back is complete and the saved copy already gone.
+    assertArrayEquals(original, schedule.readBytes())
+    assertFalse(saved.exists())
+    // An alarm fires meanwhile (onFire records the delivery in the schedule).
+    val afterAlarm = byteArrayOf(42, 42)
+    schedule.writeBytes(afterAlarm)
     failRearm = false
+    events.clear()
+    ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+    assertArrayEquals(afterAlarm, schedule.readBytes())
+    assertEquals(listOf("rearm"), events)
+    // And again: still nothing copied.
+    ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+    assertArrayEquals(afterAlarm, schedule.readBytes())
+  }
+
+  @Test
+  fun aFailedCopyBackKeepsTheSavedCopyAndArmsNothing() {
+    ops().saveAndClear {}
+    events.clear()
+    failSyncOf = "reminders" // the copy-back's directory sync
+    try {
+      ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+      fail("copy-back failure hidden")
+    } catch (e: IOException) {
+      // expected
+    }
+    assertArrayEquals(original, saved.readBytes())
+    assertFalse("armed before the copy-back was durable", "rearm" in events)
+    failSyncOf = null
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
     assertArrayEquals(original, schedule.readBytes())
     assertFalse(saved.exists())
+    assertEquals(1, events.count { it == "rearm" })
+  }
+
+  @Test
+  fun aFailureWhileDeletingTheSavedCopyArmsNothingAndTheRetryFinishes() {
+    ops().saveAndClear {}
+    events.clear()
+    // The deletion's directory sync fails: the copy is gone, but not yet durably.
+    failSyncOf = "restore"
+    try {
+      ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+      fail("deletion failure hidden")
+    } catch (e: IOException) {
+      // expected
+    }
+    assertFalse("rearm" in events)
+    failSyncOf = null
+    ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+    assertArrayEquals(original, schedule.readBytes())
+    assertEquals(1, events.count { it == "rearm" })
+
+    // The deletion itself failing (directory not writable): the saved copy stays, and the
+    // retry repeats the copy-back, still before anything is armed.
+    ops().saveAndClear {}
+    events.clear()
+    saved.parentFile.setWritable(false)
+    try {
+      ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+      fail("deletion failure hidden")
+    } catch (e: IOException) {
+      // expected
+    } finally {
+      saved.parentFile.setWritable(true)
+    }
+    assertTrue(saved.exists())
+    assertFalse("rearm" in events)
+    ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+    assertArrayEquals(original, schedule.readBytes())
+    assertFalse(saved.exists())
+    assertEquals(1, events.count { it == "rearm" })
   }
 
   /** M-b: the operation holds the `ScheduleStore` monitor for its whole duration. */

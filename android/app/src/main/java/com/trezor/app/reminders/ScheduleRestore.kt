@@ -60,12 +60,19 @@ class ScheduleRestore(
 
   /**
    * `restoreAndRearmSchedule` (pre-swap failure, later `rolledback`), idempotent (M-a):
-   * 1. by [state]: copy [saved] back (or skip if a previous attempt already did and deleted
-   *    it), delete the schedule if none existed, or leave it when the alarms were never
-   *    cleared;
-   * 2. re-arm every entry with its saved `armedFor` (so `fired` and a pending ONCE are back);
-   * 3. delete [saved].
-   * Any failure throws and leaves [saved] in place, so a retry repeats the operation.
+   * 1. by [state]: copy [saved] back durably (or skip if a previous attempt already did and
+   *    deleted it), delete the schedule if none existed, or leave it when the alarms were
+   *    never cleared;
+   * 2. delete [saved] (and a stray temp copy), durably;
+   * 3. re-arm every entry with its saved `armedFor` (so `fired` and a pending ONCE are back).
+   *
+   * Steps 2 and 3 are in this order on purpose (review L-A, a clarification of spec §8.11,
+   * which lists the deletion last): once the copy-back is durable, [saved] goes before
+   * anything is armed. If re-arming then fails and an alarm fires before the retry, the retry
+   * finds `saved` absent and only re-arms; it never copies the stale schedule back over what
+   * that alarm recorded (which could notify the same occurrence twice). A failure before
+   * step 2 completes leaves [saved] in place and the copy-back is simply repeated (no alarm
+   * of the restored schedule is armed before step 3).
    */
   fun restoreAndRearm(state: Saved) =
       synchronized(lock) {
@@ -77,14 +84,14 @@ class ScheduleRestore(
                 if (!schedule.delete()) throw IOException("Could not remove the schedule")
                 syncDirectory(schedule.parentFile!!)
               }
-          Saved.PENDING -> if (tmp.exists() && !tmp.delete()) throw IOException("Could not remove a stray copy")
+          Saved.PENDING -> Unit
         }
-        rearm()
         if (tmp.exists() && !tmp.delete()) throw IOException("Could not remove a stray copy")
         if (saved.exists()) {
           if (!saved.delete()) throw IOException("Could not remove the saved schedule")
           syncDirectory(saved.parentFile!!)
         }
+        rearm()
       }
 
   /** Temp file, `fsync`, rename over [to], `fsync` of its directory. */
