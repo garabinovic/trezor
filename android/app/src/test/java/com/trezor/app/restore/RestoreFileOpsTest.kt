@@ -90,6 +90,17 @@ class RestoreFileOpsTest {
       }
       assertTrue(dir.exists())
     }
+    // P_att only for the cleanup row (spec v2.5 §8).
+    File(layout.previousAttachments, "f").also { it.parentFile.mkdirs(); it.writeText("x") }
+    try {
+      ops.deleteRecursively(layout.previousAttachments, restoreId)
+      fail("deleted the previous attachments outside cleanup")
+    } catch (e: IllegalArgumentException) {
+      // expected
+    }
+    assertTrue(layout.previousAttachments.exists())
+    ops.deleteRecursively(layout.previousAttachments, cleanup = true)
+    assertFalse(layout.previousAttachments.exists())
     // Without the journal's restore id, no quarantine at all.
     layout.quarantine(restoreId).mkdirs()
     try {

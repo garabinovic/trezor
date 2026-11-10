@@ -122,4 +122,37 @@ class ModuleTasksTest {
     assertEquals("resolve", first.settled)
     assertEquals("resolve", queued.settled)
   }
+
+  /**
+   * Review M2 (spec v2.5 §12): a task accepted just before the restore gate is taken, and run
+   * only after it, starts nothing; work refused at once is refused too. The drain marker that
+   * follows still runs, so the restore waits for nothing that could create files.
+   */
+  @Test
+  fun workAcceptedBeforeTheRestoreGateButRunAfterItDoesNothing() {
+    val held = java.util.concurrent.atomic.AtomicBoolean(false)
+    val busy = CountDownLatch(1)
+    val blocker = Promise()
+    submit(Lane.WORKER, blocker) { busy.await(); blocker.settle("resolve") }
+    val accepted = Promise()
+    var ran = false
+    tasks.submitUnless(Lane.WORKER, { held.get() }, "RESTORE_IN_PROGRESS", accepted::reject) { ran = true; accepted.settle("resolve") }
+    // The gate is taken while the task waits behind the one running.
+    held.set(true)
+    val marker = Promise()
+    submit(Lane.WORKER, marker) { marker.settle("drained") }
+    busy.countDown()
+    assertEquals("reject:RESTORE_IN_PROGRESS", accepted.await())
+    assertFalse(ran)
+    assertEquals("drained", marker.await())
+    // Asked while held: refused before it is accepted.
+    val later = Promise()
+    tasks.submitUnless(Lane.RENDERER, { held.get() }, "RESTORE_IN_PROGRESS", later::reject) { later.settle("resolve") }
+    assertEquals("reject:RESTORE_IN_PROGRESS", later.await())
+    // Released: work runs again.
+    held.set(false)
+    val after = Promise()
+    tasks.submitUnless(Lane.WORKER, { held.get() }, "RESTORE_IN_PROGRESS", after::reject) { after.settle("resolve") }
+    assertEquals("resolve", after.await())
+  }
 }

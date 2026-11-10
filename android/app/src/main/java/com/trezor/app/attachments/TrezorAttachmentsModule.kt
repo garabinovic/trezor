@@ -124,14 +124,10 @@ class TrezorAttachmentsModule(private val reactContext: ReactApplicationContext)
    * Runs [task] on [lane]. [promise] is rejected with IO_FAILED if the module has shut
    * down, or if the task throws anything (an OutOfMemoryError included) before settling it.
    */
-  private fun submit(lane: ModuleTasks.Lane, promise: Promise, task: () -> Unit) {
-    // Under the restore gate nothing new is accepted from JS (spec §8.7).
-    if (RestoreGate.isHeld()) {
-      promise.reject(RestoreGate.IN_PROGRESS, "A restore is in progress")
-      return
-    }
-    tasks.submit(lane, { code, message -> promise.reject(code, message) }, task)
-  }
+  private fun submit(lane: ModuleTasks.Lane, promise: Promise, task: () -> Unit) =
+      // Under the restore gate nothing new is accepted from JS (spec §8.7), and nothing
+      // accepted before it starts once it is held (re-checked on the lane, v2.5 §12).
+      tasks.submitUnless(lane, RestoreGate::isHeld, RestoreGate.IN_PROGRESS, { code, message -> promise.reject(code, message) }, task)
 
   /** Runs [task] on [lane], past the restore gate, and waits for it (restore coordinator). */
   private fun onLane(lane: ModuleTasks.Lane, task: () -> Unit) {

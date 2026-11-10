@@ -16,7 +16,7 @@ class RestoreLayout(val databaseDir: File, val noBackupDir: File) {
   val incoming = File(restoreDbDir, "incoming.db")
   /** `S_db`. */
   val stagedDb = File(restoreDbDir, "trezor.db")
-  /** `P_db` (Step 4). */
+  /** `P_db`: the live database during the swap. */
   val previousDb = File(restoreDbDir, "previous.db")
 
   /** `L_att`. */
@@ -28,7 +28,7 @@ class RestoreLayout(val databaseDir: File, val noBackupDir: File) {
   val savedSchedule = File(restoreDir, "schedule.saved.bin")
   /** `S_att`. */
   val stagedAttachments = File(restoreDir, "attachments")
-  /** `P_att` (Step 4). */
+  /** `P_att`: the live attachment root during the swap. */
   val previousAttachments = File(restoreDir, "previous-attachments")
   /** One attachment section on its way into `S_att` (still under the backup's wrap key). */
   val incomingAttachment = File(restoreDir, "incoming-attachment.tmp")

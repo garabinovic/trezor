@@ -65,10 +65,11 @@ class RestoreFileOps(
   /**
    * Deletes [dir] and everything in it, then syncs its parent. Only `D/restore`, `D/backup`,
    * `D/check/<id>`, `N/restore`, `N/restore/attachments` and `N/quarantine/<restoreId>` of
-   * [journalRestoreId] (the current journal's restore) are allowed; anything else is refused.
-   * Throws if anything is left.
+   * [journalRestoreId] (the current journal's restore) are allowed, and `P_att`
+   * (`N/restore/previous-attachments`) only for the `cleanup` row ([cleanup], spec v2.5 §8);
+   * anything else is refused. Throws if anything is left.
    */
-  fun deleteRecursively(dir: File, journalRestoreId: String? = null) {
+  fun deleteRecursively(dir: File, journalRestoreId: String? = null, cleanup: Boolean = false) {
     val path = dir.canonicalPath
     val allowed =
         mutableListOf(
@@ -78,12 +79,20 @@ class RestoreFileOps(
             layout.stagedAttachments,
         )
     if (journalRestoreId != null) allowed += layout.quarantine(journalRestoreId)
+    if (cleanup) allowed += layout.previousAttachments
     val inCheck = dir.parentFile?.canonicalPath == File(layout.databaseDir, "check").canonicalPath
     require(inCheck || allowed.any { it.canonicalPath == path }) { "Deletion outside the restore paths refused" }
     if (!dir.exists()) return
     dir.deleteRecursively()
     if (dir.exists()) throw IOException("Could not delete ${dir.name}")
     syncDirectory(dir.parentFile!!)
+  }
+
+  /** Deletes the regular file [file] if it exists, then syncs its directory. */
+  fun deleteFileDurable(file: File) {
+    if (!file.exists()) return
+    if (!file.isFile || !file.delete()) throw IOException("Could not delete ${file.name}")
+    syncDirectory(file.parentFile!!)
   }
 
   /** Writes [bytes] to [file] durably: temp file, `fsync`, rename over it, directory `fsync`. */

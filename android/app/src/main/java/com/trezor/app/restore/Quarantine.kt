@@ -15,7 +15,7 @@ import java.io.File
  *
  * Each retained file is hard-linked (or copied) to `N/quarantine/<restoreId>/<id>.tza`; the
  * original stays in `L_att` untouched. Quarantine has no automatic cleanup: only this
- * restore's pre-swap failure (and, in Step 4, its rollback) deletes `N/quarantine/<restoreId>/`.
+ * restore's pre-swap failure and its `rolledback` row delete `N/quarantine/<restoreId>/`.
  */
 class Quarantine(private val layout: RestoreLayout, private val ops: RestoreFileOps) {
 

@@ -139,7 +139,7 @@ async function stageDatabase(
   requireSameAttachments(stagedRows, staged.attachments);
 }
 
-export interface PrepareOptions {
+export interface RestoreOptions {
   /** The backup document (from the Check/backup file picker). */
   uri: string;
   password: string;
@@ -158,7 +158,7 @@ export interface PrepareOptions {
    * Default: cancel.
    */
   whileSharesActive?: (active: number) => Promise<'wait' | 'cancel'>;
-  /** Called once steps 1–12 have passed, before the preparation is undone. */
+  /** Called once steps 1–12 have passed, before step 13 (a failure here is pre-swap). */
   onPrepared?: (
     prepared: PreparedRestore,
     live: SqlExecutor | undefined,
@@ -169,10 +169,7 @@ export interface PrepareOptions {
 }
 
 /**
- * Restore preparation (spec v2.4 §8.2 steps 1–12), as Step 3 of the plan
- * builds it: **exercised without the swap**. Every run ends in the pre-swap
- * failure path, so the live database and attachments are never replaced, and
- * the previous state (schedule, `fired`, alarms) is restored:
+ * Restore (spec v2.4 §8.2, v2.5 §6):
  *
  * 1. password, memory, manifest, free space (native, before the gate);
  * 2. the restore gate: the reconcile gate, then one exclusive operation on the
@@ -184,20 +181,54 @@ export interface PrepareOptions {
  * 9. fired ONCE reminders completed on the live connection;
  * 10–11. schedule saved and cleared (native, one call under its lock);
  * 12. decrypted caches purged (native);
+ * 13. the live connection closed inside the gate's callback;
+ * 13a–15. the pre-swap state check, the swap renames, `verifying` (native);
+ * 16. the process restarted; the next start verifies and finishes (recovery).
  *
- * then the pre-swap failure path: schedule restored and re-armed, staging and
- * this restore's quarantine deleted, journal deleted, gates released (which
- * requests a normal reconcile). Step 4 replaces "then" with the swap.
+ * From step 13 on, this never settles: every exit, a failure included, ends
+ * in the restart, and nothing else runs in this JS runtime (no gate is
+ * released, work queued behind the gate never runs, L1).
  *
- * Resolves with what was prepared, or rejects with a RestoreError. Its
- * `cleanedUp` is false only if the pre-swap failure path itself failed: then
- * the journal and files stay, the native and reconcile gates stay held (no
- * reconcile runs), and `retryRestoreCleanup()` resumes the cleanup and
- * releases them once it succeeds. A new preparation is refused meanwhile.
+ * A failure in steps 1–12 takes the pre-swap failure path (schedule restored
+ * and re-armed, staging and this restore's quarantine deleted, journal
+ * deleted, gates released, which requests a normal reconcile) and rejects
+ * with a RestoreError. Its `cleanedUp` is false only if that path itself
+ * failed: then the journal and files stay, the native and reconcile gates
+ * stay held (no reconcile runs), and `retryRestoreCleanup()` resumes the
+ * cleanup and releases them once it succeeds. A new restore is refused
+ * meanwhile.
  */
-export async function prepareRestore(
-  options: PrepareOptions,
-): Promise<PreparedRestore> {
+export async function restoreBackup(options: RestoreOptions): Promise<never> {
+  const run = runRestore(options);
+  running = run;
+  try {
+    return await run;
+  } finally {
+    if (running === run) {
+      running = null;
+    }
+  }
+}
+
+/** The restore running in this JS runtime, if any (v2.5 §5.2). */
+let running: Promise<never> | null = null;
+
+/**
+ * Storage initialization calls this before recovery (v2.5 §5.2): a restore of
+ * this runtime settles first (after a swap it never does: the process ends),
+ * and a failed pre-swap cleanup is resumed, so recovery never runs on files a
+ * restore here still owns. Rejects if the resumed cleanup fails again.
+ */
+export async function settleRestore(): Promise<void> {
+  if (running) {
+    await running.catch(() => undefined);
+  }
+  if (pendingCleanup) {
+    await retryRestoreCleanup();
+  }
+}
+
+async function runRestore(options: RestoreOptions): Promise<never> {
   if (pendingCleanup) {
     // A failed pre-swap cleanup still holds the gates: finish it first.
     throw new RestoreError('RESTORE_RECOVERY_RETRY', false);
@@ -272,8 +303,10 @@ export async function prepareRestore(
     } catch (e) {
       failure = e;
     }
-    // Step 3 has no swap: the pre-swap failure path always follows, still
-    // inside the database gate.
+    if (failure === undefined) {
+      await replaceAndRestart(platform, begun.sessionId, options.database);
+    }
+    // The pre-swap failure path, still inside the database gate.
     try {
       await cleanUp(cleanup);
     } catch (e) {
@@ -297,10 +330,33 @@ export async function prepareRestore(
     throw cleanupFailure;
   }
   releaseAfterCleanup(cleanup);
-  if (failure !== undefined || !prepared) {
-    throw RestoreError.from(failure);
+  throw RestoreError.from(failure);
+}
+
+/**
+ * Steps 13–16 (v2.5 §6), inside the gate's callback, which never returns: the
+ * live connection closes after the coordinator's last statement (step 13),
+ * native checks the files and swaps (13a–15), and the process restarts (16).
+ * A failure anywhere still restarts; the durable journal phase decides at the
+ * next start.
+ */
+async function replaceAndRestart(
+  platform: RestorePlatform,
+  sessionId: string,
+  database: SerialDatabase | undefined,
+): Promise<never> {
+  try {
+    database?.close();
+    await platform.swapRestore(sessionId);
+  } catch {
+    // Recovery decides from the journal and the files.
   }
-  return prepared;
+  try {
+    await platform.restartProcess();
+  } catch {
+    // Nothing else may run here either (L1).
+  }
+  return new Promise<never>(() => undefined);
 }
 
 /** One preparation's pre-swap failure path, resumable after a failure. */
@@ -331,7 +387,7 @@ async function cleanUp(c: Cleanup): Promise<void> {
   }
 }
 
-/** Step 4: the reconcile gate last; its listeners reload and reconcile. */
+/** Pre-swap failure step 4: the reconcile gate last; its listeners reload and reconcile. */
 function releaseAfterCleanup(c: Cleanup) {
   c.releaseReconcile({ completed: c.completed });
 }

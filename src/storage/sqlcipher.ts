@@ -44,16 +44,25 @@ export function databasePath(name: string): string {
 export function openEncrypted(
   name: string,
   keyHex: string,
-  options: { failOnCreate?: boolean; location?: string } = {},
+  options: {
+    failOnCreate?: boolean;
+    location?: string;
+    readOnly?: boolean;
+  } = {},
 ): SqlDatabase {
   const params: {
     name: string;
     encryptionKey?: string;
     failOnCreate?: boolean;
     location?: string;
+    readOnly?: boolean;
   } = { name, encryptionKey: rawKey(keyHex) };
   if (options.failOnCreate) {
     params.failOnCreate = true;
+  }
+  // SQLITE_OPEN_READONLY: never creates, never writes.
+  if (options.readOnly) {
+    params.readOnly = true;
   }
   // A directory other than op-sqlite's default (absolute, or relative to it).
   if (options.location) {

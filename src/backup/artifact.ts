@@ -61,16 +61,70 @@ export async function exportDatabase(
   }
 }
 
-/** The app's own schema, built at runtime in memory from its migrations (Annex B §B.6). */
-async function referenceSchema(): Promise<SqlRow[]> {
+/**
+ * The app's own schema at `version`, built at runtime in memory from its
+ * migrations up to that version (Annex B §B.6). Backups and restored databases
+ * are compared at schema 3, so a later migration in a newer build never makes
+ * a valid version-3 database differ (spec v2.5 §1.4).
+ */
+export async function referenceSchema(
+  version: number = BACKUP_SCHEMA_VERSION,
+): Promise<SqlRow[]> {
   const db = adaptOpSqlite(
     open({ name: 'trezor-schema-reference', location: ':memory:' }),
   );
   try {
-    await runMigrations(db, migrations);
+    await runMigrations(
+      db,
+      migrations.filter(m => m.version <= version),
+    );
     return await db.execute(SCHEMA_SQL);
   } finally {
     db.close();
+  }
+}
+
+/** The schema of `db` in the form `referenceSchema` returns. */
+export function schemaOf(db: SqlExecutor): Promise<SqlRow[]> {
+  return db.execute(SCHEMA_SQL);
+}
+
+/**
+ * Annex B §B.4 on a connection whose first read succeeded: cipher settings,
+ * `cipher_integrity_check`, `integrity_check`, `foreign_key_check`,
+ * `user_version` and schema. A deviation rejects with a BackupError
+ * (BACKUP_UNSUPPORTED, BACKUP_CORRUPT or BACKUP_INCONSISTENT); a failing
+ * statement rejects with its own error.
+ */
+export async function checkArtifactContent(db: SqlExecutor): Promise<void> {
+  const version = firstValue(await db.execute('PRAGMA cipher_version'));
+  if (!version || !version.startsWith('4.')) {
+    throw unsupported();
+  }
+  for (const [pragma, expected] of CIPHER_SETTINGS) {
+    if (firstValue(await db.execute(`PRAGMA ${pragma}`)) !== expected) {
+      throw unsupported();
+    }
+  }
+  if ((await db.execute('PRAGMA cipher_integrity_check')).length > 0) {
+    throw new BackupError('BACKUP_CORRUPT');
+  }
+  const integrity = await db.execute('PRAGMA integrity_check');
+  if (integrity.length !== 1 || firstValue(integrity) !== 'ok') {
+    throw new BackupError('BACKUP_CORRUPT');
+  }
+  if ((await db.execute('PRAGMA foreign_key_check')).length > 0) {
+    throw inconsistent();
+  }
+  if (
+    Number(firstValue(await db.execute('PRAGMA user_version'))) !==
+    BACKUP_SCHEMA_VERSION
+  ) {
+    throw unsupported();
+  }
+  const schema = await schemaOf(db);
+  if (JSON.stringify(schema) !== JSON.stringify(await referenceSchema())) {
+    throw inconsistent();
   }
 }
 
@@ -97,35 +151,7 @@ export async function verifyArtifact(
     } catch {
       throw new BackupError('BACKUP_CORRUPT');
     }
-    const version = firstValue(await db.execute('PRAGMA cipher_version'));
-    if (!version || !version.startsWith('4.')) {
-      throw unsupported();
-    }
-    for (const [pragma, expected] of CIPHER_SETTINGS) {
-      if (firstValue(await db.execute(`PRAGMA ${pragma}`)) !== expected) {
-        throw unsupported();
-      }
-    }
-    if ((await db.execute('PRAGMA cipher_integrity_check')).length > 0) {
-      throw new BackupError('BACKUP_CORRUPT');
-    }
-    const integrity = await db.execute('PRAGMA integrity_check');
-    if (integrity.length !== 1 || firstValue(integrity) !== 'ok') {
-      throw new BackupError('BACKUP_CORRUPT');
-    }
-    if ((await db.execute('PRAGMA foreign_key_check')).length > 0) {
-      throw inconsistent();
-    }
-    if (
-      Number(firstValue(await db.execute('PRAGMA user_version'))) !==
-      BACKUP_SCHEMA_VERSION
-    ) {
-      throw unsupported();
-    }
-    const schema = await db.execute(SCHEMA_SQL);
-    if (JSON.stringify(schema) !== JSON.stringify(await referenceSchema())) {
-      throw inconsistent();
-    }
+    await checkArtifactContent(db);
     const rows = await db.execute(
       'SELECT id, item_id, file_name, mime_type, size_bytes, sha256, format_version FROM attachments ORDER BY id',
     );

@@ -15,7 +15,7 @@ import com.trezor.app.MainActivity
  * case the task is finished and the process killed. The journal must be durable before this
  * is called.
  *
- * Step 3 provides the primitive only; it is first called from the swap (Step 4, §8.2 step 16).
+ * Called after the swap (§8.2 step 16), from `src/backup/restore.ts`.
  */
 object ProcessRestart {
 

@@ -49,6 +49,26 @@ class ModuleTasks(
       }
 
   /**
+   * [submit], unless [refused] holds: checked before the task is accepted and again on the
+   * lane, right before it runs, so work accepted just before the restore gate was taken but
+   * run after it starts nothing under the gate (Phase 6 spec v2.5 §12, review M2). A refusal
+   * rejects with [refusedCode].
+   */
+  fun submitUnless(
+      lane: Lane,
+      refused: () -> Boolean,
+      refusedCode: String,
+      reject: (code: String, message: String) -> Unit,
+      task: () -> Unit,
+  ) {
+    if (refused()) {
+      reject(refusedCode, REFUSED_MESSAGE)
+      return
+    }
+    submit(lane, reject) { if (refused()) reject(refusedCode, REFUSED_MESSAGE) else task() }
+  }
+
+  /**
    * Stops both lanes, once: a second call does nothing and returns false. [last] runs on
    * the renderer after pages still rendering (inline if the renderer already refuses).
    * Work already accepted still runs and settles; new work is refused.
@@ -59,5 +79,9 @@ class ModuleTasks(
     renderer.shutdown()
     worker.shutdown()
     return true
+  }
+
+  private companion object {
+    const val REFUSED_MESSAGE = "A restore is in progress"
   }
 }

@@ -22,15 +22,15 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Restore preparation without Android types (Phase 6 spec v2.4 §8.1–8.4, §8.6, §9.2–9.3):
- * the native steps of §8.2 up to step 12 and the pre-swap failure path. The JS coordinator
- * (`src/backup/restore.ts`) calls them one by one under the restore gate and runs the
- * SQLCipher work itself (step 6, step 9). One restore session at a time.
+ * A restore session without Android types (Phase 6 spec v2.4 §8.1–8.4, §8.6, §9.2–9.3): the
+ * native steps of §8.2, the pre-swap failure path and, from step 13a, the swap
+ * ([RestoreRecovery.swap]). The JS coordinator (`src/backup/restore.ts`) calls them one by
+ * one under the restore gate and runs the SQLCipher work itself (step 6, step 9). One restore
+ * session at a time, holding the process-wide [RestoreLock] from [begin] until its pre-swap
+ * cleanup succeeded or [release] (spec v2.5 §5); after the swap the process ends.
  *
- * Step 3 of the implementation plan stops here: the swap, its recovery and the restart call
- * (§8.2 steps 13–16, §8.5) are Step 4. Until then every preparation ends in [abort], so the
- * live database and attachment root are never moved, renamed or written: preparation only
- * creates `D/restore`, `N/restore`, `N/quarantine/<restoreId>` and links into the latter.
+ * Preparation only creates `D/restore`, `N/restore`, `N/quarantine/<restoreId>` and links into
+ * the latter; only the swap moves the live database and attachment root.
  */
 class RestoreService(
     private val layout: RestoreLayout,
@@ -43,6 +43,7 @@ class RestoreService(
     private val now: () -> Long = System::currentTimeMillis,
     private val random: SecureRandom = SecureRandom(),
     private val memory: MemoryCheck = MemoryCheck.RUNTIME,
+    private val lock: RestoreLock = RestoreLock.PROCESS,
 ) {
 
   val journals = JournalStore(layout, ops)
@@ -83,8 +84,8 @@ class RestoreService(
    * whether the entry exists at all. [databaseKeyUsable] gets and zeroes `vault.getKey('database')`;
    * [attachmentsKey] is `null` when the key doesn't exist, else whether it unwraps.
    *
-   * A journal, or restore staging left without one, is `RESTORE_STATE_UNKNOWN` here: the
-   * recovery that would handle them (§8.5) is Step 4.
+   * A journal, or restore staging left without one, is `RESTORE_STATE_UNKNOWN` here: startup
+   * recovery (§8.5) handles them, and a restore never starts over them.
    */
   fun preflight(fromErrorScreen: Boolean, databaseKeyUsable: () -> Boolean, attachmentsKey: () -> Boolean?): Preflight {
     if (!layout.liveDb.isFile) return Preflight.NotOffered
@@ -115,6 +116,14 @@ class RestoreService(
   @Synchronized
   fun begin(input: InputStream, password: String): Begun {
     check(session == null) { "A restore is already running" }
+    val id = hex(bytes(16))
+    try {
+      // No recovery or other session meanwhile (v2.5 §5): RESTORE_IN_PROGRESS.
+      lock.prepare(id)
+    } catch (e: Throwable) {
+      runCatching { input.close() }
+      throw e
+    }
     try {
       // A journal, or restore files left without one (review M-A), belong to an earlier
       // restore: refused before any session or gate exists, and left untouched.
@@ -131,7 +140,7 @@ class RestoreService(
       try {
         val manifest = BackupManifest.decode(reader.readManifest())
         requireSpace(manifest)
-        val s = Session(hex(bytes(16)), input, reader, manifest)
+        val s = Session(id, input, reader, manifest)
         session = s
         return Begun(s.id, hex(reader.header.backupId), manifest.attachments.size, manifest.database.sizeBytes)
       } catch (e: Throwable) {
@@ -140,6 +149,7 @@ class RestoreService(
       }
     } catch (e: Throwable) {
       runCatching { input.close() }
+      lock.endPrepare(id)
       throw e
     }
   }
@@ -333,12 +343,26 @@ class RestoreService(
     return if (saved == ScheduleRestore.Saved.SAVED) RestoreJournal.Schedule.SAVED else RestoreJournal.Schedule.ABSENT
   }
 
+  // --- §8.2 steps 13a–15 ----------------------------------------------------------------------
+
+  /**
+   * Steps 13a–15 after JS closed the live connection (step 13): see [RestoreRecovery.swap].
+   * The session stays (and with it the lock) until the process ends at step 16.
+   */
+  fun swap(sessionId: String, recovery: RestoreRecovery): RestoreJournal.Phase {
+    val s = current(sessionId)
+    val journal = s.journal ?: throw IllegalStateException("Not staged")
+    check(s.staged) { "Not staged" }
+    return recovery.swap(journal.restoreId)
+  }
+
   // --- Pre-swap failure (§8.2) ---------------------------------------------------------------
 
   /**
    * The pre-swap failure path: restore the schedule (§8.11), delete `D/restore`,
    * `N/restore/attachments` and `N/quarantine/<restoreId>`, then the journal (and `N/restore`
-   * once it is empty). In Step 3 every preparation ends here.
+   * once it is empty), as recovery does for a `prepared` journal. On success the session
+   * ends and releases the lock.
    *
    * - An unknown session is refused (IllegalStateException), never reported as done.
    * - Without a journal on disk: if this session started writing one, only what that write
@@ -365,18 +389,10 @@ class RestoreService(
         if (journal.restoreId != s.journal?.restoreId) {
           throw RestoreException(RestoreException.STATE_UNKNOWN, "Journal belongs to another restore")
         }
-        schedule.restoreAndRearm(
-            when (journal.scheduleSaved) {
-              RestoreJournal.Schedule.PENDING -> ScheduleRestore.Saved.PENDING
-              RestoreJournal.Schedule.SAVED -> ScheduleRestore.Saved.SAVED
-              RestoreJournal.Schedule.ABSENT -> ScheduleRestore.Saved.ABSENT
-            })
-        ops.deleteRecursively(layout.restoreDbDir)
-        ops.deleteRecursively(layout.stagedAttachments)
-        ops.deleteRecursively(layout.quarantine(journal.restoreId), journal.restoreId)
-        if (layout.incomingAttachment.exists() && !layout.incomingAttachment.delete()) throw IOException("Could not delete a staged section")
-        journals.delete()
-        if (layout.restoreDir.listFiles()?.isEmpty() == true) ops.deleteRecursively(layout.restoreDir)
+        if (journal.phase != RestoreJournal.Phase.PREPARED) {
+          throw RestoreException(RestoreException.STATE_UNKNOWN, "The swap has begun")
+        }
+        RestoreRecovery.undoPrepared(layout, ops, journals, schedule, journal)
       }
     } catch (e: RestoreException) {
       throw if (e.code == RestoreException.STATE_UNKNOWN || e.code == RestoreException.RECOVERY_RETRY) e
@@ -384,7 +400,12 @@ class RestoreService(
     } catch (e: Exception) {
       throw RestoreException(RestoreException.RECOVERY_RETRY, "Restore cleanup failed", e)
     }
-    synchronized(this) { if (session === s) session = null }
+    synchronized(this) {
+      if (session === s) {
+        session = null
+        lock.endPrepare(s.id)
+      }
+    }
   }
 
   /** What a failed first journal write of this session can leave: `restore.json.tmp`, an empty `N/restore`. */
@@ -394,12 +415,16 @@ class RestoreService(
     if (layout.restoreDir.listFiles()?.isEmpty() == true) ops.deleteRecursively(layout.restoreDir)
   }
 
-  /** Closes the session's file (module shutdown). Leaves files and journal as they are. */
+  /**
+   * Closes the session's file and releases the lock (module shutdown, after the step in
+   * flight returned, v2.5 §5.3). Leaves files and journal as they are, for recovery.
+   */
   @Synchronized
   fun release() {
     session?.let {
       runCatching { it.reader.close() }
       runCatching { it.input.close() }
+      lock.endPrepare(it.id)
     }
     session = null
   }

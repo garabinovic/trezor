@@ -23,8 +23,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * JS bridge for [RestoreService]: the document stream, Android services and JSON. The rules
- * live in the JVM-tested classes of this package. Never logs a password, key, id, name or URI.
+ * JS bridge for [RestoreService] and [RestoreRecovery]: the document stream, Android services
+ * and JSON. The rules live in the JVM-tested classes of this package. Every call runs on one
+ * worker lane, so a step is never interrupted by another. Never logs a password, key, id,
+ * name or URI.
  */
 class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : NativeTrezorRestoreSpec(reactContext) {
 
@@ -43,17 +45,27 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
           deviceOf = { Os.stat(it.path).st_dev },
       )
   private val schedule = ReminderScheduler.restoreOps(reactContext, layout.schedule, layout.savedSchedule, ops::syncDirectory)
+  private val recovery = RestoreRecovery(layout, ops, AndroidPathTypes, schedule)
   private val tasks = ModuleTasks()
+  /** This module's JS holds the recovery side of [RestoreLock] (worker lane only). */
+  private var holdsRecovery = false
 
   override fun getName(): String = NAME
 
   override fun invalidate() {
-    // The coordinator is gone with this instance: attachment work must not stay refused.
-    // A journal (if any) stays for recovery (Step 4).
-    tasks.shutdown {
+    // The coordinator is gone with this instance: attachment work must not stay refused, and
+    // recovery must be able to run. Released on the worker lane, so only after the step in
+    // flight has returned (v2.5 §5.3); a journal (if any) stays for recovery.
+    val release = {
       service.release()
+      if (holdsRecovery) {
+        holdsRecovery = false
+        RestoreLock.PROCESS.endRecover()
+      }
       RestoreGate.end()
     }
+    tasks.submit(WORKER, { _, _ -> release() }) { release() }
+    tasks.shutdown {}
     super.invalidate()
   }
 
@@ -187,6 +199,83 @@ class TrezorRestoreModule(private val reactContext: ReactApplicationContext) : N
         RestoreGate.end()
         promise.resolve(null)
       }
+
+  // --- §8.2 steps 13a–15 -------------------------------------------------------------------
+
+  override fun swapRestore(sessionId: String, promise: Promise) =
+      submit(promise) {
+        check(RestoreGate.isHeld()) { "Restore gate not held" }
+        promise.resolve(service.swap(sessionId, recovery).json)
+      }
+
+  // --- Startup recovery and Cancel restore (v2.5 §2, §7) -------------------------------------
+
+  override fun recoveryBegin(promise: Promise) =
+      submit(promise) {
+        if (!holdsRecovery) {
+          RestoreLock.PROCESS.recover()
+          holdsRecovery = true
+        }
+        promise.resolve(null)
+      }
+
+  override fun recoveryRun(promise: Promise) =
+      submit(promise) {
+        requireRecovery()
+        val json =
+            when (val outcome = recovery.run()) {
+              RestoreRecovery.Outcome.Done -> JSONObject().put("status", "done")
+              is RestoreRecovery.Outcome.Verify ->
+                  JSONObject()
+                      .put("status", "verify")
+                      .put("location", layout.databaseDir.absolutePath)
+                      .put("name", layout.liveDb.name)
+                      .put("attachmentIds", JSONArray(outcome.attachmentIds))
+            }
+        promise.resolve(json.toString())
+      }
+
+  override fun finishVerification(outcome: String, promise: Promise) =
+      submit(promise) {
+        requireRecovery()
+        val result =
+            RestoreRecovery.Verification.values().firstOrNull { it.name.equals(outcome, ignoreCase = true) }
+                ?: throw IllegalArgumentException("Unknown outcome")
+        recovery.finishVerification(result)
+        promise.resolve(null)
+      }
+
+  override fun previousData(promise: Promise) =
+      submit(promise) {
+        requireRecovery()
+        val ids = recovery.previousData()
+        promise.resolve(
+            JSONObject()
+                .put("location", layout.restoreDbDir.absolutePath)
+                .put("name", layout.previousDb.name)
+                .put("attachmentIds", JSONArray(ids))
+                .toString())
+      }
+
+  override fun cancelRestore(promise: Promise) =
+      submit(promise) {
+        requireRecovery()
+        recovery.cancel()
+        promise.resolve(null)
+      }
+
+  override fun recoveryEnd(promise: Promise) =
+      submit(promise) {
+        if (holdsRecovery) {
+          holdsRecovery = false
+          RestoreLock.PROCESS.endRecover()
+        }
+        promise.resolve(null)
+      }
+
+  private fun requireRecovery() {
+    if (!holdsRecovery) throw RestoreException(RestoreException.IN_PROGRESS, "Recovery not started")
+  }
 
   override fun restartProcess(promise: Promise) {
     val activity = reactContext.currentActivity

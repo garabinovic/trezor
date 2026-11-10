@@ -1,5 +1,6 @@
 import { nativeAttachmentPlatform } from '../../src/attachments/platform';
 import type { Attachment, DocumentItem } from '../../src/data/types';
+import { StorageError } from '../../src/storage/errors';
 import { runMigrations } from '../../src/storage/migrations';
 import type { OpenedStorage } from '../../src/storage/openStorage';
 import type { SqlDatabase, SqlValue } from '../../src/storage/sql';
@@ -96,6 +97,15 @@ function newProcess(): () => Promise<OpenedStorage> {
 }
 
 let openStorage: () => Promise<OpenedStorage>;
+
+/** A new process whose startup recovery is `recover` (default: the native one, idle in Jest). */
+function newProcessWith(recover: () => Promise<void>) {
+  let open!: typeof import('../../src/storage/openStorage').openStorage;
+  jest.isolateModules(() => {
+    open = require('../../src/storage/openStorage').openStorage;
+  });
+  return () => open(nativeAttachmentPlatform, recover);
+}
 
 function gate() {
   let release!: () => void;
@@ -313,5 +323,71 @@ describe('one storage per process (F9)', () => {
     expect(later.items).toBe(a.items);
     expect(mockConnections).toHaveLength(2);
     expect(mockConnections[1].closed).toBe(false);
+  });
+});
+
+describe('openStorage restore recovery (Phase 6 spec v2.5 §7)', () => {
+  /** Records what had happened when recovery ran. */
+  function recording(result: () => Promise<void> = async () => undefined) {
+    const seen: { connections: number; gc: number; keep: number }[] = [];
+    const recover = jest.fn(async () => {
+      seen.push({
+        connections: mockConnections.length,
+        gc: fakeAttachments.gcRuns.length,
+        keep: fakeAttachments.keepRuns,
+      });
+      await result();
+    });
+    return { recover, seen };
+  }
+
+  test('recovery runs first: before the database opens or attachments are kept or collected', async () => {
+    mockCreating = true;
+    const { recover, seen } = recording();
+    const storage = await newProcessWith(recover)();
+    expect(seen).toEqual([{ connections: 0, gc: 0, keep: 0 }]);
+    // And then startup continues as before.
+    expect(mockConnections).toHaveLength(1);
+    expect(fakeAttachments.keepRuns).toBe(1);
+    expect(fakeAttachments.gcRuns).toHaveLength(1);
+    expect(storage.initialItems).toEqual([doc]);
+  });
+
+  test('a recovery error stops startup with its code, and Retry runs recovery again first', async () => {
+    let fail = true;
+    const { recover, seen } = recording(async () => {
+      if (fail) {
+        throw new StorageError('RESTORE_VERIFY_RETRY', 'not verified');
+      }
+    });
+    const open = newProcessWith(recover);
+    await expect(open()).rejects.toMatchObject({
+      code: 'RESTORE_VERIFY_RETRY',
+    });
+    expect(mockConnections).toHaveLength(0);
+    expect(fakeAttachments.gcRuns).toHaveLength(0);
+    fail = false;
+    await open();
+    expect(recover).toHaveBeenCalledTimes(2);
+    expect(seen[1]).toEqual({ connections: 0, gc: 0, keep: 0 });
+  });
+
+  test('after a JS reload (a new copy of the module) recovery runs first again', async () => {
+    const first = recording();
+    await newProcessWith(first.recover)();
+    const second = recording();
+    await newProcessWith(second.recover)();
+    expect(second.recover).toHaveBeenCalledTimes(1);
+    // Only the first runtime's connection existed when the second recovered.
+    expect(second.seen).toEqual([{ connections: 1, gc: 1, keep: 0 }]);
+    expect(mockConnections).toHaveLength(2);
+  });
+
+  test('a later root of the same runtime shares the opened storage: no second recovery', async () => {
+    const { recover } = recording();
+    const open = newProcessWith(recover);
+    await open();
+    await open();
+    expect(recover).toHaveBeenCalledTimes(1);
   });
 });

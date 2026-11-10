@@ -2,7 +2,7 @@ import NativeTrezorRestore from '../native/NativeTrezorRestore';
 import type { ArtifactAttachment } from './platform';
 
 /**
- * Why a restore preparation stopped (Phase 6 spec v2.4 §8). The restore codes
+ * Why a restore stopped before the swap (Phase 6 spec v2.4 §8). The restore codes
  * are the spec's; backup-file and password codes come from the restore pass
  * reading the file. `RESTORE_IN_PROGRESS` (attachment work refused under the
  * gate), `RESTORE_CANCELLED` (cancelled while a share was active) and
@@ -13,7 +13,8 @@ export class RestoreError extends Error {
     readonly code: string,
     /**
      * False only when the pre-swap failure path itself failed: the journal and
-     * staging files are kept (`RESTORE_RECOVERY_RETRY`), for Step 4's recovery.
+     * staging files are kept (`RESTORE_RECOVERY_RETRY`) for retryRestoreCleanup()
+     * or, after the process ends, startup recovery.
      */
     readonly cleanedUp: boolean = true,
   ) {
@@ -85,6 +86,10 @@ export interface RestorePlatform {
   purgeCaches(): Promise<void>;
   abortRestore(sessionId: string): Promise<void>;
   releaseGate(): Promise<void>;
+  /** Steps 13a–15: 'verifying', or 'rolledback' after an in-process rollback. */
+  swapRestore(sessionId: string): Promise<string>;
+  /** Step 16 (§8.10): ends the process. */
+  restartProcess(): Promise<void>;
 }
 
 const json = async <T>(text: Promise<string>): Promise<T> =>
@@ -115,4 +120,6 @@ export const nativeRestorePlatform: RestorePlatform = {
   purgeCaches: () => NativeTrezorRestore.purgeCaches(),
   abortRestore: sessionId => NativeTrezorRestore.abortRestore(sessionId),
   releaseGate: () => NativeTrezorRestore.releaseGate(),
+  swapRestore: sessionId => NativeTrezorRestore.swapRestore(sessionId),
+  restartProcess: () => NativeTrezorRestore.restartProcess(),
 };

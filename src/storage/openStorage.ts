@@ -2,6 +2,8 @@ import {
   AttachmentPlatform,
   nativeAttachmentPlatform,
 } from '../attachments/platform';
+import { recoverRestore } from '../backup/recovery';
+import { settleRestore } from '../backup/restore';
 import type { Item } from '../data/types';
 import { openTrezorDatabase } from './database';
 import { ItemRepository } from './ItemRepository';
@@ -57,18 +59,22 @@ let shared: Promise<Initialized> | null = null;
  * are never collected. Native code also runs the cleanup at most once per
  * process.
  *
+ * Before any of that, an interrupted restore is recovered (Phase 6 spec
+ * v2.5 §7): nothing opens, migrates or collects until its journal is gone.
+ *
  * A caller that arrives while initialization runs waits for it; one that
  * arrives later loads its own initial data from the shared connection. If
  * initialization fails, its connection is closed and the next call (Retry)
- * starts afresh.
+ * starts afresh, recovery included.
  */
 export async function openStorage(
   attachments: AttachmentPlatform = nativeAttachmentPlatform,
+  recover: () => Promise<void> = recoverRestore,
 ): Promise<OpenedStorage> {
   let attempt = shared;
   const started = attempt === null;
   if (attempt === null) {
-    const mine = initialize(attachments);
+    const mine = initialize(attachments, recover);
     shared = attempt = mine;
     // Frees the slot for a Retry; a newer attempt is never cleared.
     mine.catch(() => {
@@ -85,7 +91,12 @@ export async function openStorage(
 
 async function initialize(
   attachments: AttachmentPlatform,
+  recover: () => Promise<void>,
 ): Promise<Initialized> {
+  // A restore of this JS runtime finishes first (v2.5 §5.2), then recovery
+  // runs before the database is opened or any attachment file is touched.
+  await settleRestore();
+  await recover();
   const opened = await openTrezorDatabase({
     beforeCreate: async () => {
       await attachments.keepUnreferenced();

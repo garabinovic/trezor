@@ -276,8 +276,8 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
 - `allowBackup="false"`, plus `fullBackupContent` and `dataExtractionRules`
   that exclude every domain from cloud backup and device transfer.
 - Keys, the database and attachments are bound to this device's Keystore.
-  Uninstalling or clearing storage loses the data: restore is not
-  implemented yet (Phase 6; TA §8).
+  Uninstalling or clearing storage loses the data: restoring a backup isn't
+  offered in the app yet (Phase 6 Step 5; TA §8).
 
 **Not protected:**
 - An attacker running code inside the unlocked app process.
@@ -559,10 +559,14 @@ npm start / npm run android  # Metro + install (see README for another port)
   `BackupManifestTest`, `BackupPasswordTest`) and Step 2 (`BackupServiceTest`
   on a real `AttachmentStore` with an in-memory destination that can fail at
   every step, `BackupGateTest`, `BackupFilesTest`).
-- `restore/` (Step 3): `RestoreServiceTest` (real backups from
-  `BackupService` restored on a second "device"), `RestoreJournalTest`,
-  `RestoreFileOpsTest`, `QuarantineTest`, `RestoreGateAndRestartTest`; also
-  `attachments/AttachmentLocationsTest` and `reminders/ScheduleRestoreTest`.
+- `restore/` (Steps 3–4): `RestoreServiceTest` (real backups from
+  `BackupService` restored on a second "device", then swapped and
+  recovered), `RestoreRecoveryTest` (every state-table combination, a failure
+  at every sync, rollback, Cancel restore; `JvmPathTypes` stands in for
+  `lstat`), `RestoreLockTest`, `RestoreJournalTest`, `RestoreFileOpsTest`,
+  `QuarantineTest`, `RestoreGateAndRestartTest`; also
+  `attachments/AttachmentLocationsTest`, `attachments/ModuleTasksTest` and
+  `reminders/ScheduleRestoreTest`.
 - Platform-free logic is extracted from Android classes so it can be tested
   here. Keep that pattern.
 
@@ -590,6 +594,10 @@ checks on the device (logged with `[SELFTEST]`). It reuses the production
   artifact check of TA §8.5, on production `artifact.ts` and `createBackup`.
 - Done again for Phase 6 Step 3 (`restore.check.ts`): the restore export to
   the device key, the settings rewrite and the checks on `S_db`.
+- Done again for Phase 6 Step 4 (`recovery.check.ts`): verification of the
+  restored database (wrong key, damage, ids, missing file) and the read-only
+  check of the previous one. The bridge now honours `readOnly`
+  (`SQLITE_OPEN_READONLY`).
 - **The harness is not in the repository**, so repeating it means rebuilding
   it the same way, with isolated temporary files only. Run its suites in band
   (`jest -i`): the migration check deletes the shared temporary root when it
@@ -606,11 +614,13 @@ Phase 4 has reached the automated level only (Jest, JVM and the one-off
 real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
 or a physical device, and no instrumentation test was run.
 
-Phase 6 Steps 1–3 are at the automated level too (JVM, Jest and the one-off
-real-SQLCipher backup check on macOS). Backup creation and Check backup also
-ran on an isolated Android 16 emulator as a temporary QA release build (TA
-§8.8); not on a physical device. Restore preparation (Step 3) has not run on
-an emulator or device.
+Phase 6 Steps 1–4 are at the automated level too (JVM, Jest and the one-off
+real-SQLCipher checks on macOS). Backup creation and Check backup also ran on
+an isolated Android 16 emulator as a temporary QA release build (TA §8.8);
+not on a physical device. Restore (Steps 3–4: preparation, swap, startup
+recovery, Cancel restore) has not run on an emulator or device. Process-kill
+tests in each phase need a release QA build on a dedicated emulator, with
+approval.
 
 ---
 
@@ -627,7 +637,7 @@ an emulator or device.
 
 **Not implemented** (shown as "Not available yet" or not present):
 - app lock and biometrics;
-- the restore swap, its startup recovery and any backup, Check or restore UI (Phase 6 Steps 4–5; creation, Check and restore preparation exist as APIs only, TA §8);
+- any backup, Check or restore UI (Phase 6 Step 5; creation, Check and restore exist as APIs only, startup recovery runs on every launch, and the error screen offers Cancel restore, TA §8);
 - delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;

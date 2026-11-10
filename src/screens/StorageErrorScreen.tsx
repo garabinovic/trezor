@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { LucideIcon, ShieldAlert, TriangleAlert } from 'lucide-react-native';
-import { EmptyState, Screen, Text } from '../components';
+import { canCancelRestore, cancelRestore } from '../backup/recovery';
+import { Button, Dialog, EmptyState, Screen, Text } from '../components';
 import { StorageError, StorageErrorCode } from '../storage/errors';
 import { gutter, useTheme } from '../theme';
 
@@ -64,18 +65,70 @@ const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
   SNAPSHOT_FAILED: migrationProblem,
 };
 
+/** Cancel restore (Phase 6 spec v2.5 §2); replaceable in tests. */
+export interface RestoreCancel {
+  /** Whether it may be offered; never changes anything. */
+  available: () => Promise<boolean>;
+  /** Checks again, then starts the rollback on the next Retry. */
+  cancel: () => Promise<void>;
+}
+
+const nativeRestoreCancel: RestoreCancel = {
+  available: () => canCancelRestore(),
+  cancel: () => cancelRestore(),
+};
+
 interface StorageErrorScreenProps {
   error: StorageError;
   onRetry: () => void;
+  restoreCancel?: RestoreCancel;
 }
 
-/** Shown when storage can't be opened. Offers retry only; never erases data. */
+/**
+ * Shown when storage can't be opened. Offers retry; never erases data. After
+ * a restore whose verification couldn't finish (`RESTORE_VERIFY_RETRY`), and
+ * only when the data from before the restore checks out, it also offers to
+ * cancel the restore and return to that data, after a confirmation.
+ */
 export function StorageErrorScreen({
   error,
   onRetry,
+  restoreCancel = nativeRestoreCancel,
 }: StorageErrorScreenProps) {
   const { scheme } = useTheme();
   const copy = copyByCode[error.code] ?? generic;
+  const [cancelOffered, setCancelOffered] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    setCancelOffered(false);
+    if (error.code !== 'RESTORE_VERIFY_RETRY') {
+      return;
+    }
+    let current = true;
+    restoreCancel.available().then(
+      offered => {
+        if (current) {
+          setCancelOffered(offered);
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [error, restoreCancel]);
+
+  const confirmCancel = () => {
+    setConfirming(false);
+    setCancelOffered(false);
+    // Either way the next recovery run decides: a rollback, or this screen again.
+    restoreCancel
+      .cancel()
+      .catch(() => console.warn('[restore] cancel not possible'))
+      .finally(onRetry);
+  };
+
   return (
     <Screen>
       <StatusBar
@@ -89,10 +142,26 @@ export function StorageErrorScreen({
           actionLabel="Try again"
           onActionPress={onRetry}
         />
+        {cancelOffered && (
+          <Button
+            label="Cancel restore and return to previous data"
+            onPress={() => setConfirming(true)}
+            variant="ghost"
+          />
+        )}
         <Text variant="caption" color="textTertiary" align="center">
           Error code: {error.code}
         </Text>
       </View>
+      <Dialog
+        visible={confirming}
+        title="Cancel restore?"
+        message="The restored data will be discarded and Trezor returns to the data you had before the restore."
+        confirmLabel="Return to previous data"
+        destructive
+        onConfirm={confirmCancel}
+        onCancel={() => setConfirming(false)}
+      />
     </Screen>
   );
 }

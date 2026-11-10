@@ -23,6 +23,12 @@ export type StorageErrorCode =
   | 'NEWER_SCHEMA'
   | 'MIGRATION_FAILED'
   | 'WRITE_FAILED'
+  // Restore recovery at startup (Phase 6 spec v2.5 §10)
+  | 'RESTORE_STATE_UNKNOWN'
+  | 'RESTORE_RECOVERY_RETRY'
+  | 'RESTORE_VERIFY_RETRY'
+  | 'RESTORE_UNAVAILABLE'
+  | 'RESTORE_IN_PROGRESS'
   | 'UNKNOWN';
 
 const knownCodes = new Set<string>([
@@ -44,6 +50,11 @@ const knownCodes = new Set<string>([
   'NEWER_SCHEMA',
   'MIGRATION_FAILED',
   'WRITE_FAILED',
+  'RESTORE_STATE_UNKNOWN',
+  'RESTORE_RECOVERY_RETRY',
+  'RESTORE_VERIFY_RETRY',
+  'RESTORE_UNAVAILABLE',
+  'RESTORE_IN_PROGRESS',
   'UNKNOWN',
 ]);
 

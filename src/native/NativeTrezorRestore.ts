@@ -2,13 +2,11 @@ import type { TurboModule } from 'react-native';
 import { TurboModuleRegistry } from 'react-native';
 
 /**
- * Restore preparation, native half (Phase 6 spec v2.4 §8.1–8.4, §8.6–8.11;
+ * Restore and its recovery, native half (Phase 6 spec v2.4 §8, v2.5;
  * android/app/src/main/java/com/trezor/app/restore/TrezorRestoreModule.kt).
- * SQLCipher work stays in JS (src/backup/restore.ts). Structured results are
- * JSON strings; errors reject with a code (INSUFFICIENT_SPACE carries JSON).
- *
- * Step 3: no method replaces live data. The swap, recovery and the call to
- * restartProcess are Step 4.
+ * SQLCipher work stays in JS (src/backup/restore.ts, src/backup/recovery.ts).
+ * Structured results are JSON strings; errors reject with a code
+ * (INSUFFICIENT_SPACE carries JSON).
  */
 export interface Spec extends TurboModule {
   /** §8.1: JSON { status: 'ready' | 'notOffered' | 'refused', code? }. */
@@ -39,8 +37,30 @@ export interface Spec extends TurboModule {
   /** The pre-swap failure path. */
   abortRestore(sessionId: string): Promise<void>;
   releaseGate(): Promise<void>;
-  /** §8.10, for Step 4: ends the process (relaunching only from the foreground). */
+  /**
+   * Steps 13a–15 after the live connection was closed: 'verifying', or
+   * 'rolledback' when a failed rename was rolled back in this process.
+   */
+  swapRestore(sessionId: string): Promise<string>;
+  /** §8.10: ends the process (relaunching only from the foreground). */
   restartProcess(): Promise<void>;
+  /** v2.5 §5: takes the recovery side of the restore lock, else RESTORE_IN_PROGRESS. */
+  recoveryBegin(): Promise<void>;
+  /**
+   * v2.5 §7: runs recovery rows until startup may continue, JSON { status:
+   * 'done' } or { status: 'verify', location, name, attachmentIds }.
+   */
+  recoveryRun(): Promise<string>;
+  /** 'pass' | 'fail' | 'retry' | 'unavailable' (v2.5 §1.3). */
+  finishVerification(outcome: string): Promise<void>;
+  /**
+   * v2.5 §2.1: JSON { location, name, attachmentIds } of the previous data,
+   * or RESTORE_CANCEL_UNAVAILABLE.
+   */
+  previousData(): Promise<string>;
+  /** v2.5 §2.2: writes `rollingback`; the next recovery run rolls back. */
+  cancelRestore(): Promise<void>;
+  recoveryEnd(): Promise<void>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('TrezorRestore');

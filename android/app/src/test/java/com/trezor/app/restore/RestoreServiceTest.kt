@@ -50,6 +50,8 @@ class RestoreServiceTest {
   private val events = mutableListOf<String>()
   private var rearmFailures = 0
   private lateinit var schedule: ScheduleRestore
+  private lateinit var ops: RestoreFileOps
+  private val lock = RestoreLock(gateHeld = { false })
 
   private fun id(n: Int) = "01a1a0dd-991f-783c-9531-3fab9ef4%04d".format(n)
 
@@ -59,7 +61,7 @@ class RestoreServiceTest {
     val nb = folder.newFolder("target", "no_backup")
     layout = RestoreLayout(db, nb)
     layout.liveDb.writeBytes(liveDbBytes)
-    val ops =
+    ops =
         RestoreFileOps(
             layout,
             syncDirectory = { if (failSync(it)) throw java.io.IOException("sync failed") },
@@ -71,6 +73,7 @@ class RestoreServiceTest {
             attachmentsKey = { targetKey.copyOf() },
             freeBytes = { free },
             deviceOf = { 1L },
+            lock = lock,
         )
     layout.schedule.parentFile!!.mkdirs()
     layout.schedule.writeBytes(byteArrayOf(1, 2, 3, 4))
@@ -367,6 +370,90 @@ class RestoreServiceTest {
     // Retrying in the same session resumes and finishes.
     failSync = { false }
     service.abort(begun.sessionId, schedule)
+    assertNothingLeft()
+  }
+
+  // --- Step 4: the restore lock and the swap (spec v2.5 §5, §6) ----------------------------------
+
+  private fun refusedInProgress(action: () -> Unit) {
+    try {
+      action()
+      fail("not refused")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.IN_PROGRESS, e.code)
+    }
+  }
+
+  /** H1: no recovery while a session may own staging, and no session while recovery runs. */
+  @Test
+  fun aSessionHoldsTheRestoreLockUntilItsCleanupSucceeds() {
+    val b = backup(1)
+    lock.recover()
+    refusedInProgress { begin(b) }
+    assertFalse(layout.restoreDir.exists())
+    lock.endRecover()
+
+    val begun = begin(b)
+    refusedInProgress { lock.recover() }
+    service.stage(begun.sessionId, null, null).sqlcipherKey.fill(0)
+    jsStep6(begun.sessionId)
+    // A failed cleanup keeps the session, and the lock with it.
+    failSync = { it == layout.databaseDir }
+    try {
+      service.abort(begun.sessionId, schedule)
+      fail("cleanup failure hidden")
+    } catch (e: RestoreException) {
+      assertEquals(RestoreException.RECOVERY_RETRY, e.code)
+    }
+    refusedInProgress { lock.recover() }
+    failSync = { false }
+    service.abort(begun.sessionId, schedule)
+    lock.recover()
+    lock.endRecover()
+
+    // Module shutdown releases it too (after the step in flight, v2.5 §5.3).
+    begin(b)
+    refusedInProgress { lock.recover() }
+    service.release()
+    lock.recover()
+    lock.endRecover()
+    // A begin that fails releases it at once.
+    try {
+      begin(b, "wrong password here")
+      fail("wrong password accepted")
+    } catch (e: BackupPassword.PasswordException) {
+      // expected
+    } catch (e: BackupFormatException) {
+      // expected
+    }
+    lock.recover()
+    lock.endRecover()
+  }
+
+  /** Steps 1–12 on real staging, then 13a–15 and startup recovery with a passing verification. */
+  @Test
+  fun aPreparedRestoreSwapsAndRecoveryFinishesIt() {
+    val b = backup(2)
+    liveAttachment(1)
+    val begun = begin(b)
+    service.stage(begun.sessionId, b.backupId, b.trailer).sqlcipherKey.fill(0)
+    jsStep6(begun.sessionId)
+    service.preserveRetained(begun.sessionId)
+    service.saveAndClearSchedule(begun.sessionId, schedule)
+    val recovery = RestoreRecovery(layout, ops, JvmPathTypes(), schedule, lock)
+    assertEquals(RestoreJournal.Phase.VERIFYING, service.swap(begun.sessionId, recovery))
+    // The session keeps the lock until the process ends.
+    refusedInProgress { lock.recover() }
+    service.release()
+
+    lock.recover()
+    val verify = recovery.run() as RestoreRecovery.Outcome.Verify
+    assertEquals(b.rows.map { it.id }.sorted(), verify.attachmentIds)
+    recovery.finishVerification(RestoreRecovery.Verification.PASS)
+    assertEquals(RestoreRecovery.Outcome.Done, recovery.run())
+    lock.endRecover()
+    assertArrayEquals(byteArrayOf(7, 7, 7), layout.liveDb.readBytes())
+    assertEquals(b.rows.map { "${it.id}.tza" }.sorted(), liveRoot.list()!!.sorted())
     assertNothingLeft()
   }
 
