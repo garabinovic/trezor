@@ -437,4 +437,11 @@ describe('settings', () => {
     await pressLabel(app, 'Settings');
     expect(isSelected(app, 'Dark')).toBe(true);
   });
+
+  test('About shows the installed build’s version from the native side', async () => {
+    await launch();
+    await pressLabel(app, 'Settings');
+    expect(hasText(app, '1.0.0 (2)')).toBe(true);
+    expect(texts(app).join(' ')).not.toContain('preview');
+  });
 });

@@ -172,6 +172,9 @@ class TrezorBackupModule(private val reactContext: ReactApplicationContext) :
     incompleteNotice = ""
   }
 
+  override fun appVersion(): String =
+      JSONObject().put("versionName", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).toString()
+
   // --- Pickers ---------------------------------------------------------------------------
 
   private fun launch(activity: Activity, request: Int, intent: Intent, promise: Promise, onResult: (Uri?) -> Unit) {

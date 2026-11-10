@@ -33,6 +33,8 @@ export interface Spec extends TurboModule {
   finishCheck(checkId: string): Promise<void>;
   /** The name of a partial backup a previous run couldn't delete (once), or ''. */
   takeIncompleteNotice(): Promise<string>;
+  /** The app's version, as backups record it. JSON: { versionName, versionCode }. */
+  appVersion(): string;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('TrezorBackup');

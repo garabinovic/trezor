@@ -1,8 +1,8 @@
 # Trezor — Current status (Android MVP)
 
 State described: `main` at `22a06ed` plus the documentation commit that adds
-this file (2026-11-10). Check it with `git log --oneline -3`. This is the one
-place for the current status; [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)
+this file and the release-signing commit (2026-11-10). Check it with
+`git log --oneline -3`. This is the one place for the current status; [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md)
 (TA) has the detail and the evidence.
 
 **Platform: Android only.** The iOS project exists (`ios/`) but has no native
@@ -12,12 +12,12 @@ modules, so none of the features below works on iOS (see "Not implemented").
 
 Automated at `22a06ed`:
 
-| Suite                        | Result                                       |
-| ---------------------------- | -------------------------------------------- |
-| Jest                         | 510/510 in 34 suites                         |
-| Android JVM                  | 317/317 (`./gradlew :app:testDebugUnitTest`) |
-| TypeScript, ESLint, Prettier | clean                                        |
-| Debug and release builds     | both succeed                                 |
+| Suite                        | Result                                           |
+| ---------------------------- | ------------------------------------------------ |
+| Jest                         | 510/510 in 34 suites (511 with the version test) |
+| Android JVM                  | 317/317 (`./gradlew :app:testDebugUnitTest`)     |
+| TypeScript, ESLint, Prettier | clean                                            |
+| Debug and release builds     | both succeed                                     |
 
 Emulator runs used release builds on dedicated, disposable AVDs (API 36),
 never a shared emulator.
@@ -96,18 +96,55 @@ never a shared emulator.
 
 ## Release findings (audit of `22a06ed`)
 
-| #   | Severity    | Finding                                                                                                                                                     | Evidence                                                                                                                                                                                                                                                                                                                      | Fix needs                                                                          |
-| --- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| 1   | **Blocker** | Release builds are signed with the public React Native debug key                                                                                            | `android/app/build.gradle` release `signingConfig signingConfigs.debug`; the release APK's certificate is `CN=Android Debug` (SHA-256 `FA:C6:17:…:3B:9C`, the same as `android/app/debug.keystore`). The `TREZOR_RELEASE_*` properties in the developer's `~/.gradle/gradle.properties` are not referenced by any Gradle file | Code (Gradle); see "Next recommended work"                                         |
-| 2   | High        | Switching to the release key changes the signature: an existing install signed with another key can't be updated in place, and uninstalling erases its data | Android signature rules; the signer of the A53's current install is _(unverified)_                                                                                                                                                                                                                                            | Process: make a verified backup on the device first, then restore after installing |
-| 3   | High        | No physical-device run of Phases 4–7 (attachments, backup and restore, App Lock, Delete all data)                                                           | This file, TA §8.8, §15.5, §16.5                                                                                                                                                                                                                                                                                              | Validation, with approval                                                          |
-| 4   | Medium      | R8/minification is off in release (`enableProguardInReleaseBuilds = false`)                                                                                 | `android/app/build.gradle`; keep rules exist only for BouncyCastle                                                                                                                                                                                                                                                            | Accept, or enable and re-test the release build                                    |
-| 5   | Medium      | Version metadata is inconsistent: `versionCode 1`, `versionName "1.0"`, while Settings shows "0.1.0 (preview)" (hard-coded)                                 | `android/app/build.gradle`, `src/screens/SettingsScreen.tsx`                                                                                                                                                                                                                                                                  | Code (small)                                                                       |
-| 6   | Medium      | OpenSSL 3.3.2 comes from a third-party Maven artifact pulled by op-sqlite; no Gradle dependency verification                                                | TA §11, §12                                                                                                                                                                                                                                                                                                                   | Accept or add verification                                                         |
-| 7   | Medium      | op-sqlite 19.0.3 is patched (`patches/`, `postinstall`); upgrading op-sqlite must re-check the patch                                                        | `patches/@op-engineering+op-sqlite+19.0.3.patch`                                                                                                                                                                                                                                                                              | Process                                                                            |
-| 8   | Medium      | The validation gaps above (biometrics, API levels, providers, Argon2 on a device)                                                                           | This file                                                                                                                                                                                                                                                                                                                     | Validation                                                                         |
-| 9   | Low         | Settings "About" says "Your data never leaves this device", but backups, Save a copy and Share leave it when the user chooses                               | `src/screens/SettingsScreen.tsx`                                                                                                                                                                                                                                                                                              | Copy change                                                                        |
-| 10  | Low         | `ReminderRestoreReceiver` is exported (system broadcasts); it only re-arms existing alarms, so a spoofed broadcast is harmless                              | `AndroidManifest.xml`, `ReminderReceivers.kt`                                                                                                                                                                                                                                                                                 | None                                                                               |
+| #   | Severity              | Finding                                                                                                                                                     | Evidence                                                                                                                                                                        | Fix needs                                                                          |
+| --- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 1   | ~~Blocker~~ **Fixed** | Release builds were signed with the public React Native debug key                                                                                           | Fixed: release builds use the private release key (see "Release signing" below)                                                                                                 | Done                                                                               |
+| 2   | High                  | Switching to the release key changes the signature: an existing install signed with another key can't be updated in place, and uninstalling erases its data | Android signature rules; the signer of the A53's current install is _(unverified)_: the A53 wasn't connected for the read-only check. Its Phase 3 build has no Backup (Phase 6) | Process: make a verified backup on the device first, then restore after installing |
+| 3   | High                  | No physical-device run of Phases 4–7 (attachments, backup and restore, App Lock, Delete all data)                                                           | This file, TA §8.8, §15.5, §16.5                                                                                                                                                | Validation, with approval                                                          |
+| 4   | Medium                | R8/minification is off in release (`enableProguardInReleaseBuilds = false`)                                                                                 | `android/app/build.gradle`; keep rules exist only for BouncyCastle                                                                                                              | Accept, or enable and re-test the release build                                    |
+| 5   | ~~Medium~~ **Fixed**  | Version metadata was inconsistent (`versionCode 1`, `versionName "1.0"`, Settings hard-coded "0.1.0 (preview)")                                             | Fixed: `versionCode 2`, `versionName "1.0.0"`; Settings → About shows the installed build's `BuildConfig` version, "1.0.0 (2)"                                                  | Done                                                                               |
+| 6   | Medium                | OpenSSL 3.3.2 comes from a third-party Maven artifact pulled by op-sqlite; no Gradle dependency verification                                                | TA §11, §12                                                                                                                                                                     | Accept or add verification                                                         |
+| 7   | Medium                | op-sqlite 19.0.3 is patched (`patches/`, `postinstall`); upgrading op-sqlite must re-check the patch                                                        | `patches/@op-engineering+op-sqlite+19.0.3.patch`                                                                                                                                | Process                                                                            |
+| 8   | Medium                | The validation gaps above (biometrics, API levels, providers, Argon2 on a device)                                                                           | This file                                                                                                                                                                       | Validation                                                                         |
+| 9   | Low                   | Settings "About" says "Your data never leaves this device", but backups, Save a copy and Share leave it when the user chooses                               | `src/screens/SettingsScreen.tsx`                                                                                                                                                | Copy change                                                                        |
+| 10  | Low                   | `ReminderRestoreReceiver` is exported (system broadcasts); it only re-arms existing alarms, so a spoofed broadcast is harmless                              | `AndroidManifest.xml`, `ReminderReceivers.kt`                                                                                                                                   | None                                                                               |
+
+## Release signing (2026-11-10)
+
+- **Configuration** (`android/app/build.gradle`):
+  - release builds are signed only with the private release key;
+  - it comes from four Gradle properties, normally in
+    `~/.gradle/gradle.properties` and never in the repository:
+    `TREZOR_RELEASE_STORE_FILE` (an absolute path),
+    `TREZOR_RELEASE_STORE_PASSWORD`, `TREZOR_RELEASE_KEY_ALIAS` and
+    `TREZOR_RELEASE_KEY_PASSWORD`;
+  - debug builds keep `signingConfigs.debug` and don't need them.
+- **Fail-closed:** if a property is missing or the keystore file doesn't
+  exist, `preReleaseBuild` fails, so `assembleRelease` and `bundleRelease`
+  stop with a message that names only the missing property. Without a signing
+  config, `installRelease` doesn't exist. There is no fallback to the debug
+  key.
+- **Release certificate**, verified with `apksigner verify --print-certs` on
+  the built APK:
+
+  | Field   | Value                                                                                             |
+  | ------- | ------------------------------------------------------------------------------------------------- |
+  | Subject | `CN=Trezor, O=Trezor`                                                                             |
+  | SHA-256 | `19:A3:10:6D:2C:BE:26:9E:A5:59:47:88:1A:24:B9:D8:98:D6:14:B9:C7:B6:D1:BF:74:DB:5D:53:A5:59:F2:F7` |
+  | Valid   | 2026-11-05 09:33:10 UTC to 2054-03-23 09:33:10 UTC                                                |
+  | Schemes | APK Signature Scheme v2 (minSdk 24 needs no v1)                                                   |
+
+  This is not the public debug certificate (`CN=Android Debug`, SHA-256
+  `FA:C6:17:…:3B:9C`), which debug builds still use.
+
+- **Version:** `versionCode 2`, `versionName "1.0.0"`. Settings → About
+  shows the installed build's version from `BuildConfig`, "1.0.0 (2)".
+- **Samsung A53:** the read-only certificate check was _not done_: no device
+  was connected (`adb devices -l` was empty). Its signer is still
+  _(unverified)_. Nothing was installed, uninstalled, updated or launched on
+  it, and none of its app data was read or changed.
+- **Key loss:** losing the keystore file or its passwords blocks updates of
+  installs signed with it. Keep an offline backup of both.
 
 Checked and fine:
 
@@ -126,21 +163,18 @@ Checked and fine:
 
 ## Verdict
 
-**Not ready for a public release: one blocker (release signing, #1).** Once
-release signing is configured, with a migration plan for existing installs
-(#2), it is **ready for final release preparation with explicitly accepted
-limitations**. Physical-device validation (#3) should be done before any
-public release.
+**Release signing (#1) is fixed; no blocker remains in the code.** With a
+migration plan for existing installs (#2), it is **ready for final release
+preparation with explicitly accepted limitations**. Physical-device
+validation (#3) should be done before any public release.
 
 ## Next recommended work
 
-1. **Release preparation:**
-   - wire the release signing config to the `TREZOR_RELEASE_*` properties
-     (never commit the keystore or passwords);
-   - set the version name and code, and align the Settings version text;
-   - decide on R8;
-   - rebuild and run the release checks.
+1. **Release preparation:** decide on R8, then rebuild and run the release
+   checks. Signing and version are done.
 2. **Physical-device validation**, only with explicit approval:
+   - check the A53's installed signer read-only (`dumpsys package`,
+     `pm path`, pull the APK, `apksigner`);
    - make a verified backup on the A53 first;
    - then attachments, backup, Check and restore, App Lock with biometrics,
      Delete all data, and the UI issues listed above.

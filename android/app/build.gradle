@@ -72,6 +72,21 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+/**
+ * Release signing: the private release key, from Gradle properties (normally
+ * ~/.gradle/gradle.properties, or ORG_GRADLE_PROJECT_<name> environment variables).
+ * Never in the repository. Without them, release tasks fail (preReleaseBuild below);
+ * there is no fallback to the debug key. Debug builds don't need them.
+ */
+def releaseSigningProperties = [
+    'TREZOR_RELEASE_STORE_FILE',
+    'TREZOR_RELEASE_STORE_PASSWORD',
+    'TREZOR_RELEASE_KEY_ALIAS',
+    'TREZOR_RELEASE_KEY_PASSWORD',
+]
+def missingReleaseSigning = releaseSigningProperties.findAll { !findProperty(it) }
+def releaseStoreFile = missingReleaseSigning.isEmpty() ? file(findProperty('TREZOR_RELEASE_STORE_FILE')) : null
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -82,8 +97,8 @@ android {
         applicationId "com.trezor.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -93,17 +108,41 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (releaseStoreFile != null) {
+            release {
+                storeFile releaseStoreFile
+                storePassword findProperty('TREZOR_RELEASE_STORE_PASSWORD')
+                keyAlias findProperty('TREZOR_RELEASE_KEY_ALIAS')
+                keyPassword findProperty('TREZOR_RELEASE_KEY_PASSWORD')
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Only the private release key; null when it isn't configured, and then
+            // preReleaseBuild fails rather than producing an unsigned APK.
+            signingConfig releaseStoreFile != null ? signingConfigs.release : null
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+// Every release packaging task (assemble, bundle, install) runs preReleaseBuild first.
+// The message names the missing properties, never their values.
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    doFirst {
+        if (!missingReleaseSigning.isEmpty()) {
+            throw new GradleException(
+                "Release signing is not configured: set ${missingReleaseSigning.join(', ')} " +
+                "(e.g. in ~/.gradle/gradle.properties). Release builds are never signed with the debug key.")
+        }
+        if (!releaseStoreFile.isFile()) {
+            throw new GradleException(
+                "Release signing: the keystore set in TREZOR_RELEASE_STORE_FILE does not exist.")
         }
     }
 }

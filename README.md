@@ -79,10 +79,12 @@ npm run android           # debug build, install and launch
 cd android && ./gradlew :app:assembleRelease    # android/app/build/outputs/apk/release/app-release.apk
 ```
 
-⚠️ The release build is currently **signed with the debug keystore**
-(`android/app/build.gradle`). It is not publishable until release signing is
-configured (docs/STATUS.md, finding 1). Never commit signing keys or
-passwords.
+Release builds are signed with the private release key, configured through
+the Gradle properties `TREZOR_RELEASE_STORE_FILE` (an absolute path),
+`TREZOR_RELEASE_STORE_PASSWORD`, `TREZOR_RELEASE_KEY_ALIAS` and
+`TREZOR_RELEASE_KEY_PASSWORD`, normally in `~/.gradle/gradle.properties`.
+Without them, release tasks fail; they never fall back to the debug key.
+Debug builds don't need them. Never commit signing keys or passwords.
 
 ## Checks
 

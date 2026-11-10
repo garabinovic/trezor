@@ -24,6 +24,7 @@ import {
   ValueRow,
 } from '../components';
 import { useItems } from '../data';
+import NativeTrezorBackup from '../native/NativeTrezorBackup';
 import { authErrorMessage } from '../lock/appLock';
 import { useAppLock } from '../lock/AppLockProvider';
 import { RootStackParamList } from '../navigation/types';
@@ -46,6 +47,14 @@ const themeOptions: ChipOption<ThemePreference>[] = [
   { value: 'dark', label: 'Dark' },
 ];
 
+/** The installed build's version (Android versionName and versionCode). */
+function appVersion(): string {
+  const { versionName, versionCode } = JSON.parse(
+    NativeTrezorBackup.appVersion(),
+  ) as { versionName: string; versionCode: number };
+  return `${versionName} (${versionCode})`;
+}
+
 export function SettingsScreen({ navigation }: Props) {
   const { colors, scheme } = useTheme();
   const {
@@ -60,6 +69,7 @@ export function SettingsScreen({ navigation }: Props) {
   const { preference, setPreference } = useThemePreference();
   const { sampleDataEnabled, setSampleDataEnabled } = useItems();
   const appLock = useAppLock();
+  const [version] = useState(appVersion);
   const [lockMessage, setLockMessage] = useState<string | null>(null);
   const [lockBusy, setLockBusy] = useState(false);
   const lockAvailable = appLock.state.availability === 'available';
@@ -280,7 +290,7 @@ export function SettingsScreen({ navigation }: Props) {
         )}
 
         <Section title="About" grouped>
-          <ValueRow label="Version" value="0.1.0 (preview)" />
+          <ValueRow label="Version" value={version} />
           <ListItem
             icon={ShieldCheck}
             title="Private by design"

@@ -1387,7 +1387,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | op-sqlite small maintainer base, frequent majors | Exact pin; driver isolated behind `SqlDatabase` |
 | Third-party OpenSSL Maven artifact | Supply-chain dependency. **Not yet done:** Gradle dependency verification (checksums) |
 | APK +20 MB universal (+6.6 MB per arm64 device) | Ship AAB / ABI splits before release |
-| Release still signed with the template debug key; R8 off | **Release blocker** (STATUS.md, finding 1). `android/app/build.gradle` signs release with `signingConfigs.debug`; the developer's `TREZOR_RELEASE_*` Gradle properties exist outside the repository but are not referenced. Never commit the keystore or its passwords (`keystore.properties` is git-ignored) |
+| Release signing; R8 off | **Done (signing):** release builds are signed with the private release key from the `TREZOR_RELEASE_*` Gradle properties, outside the repository; without them every release task fails at `preReleaseBuild`, with no fallback to the debug key (STATUS.md, finding 1). Never commit the keystore or its passwords (`*.p12`, `keystore.properties` are git-ignored). R8 is still off (finding 4) |
 | Sample-data module bundled (unreachable) in release | Low risk; could be excluded with a Metro resolver rule later |
 | Only tested on one emulator (API 37). Not tested on API 24–33 or real devices | Test on low-API and StrongBox devices before release |
 | Opening view uses the system theme; with a forced dark theme on a light system, startup shows a light background for a moment | Cosmetic. The native launch window can't know the in-app preference |

@@ -33,6 +33,8 @@ jest.mock('./src/native/NativeTrezorBackup', () => ({
       get: (_, name) =>
         name === '__esModule'
           ? undefined
+          : name === 'appVersion'
+          ? jest.fn(() => '{"versionName":"1.0.0","versionCode":2}')
           : jest.fn(async () => {
               throw Object.assign(new Error('native backup in Jest'), {
                 code: 'BACKUP_FAILED',
