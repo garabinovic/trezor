@@ -11,8 +11,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useReminders } from '../reminders/RemindersProvider';
 import { useTheme } from '../theme';
 import { AttachmentViewerScreen } from '../screens/AttachmentViewerScreen';
+import { BackupScreen } from '../screens/BackupScreen';
+import { CheckBackupScreen } from '../screens/CheckBackupScreen';
 import { ItemDetailScreen } from '../screens/ItemDetailScreen';
 import { ItemEditorScreen } from '../screens/ItemEditorScreen';
+import { RestoreScreen } from '../screens/RestoreScreen';
 import { SearchScreen } from '../screens/SearchScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { TabNavigator } from './TabNavigator';
@@ -99,6 +102,9 @@ export function RootNavigator() {
         />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Backup" component={BackupScreen} />
+        <Stack.Screen name="CheckBackup" component={CheckBackupScreen} />
+        <Stack.Screen name="Restore" component={RestoreScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

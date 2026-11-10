@@ -9,6 +9,34 @@ import { StorageError, StorageErrorCode } from '../../src/storage/errors';
 import { ThemeProvider } from '../../src/theme';
 import { settle } from '../../test-utils/appHarness';
 
+const mockPreflight = jest.fn();
+const mockRestoreBackup = jest.fn();
+const mockPickBackupFile = jest.fn();
+jest.mock('../../src/backup/restorePlatform', () => {
+  const actual = jest.requireActual('../../src/backup/restorePlatform');
+  return {
+    ...actual,
+    nativeRestorePlatform: {
+      ...actual.nativeRestorePlatform,
+      preflight: (fromErrorScreen: boolean) => mockPreflight(fromErrorScreen),
+    },
+  };
+});
+jest.mock('../../src/backup/restore', () => ({
+  ...jest.requireActual('../../src/backup/restore'),
+  restoreBackup: (o: unknown) => mockRestoreBackup(o),
+}));
+jest.mock('../../src/backup/platform', () => {
+  const actual = jest.requireActual('../../src/backup/platform');
+  return {
+    ...actual,
+    nativeBackupPlatform: {
+      ...actual.nativeBackupPlatform,
+      pickBackupFile: () => mockPickBackupFile(),
+    },
+  };
+});
+
 // The storage-error screen's Cancel restore action (Phase 6 spec v2.5 §2.3,
 // decision D2): only for RESTORE_VERIFY_RETRY, only when available, and only
 // after a confirmation. Retry stays.
@@ -185,4 +213,79 @@ test('a failed cancel leaves nothing disabled, checks availability again and doe
   expect(restoreCancel.cancel).toHaveBeenCalledTimes(2);
   expect(screen.onRetry).toHaveBeenCalledTimes(1);
   warn.mockRestore();
+});
+
+// Phase 6 Step 5, spec v2.4 §8.1: the restore entry depends on the code.
+const RESTORE = 'Restore from a backup';
+const screenText = (screen: ReturnType<typeof render>) =>
+  JSON.stringify(screen.renderer.toJSON());
+
+test('Restore from a backup is offered for unreadable data only; key errors say it is unavailable', async () => {
+  for (const code of [
+    'DATABASE_UNREADABLE',
+    'DATABASE_CORRUPT',
+    'MIGRATION_FAILED',
+    'SNAPSHOT_FAILED',
+  ] as StorageErrorCode[]) {
+    const screen = render(code, cancel(false));
+    await settle();
+    expect([code, screen.buttons(RESTORE).length]).toEqual([code, 1]);
+    expect(screen.buttons('Try again')).toHaveLength(1);
+  }
+  for (const code of [
+    'KEY_MISSING_FOR_DATABASE',
+    'MASTER_KEY_MISSING',
+    'UNWRAP_FAILED',
+    'KEY_INVALIDATED',
+    'KEY_NOT_FOUND',
+    'INVALID_KEY_FORMAT',
+  ] as StorageErrorCode[]) {
+    const screen = render(code, cancel(false));
+    await settle();
+    expect([code, screen.buttons(RESTORE).length]).toEqual([code, 0]);
+    expect(screenText(screen)).toContain('RESTORE_UNAVAILABLE');
+  }
+  for (const code of [
+    'NEWER_SCHEMA',
+    'STORAGE_ERROR',
+    'WRITE_FAILED',
+    'RESTORE_STATE_UNKNOWN',
+    'RESTORE_VERIFY_RETRY',
+  ] as StorageErrorCode[]) {
+    const screen = render(code, cancel(false));
+    await settle();
+    expect([code, screen.buttons(RESTORE).length]).toEqual([code, 0]);
+  }
+});
+
+test('restoring from the error screen runs without a live database, and Cancel goes back', async () => {
+  mockPreflight.mockResolvedValue({ status: 'ready' });
+  mockPickBackupFile.mockResolvedValue('content://backups/one.tzbk');
+  mockRestoreBackup.mockReturnValue(new Promise(() => undefined));
+  const screen = render('DATABASE_CORRUPT', cancel(false));
+  await settle();
+  await screen.press(RESTORE);
+  expect(mockPreflight).toHaveBeenCalledWith(true);
+  // The Retry screen is replaced by the restore form.
+  expect(screen.buttons('Try again')).toHaveLength(0);
+  await screen.press('Cancel');
+  expect(screen.buttons(RESTORE)).toHaveLength(1);
+
+  await screen.press(RESTORE);
+  await screen.press('Choose backup file');
+  const input = screen.renderer.root.find(
+    (n: ReactTestInstance) =>
+      n.props.accessibilityLabel === 'Backup password' &&
+      typeof n.props.onChangeText === 'function',
+  );
+  await ReactTestRenderer.act(async () =>
+    input.props.onChangeText('correct horse battery'),
+  );
+  await screen.press('Restore');
+  await screen.press('Replace');
+  const options = mockRestoreBackup.mock.calls[0][0];
+  expect(options.database).toBeUndefined();
+  expect(options.firedOnceIds).toBeUndefined();
+  expect(options.uri).toBe('content://backups/one.tzbk');
+  expect(screenText(screen)).toContain('Restoring…');
 });

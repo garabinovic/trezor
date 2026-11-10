@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { LucideIcon, ShieldAlert, TriangleAlert } from 'lucide-react-native';
 import { canCancelRestore, cancelRestore } from '../backup/recovery';
+import { restoreEntryFor } from '../backup/restore';
 import { Button, Dialog, EmptyState, Screen, Text } from '../components';
 import { StorageError, StorageErrorCode } from '../storage/errors';
 import { gutter, useTheme } from '../theme';
+import { RestoreFlow } from './backup/RestoreFlow';
 
 interface ErrorCopy {
   icon: LucideIcon;
@@ -63,6 +65,35 @@ const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
   DATABASE_CORRUPT: unreadable,
   MIGRATION_FAILED: migrationProblem,
   SNAPSHOT_FAILED: migrationProblem,
+  RESTORE_VERIFY_RETRY: {
+    icon: TriangleAlert,
+    title: 'The restore isn’t finished yet',
+    message:
+      'Trezor couldn’t check the restored data just now. Your data from before the restore is kept until it can.',
+  },
+  RESTORE_RECOVERY_RETRY: {
+    icon: TriangleAlert,
+    title: 'The restore isn’t finished yet',
+    message:
+      'A step of the restore couldn’t be completed. Nothing has been lost; trying again continues where it stopped.',
+  },
+  RESTORE_STATE_UNKNOWN: {
+    icon: ShieldAlert,
+    title: 'An unfinished restore needs attention',
+    message:
+      'Trezor found restore files it can’t account for. To protect your data, nothing is changed automatically.',
+  },
+  RESTORE_UNAVAILABLE: {
+    icon: ShieldAlert,
+    title: 'Trezor can’t finish the restore',
+    message:
+      'The encryption key on this device is missing or no longer valid. All restore files are kept.',
+  },
+  RESTORE_IN_PROGRESS: {
+    icon: TriangleAlert,
+    title: 'A restore is still running',
+    message: 'Wait a moment, then try again.',
+  },
 };
 
 /** Cancel restore (Phase 6 spec v2.5 §2); replaceable in tests. */
@@ -108,6 +139,8 @@ export function StorageErrorScreen({
   /** Bumped after a failed cancel, to check availability again. */
   const [recheck, setRecheck] = useState(0);
   const busy = checking || cancelling;
+  const entry = restoreEntryFor(error.code);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     setCancelOffered(false);
@@ -162,6 +195,17 @@ export function StorageErrorScreen({
     );
   };
 
+  if (restoring) {
+    // §8.1: restore over data that can't be opened; no live connection.
+    return (
+      <Screen keyboardAware>
+        <View style={styles.body}>
+          <RestoreFlow fromErrorScreen onClose={() => setRestoring(false)} />
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <StatusBar
@@ -176,6 +220,19 @@ export function StorageErrorScreen({
           onActionPress={retry}
           actionDisabled={busy}
         />
+        {entry === 'restore' && (
+          <Button
+            label="Restore from a backup"
+            onPress={() => setRestoring(true)}
+            variant="ghost"
+          />
+        )}
+        {entry === 'unavailable' && (
+          <Text variant="caption" color="textSecondary" align="center">
+            Restoring a backup isn’t possible on this device while its key is
+            missing or invalid (RESTORE_UNAVAILABLE).
+          </Text>
+        )}
         {cancelOffered && (
           <Button
             label="Cancel restore and return to previous data"

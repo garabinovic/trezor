@@ -276,8 +276,8 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
 - `allowBackup="false"`, plus `fullBackupContent` and `dataExtractionRules`
   that exclude every domain from cloud backup and device transfer.
 - Keys, the database and attachments are bound to this device's Keystore.
-  Uninstalling or clearing storage loses the data: restoring a backup isn't
-  offered in the app yet (Phase 6 Step 5; TA §8).
+  Uninstalling or clearing storage loses the data unless a backup file was
+  made (Settings → Back up to a file, TA §8.9).
 
 **Not protected:**
 - An attacker running code inside the unlocked app process.
@@ -614,13 +614,12 @@ Phase 4 has reached the automated level only (Jest, JVM and the one-off
 real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
 or a physical device, and no instrumentation test was run.
 
-Phase 6 Steps 1–4 are at the automated level too (JVM, Jest and the one-off
-real-SQLCipher checks on macOS). Backup creation and Check backup also ran on
-an isolated Android 16 emulator as a temporary QA release build (TA §8.8);
-not on a physical device. Restore (Steps 3–4: preparation, swap, startup
-recovery, Cancel restore) has not run on an emulator or device. Process-kill
-tests in each phase need a release QA build on a dedicated emulator, with
-approval.
+Phase 6 Steps 1–5 are at the automated level (JVM, Jest and the one-off
+real-SQLCipher checks on macOS), and backup, Check, restore (from Settings
+and from the storage-error screen) and startup recovery ran end to end on the
+dedicated API 36 emulator `Trezor_Step4_QA_API36` with a release build (TA
+§8.8). Not on a physical device. Saving a backup to the Downloads root fails
+closed there (`DESTINATION_UNVERIFIED`); device storage works.
 
 ---
 
@@ -637,7 +636,6 @@ approval.
 
 **Not implemented** (shown as "Not available yet" or not present):
 - app lock and biometrics;
-- any backup, Check or restore UI (Phase 6 Step 5; creation, Check and restore exist as APIs only, startup recovery runs on every launch, and the error screen offers Cancel restore, TA §8);
 - delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;

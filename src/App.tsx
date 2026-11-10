@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   AppState,
   DevSettings,
@@ -8,6 +8,8 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { nativeAttachmentPlatform } from './attachments/platform';
+import { nativeBackupPlatform } from './backup/platform';
+import { Dialog } from './components';
 import { ItemsProvider } from './data';
 import { RootNavigator } from './navigation/RootNavigator';
 import { RemindersProvider } from './reminders/RemindersProvider';
@@ -71,6 +73,16 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
     return () => subscription.remove();
   }, []);
 
+  // A backup that a previous run couldn't finish, whose file couldn't be
+  // deleted: the user is told once (spec v2.4 §6.4). Native clears the record.
+  const [incompleteBackup, setIncompleteBackup] = useState<string | null>(null);
+  useEffect(() => {
+    nativeBackupPlatform.takeIncompleteNotice().then(
+      name => setIncompleteBackup(name),
+      () => undefined,
+    );
+  }, []);
+
   const persistTheme = useCallback(
     (preference: ThemePreference) =>
       storage.settings
@@ -97,6 +109,15 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
         >
           <RootNavigator />
           <WriteErrorDialog />
+          <Dialog
+            visible={incompleteBackup !== null}
+            title="An incomplete backup file may remain"
+            message={`A backup didn’t finish, and Trezor couldn’t delete its file “${incompleteBackup}”. Delete it where you saved it; it can’t be restored.`}
+            confirmLabel="OK"
+            cancelLabel={null}
+            onConfirm={() => setIncompleteBackup(null)}
+            onCancel={() => setIncompleteBackup(null)}
+          />
         </RemindersProvider>
       </ItemsProvider>
     </ThemeProvider>

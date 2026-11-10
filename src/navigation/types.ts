@@ -17,6 +17,9 @@ export type RootStackParamList = {
   AttachmentViewer: { itemId: string; attachmentId: string };
   Search: undefined;
   Settings: undefined;
+  Backup: undefined;
+  CheckBackup: undefined;
+  Restore: undefined;
 };
 
 export const tabForType: Record<ItemType, keyof TabParamList> = {

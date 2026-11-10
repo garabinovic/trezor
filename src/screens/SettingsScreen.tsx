@@ -6,6 +6,7 @@ import {
   Bell,
   BellOff,
   Download,
+  FileCheck,
   Fingerprint,
   FlaskConical,
   Lock,
@@ -139,19 +140,31 @@ export function SettingsScreen({ navigation }: Props) {
         <Section
           title="Data"
           grouped
-          footer="Trezor stores everything on this device. There is no account and no cloud sync."
+          footer="Trezor stores everything on this device. There is no account and no cloud sync. A backup is a file you keep yourself, encrypted with its own password."
         >
           <ListItem
             icon={Download}
             title="Back up to a file"
-            subtitle={NOT_AVAILABLE}
-            disabled
+            subtitle="Everything, encrypted with a password you choose"
+            subtitleLines={2}
+            chevron
+            onPress={() => navigation.navigate('Backup')}
+          />
+          <ListItem
+            icon={FileCheck}
+            title="Check a backup"
+            subtitle="Verify a backup file without changing anything"
+            subtitleLines={2}
+            chevron
+            onPress={() => navigation.navigate('CheckBackup')}
           />
           <ListItem
             icon={Upload}
             title="Restore from a backup"
-            subtitle={NOT_AVAILABLE}
-            disabled
+            subtitle="Replaces all data on this device"
+            subtitleLines={2}
+            chevron
+            onPress={() => navigation.navigate('Restore')}
           />
           <ListItem
             icon={Trash2}
