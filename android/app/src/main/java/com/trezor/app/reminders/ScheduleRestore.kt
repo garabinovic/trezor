@@ -87,10 +87,11 @@ class ScheduleRestore(
           Saved.PENDING -> Unit
         }
         if (tmp.exists() && !tmp.delete()) throw IOException("Could not remove a stray copy")
-        if (saved.exists()) {
-          if (!saved.delete()) throw IOException("Could not remove the saved schedule")
-          syncDirectory(saved.parentFile!!)
-        }
+        val deleted = saved.exists()
+        if (deleted && !saved.delete()) throw IOException("Could not remove the saved schedule")
+        // For `saved`, the deletion must be durable before anything is armed, also when an
+        // earlier attempt deleted the copy but its directory sync failed (review Low 1).
+        if (deleted || state == Saved.SAVED) syncDirectory(saved.parentFile!!)
         rearm()
       }
 

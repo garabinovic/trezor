@@ -95,11 +95,12 @@ class ScheduleRestoreTest {
     assertFalse(saved.exists())
     // Copy back durably, delete the saved copy durably, and only then re-arm (review L-A).
     assertEquals(listOf("sync:reminders", "sync:restore", "rearm"), events)
-    // Again (M-a): saved but absent means the copy-back already happened.
+    // Again (M-a): saved but absent means the copy-back already happened; the deletion is
+    // still made durable before re-arming.
     events.clear()
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
     assertArrayEquals(original, schedule.readBytes())
-    assertEquals(listOf("rearm"), events)
+    assertEquals(listOf("sync:restore", "rearm"), events)
   }
 
   @Test
@@ -143,7 +144,7 @@ class ScheduleRestoreTest {
     events.clear()
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
     assertArrayEquals(afterAlarm, schedule.readBytes())
-    assertEquals(listOf("rearm"), events)
+    assertEquals(listOf("sync:restore", "rearm"), events)
     // And again: still nothing copied.
     ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
     assertArrayEquals(afterAlarm, schedule.readBytes())
@@ -206,6 +207,33 @@ class ScheduleRestoreTest {
     assertArrayEquals(original, schedule.readBytes())
     assertFalse(saved.exists())
     assertEquals(1, events.count { it == "rearm" })
+  }
+
+  /**
+   * Review Low 1: the saved copy was deleted but the directory sync failed, so the deletion
+   * may not be durable. The retry finds the copy already absent and must still sync
+   * `N/restore` before it arms anything.
+   */
+  @Test
+  fun aRetryAfterAFailedDeletionSyncMakesTheDeletionDurableBeforeRearming() {
+    ops().saveAndClear {}
+    events.clear()
+    failSyncOf = "restore"
+    try {
+      ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+      fail("sync failure hidden")
+    } catch (e: IOException) {
+      // expected
+    }
+    assertFalse(saved.exists())
+    assertArrayEquals(original, schedule.readBytes())
+    assertFalse("rearm" in events)
+    failSyncOf = null
+    events.clear()
+    ops().restoreAndRearm(ScheduleRestore.Saved.SAVED)
+    // Ordering: the directory is synced first, then (and only then) re-armed; no copy-back.
+    assertEquals(listOf("sync:restore", "rearm"), events)
+    assertArrayEquals(original, schedule.readBytes())
   }
 
   /** M-b: the operation holds the `ScheduleStore` monitor for its whole duration. */
