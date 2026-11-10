@@ -153,9 +153,12 @@ their own colours, font sizes or spacing.
   destructive actions.
 - **Destructive actions** always go through a confirmation dialog that names
   what will be deleted.
-- **Unavailable features are shown honestly.** Settings lists App lock, Backup
-  and Export so the product's direction is visible, but they're disabled and
-  labelled "Not available yet". Nothing pretends to work.
+- **Unavailable features are shown honestly.** Features that don't exist yet
+  (Delete all data) are listed but disabled and labelled "Not available yet".
+  Nothing pretends to work.
+- **App lock** (Phase 5) uses the device's own fingerprint, face or screen
+  lock, with a plain lock screen ("Trezor is locked", Unlock); there is no
+  separate Trezor PIN.
 - **Cards** show the card number large and spaced for a cashier to type in,
   captioned "Card number · No barcode saved". Until codes can be scanned or
   shown for real there is no barcode area, no barcode or QR icon, and no

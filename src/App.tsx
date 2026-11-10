@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   AppState,
   DevSettings,
+  Modal,
   StyleSheet,
   useColorScheme,
   View,
@@ -11,6 +12,8 @@ import { nativeAttachmentPlatform } from './attachments/platform';
 import { nativeBackupPlatform } from './backup/platform';
 import { Dialog } from './components';
 import { ItemsProvider } from './data';
+import { AppLockProvider, useAppLock } from './lock/AppLockProvider';
+import { LockScreen } from './lock/LockScreen';
 import { RootNavigator } from './navigation/RootNavigator';
 import { RemindersProvider } from './reminders/RemindersProvider';
 import { StorageErrorScreen } from './screens/StorageErrorScreen';
@@ -30,10 +33,61 @@ if (__DEV__) {
 export function App() {
   return (
     <SafeAreaProvider>
-      <StorageProvider>
-        <AppContent />
-      </StorageProvider>
+      <AppLockProvider>
+        <StorageProvider>
+          <LockedApp />
+        </StorageProvider>
+      </AppLockProvider>
     </SafeAreaProvider>
+  );
+}
+
+/**
+ * App Lock (Phase 5). Until the first unlock of this process nothing of the
+ * app is mounted, only the lock screen (storage still opens and recovers
+ * meanwhile). Later locks cover the mounted app with the lock screen in a
+ * modal, so drafts and navigation survive, and hide it from accessibility
+ * services. The window itself is FLAG_SECURE natively while locked.
+ */
+function LockedApp() {
+  const { state } = useAppLock();
+  const [unlockedOnce, setUnlockedOnce] = useState(!state.locked);
+  useEffect(() => {
+    if (!state.locked) {
+      setUnlockedOnce(true);
+    }
+  }, [state.locked]);
+
+  if (!unlockedOnce) {
+    return (
+      <ThemeProvider>
+        <LockScreen />
+      </ThemeProvider>
+    );
+  }
+  return (
+    <>
+      <View
+        style={styles.fill}
+        importantForAccessibility={
+          state.locked ? 'no-hide-descendants' : 'auto'
+        }
+      >
+        <AppContent />
+      </View>
+      <Modal
+        visible={state.locked}
+        animationType="none"
+        statusBarTranslucent
+        navigationBarTranslucent
+        // Back while locked does nothing; Home leaves as usual.
+        onRequestClose={() => undefined}
+      >
+        <ThemeProvider>
+          <LockScreen />
+        </ThemeProvider>
+      </Modal>
+    </>
   );
 }
 

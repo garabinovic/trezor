@@ -42,6 +42,18 @@ jest.mock('./src/native/NativeTrezorBackup', () => ({
   ),
 }));
 
+// App Lock is native; by default it is off (tests of the lock mock this).
+jest.mock('./src/native/NativeTrezorAppLock', () => ({
+  __esModule: true,
+  default: {
+    getState: jest.fn(
+      () => '{"enabled":false,"locked":false,"availability":"available"}',
+    ),
+    authenticate: jest.fn(async () => undefined),
+    setEnabled: jest.fn(async () => undefined),
+  },
+}));
+
 // SQLCipher is native-only. Tests that use SQL mock it themselves (with
 // test-utils/fakeSqlCipher or node:sqlite), which replaces this.
 jest.mock('@op-engineering/op-sqlite', () => ({

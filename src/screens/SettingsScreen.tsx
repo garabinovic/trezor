@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Switch, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -7,7 +7,6 @@ import {
   BellOff,
   Download,
   FileCheck,
-  Fingerprint,
   FlaskConical,
   Lock,
   ShieldCheck,
@@ -24,6 +23,8 @@ import {
   ValueRow,
 } from '../components';
 import { useItems } from '../data';
+import { authErrorMessage } from '../lock/appLock';
+import { useAppLock } from '../lock/AppLockProvider';
 import { RootStackParamList } from '../navigation/types';
 import { useReminders } from '../reminders/RemindersProvider';
 import {
@@ -56,6 +57,22 @@ export function SettingsScreen({ navigation }: Props) {
   } = useReminders();
   const { preference, setPreference } = useThemePreference();
   const { sampleDataEnabled, setSampleDataEnabled } = useItems();
+  const appLock = useAppLock();
+  const [lockMessage, setLockMessage] = useState<string | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const lockAvailable = appLock.state.availability === 'available';
+
+  const toggleAppLock = async (enabled: boolean) => {
+    setLockBusy(true);
+    setLockMessage(null);
+    try {
+      await appLock.setEnabled(enabled);
+    } catch (e) {
+      setLockMessage(authErrorMessage(e));
+    } finally {
+      setLockBusy(false);
+    }
+  };
 
   return (
     <Screen header={<BarHeader title="Settings" onBack={navigation.goBack} />}>
@@ -121,19 +138,35 @@ export function SettingsScreen({ navigation }: Props) {
         <Section
           title="Security"
           grouped
-          footer="App lock will protect Trezor with a PIN or your fingerprint."
+          footer={
+            lockMessage ??
+            'App lock hides Trezor whenever you leave it, until you unlock it with your fingerprint, face or screen lock. Your data is encrypted either way.'
+          }
         >
           <ListItem
             icon={Lock}
             title="App lock"
-            subtitle={NOT_AVAILABLE}
-            disabled
-          />
-          <ListItem
-            icon={Fingerprint}
-            title="Unlock with fingerprint"
-            subtitle={NOT_AVAILABLE}
-            disabled
+            subtitle={
+              appLock.state.enabled || lockAvailable
+                ? 'Ask for your fingerprint, face or screen lock'
+                : 'Set up a screen lock in Android settings first'
+            }
+            subtitleLines={2}
+            trailing={
+              <Switch
+                accessibilityLabel="App lock"
+                value={appLock.state.enabled}
+                onValueChange={toggleAppLock}
+                disabled={
+                  lockBusy || (!appLock.state.enabled && !lockAvailable)
+                }
+                trackColor={{
+                  false: colors.borderStrong,
+                  true: colors.accent,
+                }}
+                thumbColor={scheme === 'dark' ? colors.text : colors.surface}
+              />
+            }
           />
         </Section>
 

@@ -281,8 +281,9 @@ src/attachments/platform.ts     → TrezorAttachments  (attachments/)  encrypted
 
 **Not protected:**
 - An attacker running code inside the unlocked app process.
-- Recents thumbnails and screenshots: there is no `FLAG_SECURE` (TA §12;
-  product decision pending).
+- Recents thumbnails and screenshots while App Lock is off. With App Lock on,
+  the window is `FLAG_SECURE` whenever Trezor is locked or not in front, and
+  the Recents card is blank (TA §15.3).
 - PDFs are parsed in-process by Android's `PdfRenderer`.
 
 ---
@@ -475,7 +476,8 @@ spacing; compose from `src/components`.
 - **Search:** grouped results, Unicode-aware, done in JS.
 - **Settings:**
   - Theme, Notification privacy and the delivery warnings;
-  - App lock, backup, restore and delete-all shown as "Not available yet";
+  - App lock (Phase 5, TA §15), Back up, Check a backup and Restore (TA §8.9);
+  - delete-all shown as "Not available yet";
   - a debug-only "Show sample data" switch.
 
 **Item UX:**
@@ -635,11 +637,10 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
 | 6 — Encrypted backup (Steps 1–3 of 5) | TZBK v1 format library (`1dbcfae`); backup creation (SQLCipher export under the backup gate, attachment verification and DEK rewrap, SAF write with `fsync` and mandatory read-back) and non-destructive Check backup, as APIs without UI (`src/backup/backup.ts`); restore preparation (§8.2 steps 1–12: staging with rewrap, journal, quarantine, settings rewrite, schedule save/restore, cache purge, restore gate), exercised without the swap and always undone (swap, recovery and UI are Steps 4–5) | TA §8 |
 
 **Not implemented** (shown as "Not available yet" or not present):
-- app lock and biometrics;
+- App Lock on iOS (Android only, TA §15.6);
 - delete all data;
 - barcode/QR scanning or display;
 - camera capture and OCR;
-- `FLAG_SECURE`;
 - iOS.
 
 ---
@@ -674,7 +675,7 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
 - The Save-during-import guard relies on React batching two state updates
   (TA §14.5).
 - PDFs are rendered in-process.
-- There is no `FLAG_SECURE`.
+- `FLAG_SECURE` only with App Lock on (TA §15.3).
 **Findings from the independent Phase 4 review:**
 - **Fixed (`6786ceb`), Medium: Share failed for long non-ASCII names.** Export
   names were limited to 120 UTF-16 characters, so a long CJK name (e.g. 352

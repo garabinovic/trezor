@@ -136,7 +136,7 @@ this app installation can unwrap.
 | --- | --- |
 | Lost or stolen device, including rooted file extraction | Malware with root running while Trezor is unlocked (it can read process memory) |
 | Other apps | A compromised OS or Keystore implementation |
-| Backups or device transfer copying data elsewhere | Shoulder-surfing (future app lock and `FLAG_SECURE`) |
+| Backups or device transfer copying data elsewhere | Shoulder-surfing beyond what App Lock covers (§15): it hides Trezor while locked or not in front, it doesn't encrypt anything |
 
 ---
 
@@ -185,7 +185,8 @@ Android Keystore  "trezor.master.v1"  AES-256-GCM, non-exportable,
   - Unlocked-device binding (API 28+) would stop future features that need
     the database while the screen is locked (reminder notifications).
 
-  Revisit both together in the app-lock phase.
+  Phase 5 (App Lock, §15) kept this deliberately: App Lock is access
+  control for the UI, and no key is bound to authentication.
 
 **Hardware vs software backing.** The vault reports where the master key lives
 (`getMasterKeySecurityLevel()`: `strongbox` / `tee` / `software`):
@@ -448,7 +449,8 @@ The full DDL is in `src/storage/migrations.ts`. Relationships:
 | `notifications.permissionRequested` | Yes | Boolean; the Android 13+ permission is asked at most once |
 | `notifications.exactAlarmRequested` | Yes | Boolean; the "Deliver reminders on time?" explanation is shown at most once (§13.5) |
 | Show sample data | **No** — debug builds only, in memory | Not visible in release **[verified]** |
-| App lock, backup, restore, delete all | — | Shown as "Not available yet" (Phase 0 UI) |
+| App lock | **No** — Android SharedPreferences `trezor.applock` (`enabled`) | Device-local, needed before JS runs, never in a backup (§15) |
+| Delete all | — | Shown as "Not available yet" (Phase 0 UI) |
 
 ---
 
@@ -1263,6 +1265,7 @@ dialog names it.
 | Phase 6 Step 2 (backup creation, Check backup) | JVM `com.trezor.app.backup` 85 in 8 classes (Step 1's 49, + `BackupServiceTest` 24 on a real `AttachmentStore` with TZA files and an in-memory destination that fails where asked: written, read back and checked, no attachments, key unavailable, body unchanged with only the DEK rewrapped, missing/damaged/mismatching/other-key files fail before any byte, refused destinations untouched, write/`fsync`/close failures and wrong or unknown final size delete the file, undeletable file reported, damaged read-back, gate deferral and release on failure, one session, password and space checks, Check failures and cleanup, startup cleanup, 25 MiB accepted and over the limit refused; `BackupGateTest` 5; `BackupFilesTest` 7). Jest +25 `backup.test.ts` (real export and artifact checks on the SQLCipher fake, extended with `location`, `:memory:` and cipher settings: flow order, rows from the export, gate makes queued writes wait, failures release it and abort, attachment error details, destination outcomes, manifest mismatch, wrong key, export failure detaches, FK violation, cipher settings, SQLCipher 3, integrity, schema, schema version; Check result, cancel, password, mismatch, error text). Real SQLCipher 4.19.0 (one-off harness, run in band with the Phase 4 check): export with foreign keys on, every B.4 check, all rows and `user_version` 3, SQLCipher 4 defaults, no header or plaintext in the file, live key refused, damaged page corrupt, other schema inconsistent, `createBackup` end to end | **JVM 85/85 backup, Jest 416/416, real SQLCipher 6/6 (+ Phase 4's 4/4)** |
 | Phase 6 Step 3 (restore preparation, without the swap) | JVM +35 in 7 new classes and 1 extended: `RestoreServiceTest` 9 (real backups from `BackupService` restored on a device with another key: every step, `S_att` readable only with the target key, quarantine link, schedule saved and restored, live files byte-identical; zero attachments; wrong password, short password and too little space write nothing; changed backup → `BACKUP_CHANGED`; damaged and truncated sections; a failing cleanup keeps the journal → `RESTORE_RECOVERY_RETRY`; a journal blocks; every §8.1 precondition), `RestoreJournalTest` 4, `RestoreFileOpsTest` 4, `QuarantineTest` 5 (`kept-ids` absent, valid with a missing file, damaged → all, unlistable root, no overwrite), `AttachmentLocationsTest` 3, `ScheduleRestoreTest` 7 (order, every `scheduleSaved` case, idempotence, a failed re-arm retried safely (since the second review the saved copy is deleted before re-arming, see that row), the `ScheduleStore` monitor held throughout), `RestoreGateAndRestartTest` 2, `ShareFilesTest` +1. Jest +16: `restore.test.ts` 13 (step order, `S_db` under the device key with the settings rewrite, invalid settings and unreadable live settings, error-screen mode, queued writes and reconciles wait, shares wait/cancel, a failure at every step undoes and releases, schema and manifest mismatch, failed cleanup reported, wrong password, error-code entries), `reconcileGate.test.ts` 3. Real SQLCipher 4.19.0 harness +2 (export to the device key, settings rewrite and §B.4 on `S_db`; keys not interchangeable, files encrypted), run in band with Step 2's 6 and Phase 4's 4 | **JVM 262/262, Jest 432/432, real SQLCipher 12/12** |
 | Phase 6 Step 5 (backup, Check and restore screens) | Jest +12 (**482**): `backupFlows.test.tsx` 10 on the real app with the operations faked (backup: two passwords, blocking view with no back, success only when verified, cancelled picker, every error message including the named damaged or missing attachment and a remaining partial file; Check: valid with the file count, wrong password, damaged; restore: preflight refusal, Replace-only confirmation, dismissing starts nothing, blocking view from the swap on with the U1 text and no back, pre-swap failures back on the form, active share wait or cancel, failed cleanup held until a retry succeeds; the incomplete-backup notice once), `storageErrorScreen.test.tsx` +2 (restore entry per §8.1 code, `RESTORE_UNAVAILABLE` for key errors, restoring without a live database). JVM unchanged (298). Emulator (API 36, release): see §8.8 | **Jest 482/482, JVM 298/298** |
+| Phase 5 App Lock | JVM +12 (**310**): `AppLockPolicyTest` (disabled never locks or hides; enabled starts locked and only `unlock` unlocks; leaving locks and hides before the snapshot; a pause alone or a configuration change doesn't lock; losing window focus hides without locking; Trezor's own activities don't lock within the grace and do after it; the launch flag lasts only until the next resume and a failed launch clears it; turning on or off never leaves it locked; system error codes). Jest +8 (**490**): `appLock.test.tsx` on the real app with a native fake (locked at start: only the lock screen, one prompt, then the app; cancel quiet, Unlock retries; failure and lockout messages; a prompt that resolves without native unlocking stays locked; a later lock covers the mounted app and hides it from accessibility; without any credential the lock screen offers to turn it off; the Settings switch goes through native and a cancel changes nothing; without a screen lock it can't be turned on). Emulator: §15.5 | **JVM 310/310, Jest 490/490** |
 | Step 4 review correction (Retry during Cancel restore) | JVM +1 (**298**): `RestoreLockTest`: a second recovery run is refused while the first holds the lock; empty, guessed, stale or another run's tokens release nothing; the first ends its own run; a new run gets a new token. Jest +4 (**470**): `recovery.test.ts` +2 (a Retry and a Cancel check during a cancel are refused, and the cancel completes and releases; a failed run releases only its own lock), `storageErrorScreen.test.tsx` +3 replacing 1 (Retry disabled during the availability check; Retry and Cancel disabled during a cancel, and a double confirmation cancels once; a failed cancel re-enables both, checks again and doesn't retry by itself) | **JVM 298/298, Jest 470/470** |
 | Phase 6 Step 4 (swap, startup recovery, Cancel restore; spec v2.5) | JVM +25 (**297**): `RestoreRecoveryTest` 20 on real files with recorded, failing syncs and a JVM `lstat`:<br>- all 64 path combinations in every phase for both tables, against the spec's rows (anything else refused and nothing touched);<br>- a swap then a pass ends restored, a fail rolls back to the previous data and schedule, `prepared` at startup undoes the preparation for every `scheduleSaved`;<br>- a failure at **every** sync of the swap, and of recovery after it, converges to one complete outcome and never rolls forward after `rollingback`;<br>- a rename failing outright rolls back in process;<br>- the sync set before classifying and before every phase write, and `N` synced after `N/restore` goes;<br>- transient and key outcomes keep everything; D1 entries are unknown;<br>- Cancel restore offered only when every condition holds, and it rolls back;<br>- wrong types, symlinks and `lstat` errors; sidecars in every late phase; `pending` and sections in transit; temp journals;<br>- step 13a refusals.<br>Also `RestoreLockTest` 2, `RestoreServiceTest` +2 (the session holds the lock until its cleanup succeeded or it is released; steps 1–12 on real staging, then swap and recovery), `ModuleTasksTest` +1 (M2: work accepted before the gate and run after it does nothing), `RestoreFileOpsTest` (`P_att` only for cleanup).<br><br>Jest +29 (**466**):<br>- `recovery.test.ts` 18: classification of every code, numeric and in the message; a passing restored database; wrong key, ids, schema, version and damage deterministic; a missing file transient and not created; key outcomes; no key created; L6 with a mocked migration 4; D4 previous-data checks; the recovery loop and its codes; lock always released; Cancel availability and re-check;<br>- `restore.test.ts` +4 (now 20): success swaps and restarts and never settles; queued work and reconciles run after a pre-swap failure, never after a swap; failing swap or restart calls still restart holding every gate; `settleRestore` waits, and resumes a failed cleanup;<br>- `openStorage.test.ts` +4: recovery before the open, `keepUnreferenced` and GC; a recovery error stops startup and Retry recovers first again; again first after a JS reload; one recovery per runtime;<br>- `storageErrorScreen.test.tsx` 3: Cancel restore only when offered, only after confirming, then Retry.<br><br>Real SQLCipher 4.19.0 +5 (**17**, `recovery.check.ts`): a restored database passes and verification writes nothing; wrong key is SQLite 26 and deterministic; a damaged first or later page and a truncated file are deterministic; another id set deterministic; a missing file transient; D4 read-only on the previous database, left byte for byte | **JVM 297/297, Jest 466/466, real SQLCipher 17/17** |
 | Step 3 third-review correction (Low 1) | `ScheduleRestoreTest` +1: the saved copy deleted but its directory sync failing, the retry (copy already absent) syncs `N/restore` before re-arming, asserted as the event order `sync:restore`, `rearm`; the two existing retry tests now assert the same order. With the previous code all three fail | **JVM 272/272** |
@@ -1337,6 +1340,7 @@ UI.
 | `androidx.test.ext:junit` | 1.2.1 | androidTest only | Instrumentation test runner support |
 | `androidx.test:runner` | 1.6.2 | androidTest only | Instrumentation test runner |
 | `junit:junit` | 4.13.2 | JVM unit tests only (Phase 3) | Runs the JVM tests (recurrence, attachments); not packaged in the app |
+| `androidx.biometric:biometric` | 1.1.0 | app (Phase 5) | BiometricPrompt and BiometricManager for App Lock (§15); pulls `androidx.fragment`, already present through React Native |
 | `androidx.activity` / `androidx.core` | Compiled against 1.7.0 / 1.13.0; the release ships 1.8.1 / 1.17.0. Both come with React Native and other libraries | app, used directly since Phase 4 | Photo Picker and document contracts; `FileProvider` for Share. Not declared in `build.gradle`, so the versions follow React Native; the APIs used exist in all of them |
 
 No new JS runtime dependencies besides op-sqlite. Phase 3 adds no runtime
@@ -1390,7 +1394,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | Export to providers that don't report a size | Refused with `DESTINATION_UNVERIFIED` (fail closed). Which real providers do this is unverified. The empty document the picker created may remain, and the user is asked to choose another location |
 | JS access to vault keys | **Fixed (KeyVault hardening, `04c4605`):** `TrezorVaultModule.hasKey`/`createKey`/`getKey` accept only `database` (`JsKeyAccess`); `attachments`, `reminders` and any other id are rejected with `INVALID_ARGUMENT` before the vault is touched (`JsVault`). Native code keeps using `KeyVault` directly, attachments and reminders through their fixed ids. **[verified: JVM]** with a recording vault for the rule, `JsVault`, `AttachmentKeys.of` and `ScheduleStore.keyFrom`; the module's one-line delegation to `JsVault` is not tested (instrumentation). Native access to the other keys through the real Keystore is an instrumentation test (compiled, not run) |
 | Untrusted PDFs are rendered in-process | Android's `PdfRenderer` (PDFium) parses picked PDFs in Trezor's process, which can unwrap the attachments key. Accepted platform risk |
-| Screen contents in Recents and screenshots (no `FLAG_SECURE`) | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Product decision pending; no change made |
+| Screen contents in Recents and screenshots while App Lock is off | Android's Recents thumbnail shows the last screen, such as a note, a card number or a decrypted photo or PDF in the viewer, and screenshots and screen recording are allowed. `FLAG_SECURE` would block all three, but it would also stop users screenshotting a card for a cashier or a receipt to send, and it makes screen sharing show black. A narrower option on Android 13+ is `Activity.setRecentsScreenshotEnabled(false)`, which hides only the Recents thumbnail. Decided in Phase 5: App Lock adds `FLAG_SECURE` and the API 33+ Recents switch only while it is on, and only when locked or not in front (§15.3); with it off, nothing changes |
 | Device UI issues (Galaxy A53) | Tab bar overlap: **fixed in code (`8d728c3`)**. The bar's height and bottom padding now include the system navigation inset, and the Documents tab is labelled "Docs". Installed on the A53 (release build); not yet confirmed there by the user. The keyboard not opening for an auto-focused field is still unresolved (found during Phase 3 testing) |
 | Third, independent Phase 4 review | (M1) **Fixed:** startup cleanup deleted every `.tza` file when the database had to be created because its file was missing; now they are recorded as kept before the database is created (§14.3). (M2) **Fixed:** startup cleanup ran on every React root mount; now once per process (§14.3). (L1) **Corrected in the docs:** the HEIF/AVIF check reads at most 12 compatible brands (§14.2). (L2) **Corrected in the docs:** tab bar row above. (L3) **Fixed:** an `Error` such as `OutOfMemoryError` in a native task now rejects its promise with `IO_FAILED` (`ModuleTasks`), instead of killing the process with the promise unsettled; share and view copies, PDF pages and descriptors, and partial exports are cleaned up on an `Error` too, and a pick that ends with an `Error` removes the files it already imported **[verified: JVM]**, except `PdfViews` (Android only, no JVM test). For `OutOfMemoryError` this is **best effort**: the JVM tests throw a simulated `OutOfMemoryError` with memory still available, while a real one may also break the rejection, the cleanup, the React Native bridge or the JS runtime, and the process may still be killed; recovery from running out of memory is not claimed. (L4) **Fixed:** tests that only matched Kotlin source text were replaced by behaviour tests against recording fakes (`JsVaultTest`, `ModuleTasksTest`, `AttachmentCleanupTest`, the shared export name in `ShareFilesTest`). What they can't reach is the one-line glue in the React Native modules (which method calls which helper); that needs instrumentation. The FileProvider test reads the source manifest; the merged manifest of the debug APK (checked with `aapt2`, not automated) has two providers, ours (not exported, authority `com.trezor.app.attachments`) and androidx.startup's `InitializationProvider` (not exported, no file paths). A second React root also opened a second database connection (the first was never closed); M2 no longer depends on that. Reviewed read-only afterwards (F9): each open is its own SQLCipher handle, closed only when JS garbage-collects it; no `busy_timeout` is set, so overlapping writes fail with `SQLITE_BUSY`; two opens during a pending migration can both run it (`user_version` is read outside the migration's transaction). **Fixed in a separate commit:** one initialization and connection per process, closed on a failed initialization, and `BEGIN IMMEDIATE` migrations that re-read the version (§6.3, §7). One owner for the connection is a precondition for backup and restore (Phase 6) |
 
@@ -1938,3 +1942,127 @@ After a share there is nothing to report: the share sheet takes over.
 - The v2 → v3 migration has run on real SQLCipher (§5), but on macOS, not
   Android.
 - Known limitations are listed in §12.
+
+---
+
+## 15. App Lock (Phase 5, Android)
+
+App Lock hides Trezor behind the device's own authentication. It is **access
+control for the UI**, not encryption: the database and attachments are
+encrypted with the same keys whether it is on or off, and no key is bound to
+authentication (§4.2). There is no Trezor PIN or password; nothing biometric
+is stored by Trezor.
+
+### 15.1 Authentication
+
+- AndroidX `BiometricPrompt` (`androidx.biometric` 1.1.0), allowed
+  authenticators `BIOMETRIC_WEAK | DEVICE_CREDENTIAL`: the device's
+  fingerprint or face, or its PIN, pattern or password. AndroidX supports
+  this combination on every API level of the app (minSdk 24).
+- Started and decided natively (`lock/TrezorAppLockModule.kt`). Only
+  `onAuthenticationSucceeded` unlocks or changes the setting. JS has no call
+  that unlocks: `authenticate()` and `setEnabled()` only open the prompt.
+  The UI reads the state back from native, so a JS promise that resolves
+  without a native unlock leaves the app locked.
+- Failed attempts, retries and lockout are the system prompt's. Trezor maps
+  its errors to `CANCELLED`, `LOCKOUT`, `UNAVAILABLE` or `FAILED` for the
+  message.
+- **Availability:** `BiometricManager.canAuthenticate` with the same
+  authenticators. `available`, `noCredential` (nothing enrolled, no screen
+  lock) or `unavailable`. It is re-read whenever Trezor returns to the
+  foreground.
+- **Enrollment changes:** nothing is bound to them; a new fingerprint or a
+  changed PIN works at once. If the device has no credential left,
+  authentication is impossible. The lock screen then explains this and
+  offers **Turn off App Lock** without a prompt. Removing the screen lock
+  already needed the old credential.
+
+### 15.2 When it locks (`lock/AppLockPolicy.kt`, JVM-tested)
+
+- **Enabled at process start** (cold start, process recreation): locked.
+  Nothing of the app is mounted until the first unlock; storage opens and
+  recovers meanwhile.
+- **The activity stops** (Home, another app, Recents then away, screen off):
+  locked, unless the stop is a configuration change, or an activity Trezor
+  started itself. `MainActivity.startActivityForResult` sees every one: file
+  pickers, Save a copy, the backup and restore pickers, the share sheet, the
+  device-credential screen. Those lock only if the user was away for more
+  than **3 minutes** (`EXTERNAL_GRACE_MS`).
+- **Unlocks** only after a successful authentication.
+- A later lock covers the still-mounted app with the lock screen (a modal),
+  so drafts and navigation survive. The app underneath is hidden from
+  accessibility services (`no-hide-descendants`).
+- The lock screen opens the system prompt once each time Trezor comes to
+  the foreground locked. After a cancel, **Unlock** opens it again. Back does
+  nothing while locked.
+
+### 15.3 Screen privacy
+
+- While App Lock is on, the window is `FLAG_SECURE` whenever Trezor is
+  locked, not resumed, or without window focus. This blocks screenshots and
+  screen recording, and blanks the Recents card.
+- Focus matters: on recent Android, Recents shows the still-resumed app as a
+  live tile without pausing it. Losing focus is the first signal.
+- On API 33+ the Recents snapshot is also disabled
+  (`setRecentsScreenshotEnabled(false)`).
+- Unlocked, resumed and focused, screenshots work normally. While one of
+  Trezor's own dialogs has focus, the screen behind it is private too.
+- With App Lock off, nothing changes.
+
+### 15.4 Setting
+
+- Settings → Security → **App lock** switch, the only setting.
+- Turning it on needs an available credential and a successful prompt.
+  Turning it off needs a prompt too, unless no credential is left.
+- Stored in private SharedPreferences (`trezor.applock`, `enabled`, written
+  with `commit()`), not in the database:
+  - native code needs it before JS runs;
+  - it is device-local, so it is never in a backup and a restore never
+    changes it;
+  - `allowBackup="false"` keeps it out of Android backups;
+  - it holds no secret.
+
+### 15.5 Verification
+
+- **Automated:** JVM `AppLockPolicyTest` and Jest `appLock.test.tsx` (§9).
+- **Emulator:** the dedicated API 36 AVD `Trezor_Step4_QA_API36`, release
+  build, test PIN set with `locksettings` (removed afterwards). Verified:
+  - without a screen lock, the switch is disabled with an explanation;
+  - turning it on through the system prompt (stored, window not secure
+    while unlocked);
+  - Home locks, the window is `FLAG_SECURE` in the background, and the
+    prompt opens on return;
+  - cancel stays locked, and a screenshot while locked is black;
+  - a wrong PIN keeps the prompt open, the right one unlocks onto the same
+    screen;
+  - the file picker doesn't lock;
+  - a cold start and a relaunch after the background process was killed
+    are locked;
+  - rotation doesn't lock;
+  - the Recents card is blank;
+  - screen off and on locks;
+  - turning it off asks for the PIN (a cancel keeps it on);
+  - with the screen lock removed, the lock screen offers to turn it off.
+- **Not verified:** biometric unlock (no fingerprint was enrolled on the
+  emulator, only the PIN fallback), a physical device, and API levels below
+  36.
+
+### 15.6 iOS (not implemented)
+
+iOS App Lock is **not** implemented or claimed. The iOS target has only
+`AppDelegate.swift` and `SceneDelegate.swift`, and no native modules: none of
+Trezor's native modules (vault, database files, reminders, attachments,
+backup, restore) exist for iOS yet. App Lock would need:
+- a native module with `LAContext.evaluatePolicy(.deviceOwnerAuthentication)`
+  (Face ID or Touch ID with passcode fallback), deciding natively as on
+  Android;
+- `NSFaceIDUsageDescription` in `Info.plist`;
+- locking in the scene lifecycle (`sceneDidEnterBackground`);
+- a privacy cover view added in `sceneWillResignActive`, so the app
+  switcher snapshot shows nothing;
+- the preference in `UserDefaults` or the Keychain;
+- the same JS provider and lock screen, unchanged.
+
+It can only be built and tested with an iOS toolchain, and it depends on the
+iOS port of the other modules.
+

@@ -122,6 +122,9 @@ dependencies {
     // lightweight crypto API is used, never the JCA provider.
     implementation("org.bouncycastle:bcprov-jdk18on:1.79")
 
+    // App Lock (Phase 5): the system's biometric or screen-lock prompt.
+    implementation("androidx.biometric:biometric:1.1.0")
+
     // JVM unit tests (recurrence rules); not in the app.
     testImplementation("junit:junit:4.13.2")
 
