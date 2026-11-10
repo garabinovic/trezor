@@ -117,7 +117,7 @@ leave.
 | Item editor  | Title + type-specific fields, inline validation, Cancel/Save. Cards: issuer and front/back photos (add, replace, remove). Documents: up to 10 photos or PDFs (add photos, add files; per file move up/down, replace, remove). |
 | Attachment viewer | Full screen, Close (X), Previous/Next between the item's files, a one-line position ("2 of 3 · PDF · 1.2 MB · Page 1 of 4"). Photos: pinch, pan, double-tap zoom. PDFs: pages scrolled vertically. "Save a copy" and "Share" at the bottom. |
 | Search       | Auto-focused field, results grouped by type, hint and no-results states.                                  |
-| Settings     | Appearance, Security, Data, About. Features not yet built are shown but clearly marked "Not available yet". |
+| Settings     | Appearance, Notification privacy, Security (App lock), Data (Back up to a file, Check a backup, Restore from a backup, Delete all data), About. A feature not yet built would be shown but marked "Not available yet". |
 
 ## 7. Components
 

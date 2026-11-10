@@ -1,5 +1,8 @@
 # SQLCipher compatibility spike — results
 
+> Historical record of the Phase 1 spike (2026-10-30). The current storage
+> design is in [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md).
+
 Date: 2026-10-30 · Device: Android emulator, API 37 (arm64-v8a) · Debug build
 
 ## Setup

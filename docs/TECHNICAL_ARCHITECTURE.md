@@ -1,19 +1,28 @@
 # Trezor — Technical Architecture
 
-Status: **Phase 4 implemented** (encrypted attachments for cards and
-documents, §14), on top of Phase 3 (reminders and local notifications, §13),
-Phase 2 (core organizer), Phase 1 and the Phase 1.1 corrections. This document
-describes what is built, why, and how it differs from
-the Phase 1 proposal (git history: `docs: add Phase 1 technical architecture
-proposal`). Phase 1.1 fixed the findings of the Phase 1 security audit; see
-§10.1.
+Status: **Android MVP at `22a06ed`**, before release preparation:
+- the organizer and encrypted storage (Phases 1–2);
+- reminders (§13);
+- encrypted attachments (§14);
+- encrypted backup and restore (§8);
+- App Lock (§15);
+- Delete all data (§16).
+
+iOS is not implemented. The current status, validation gaps and release
+findings are in [STATUS.md](STATUS.md). This document describes what is
+built, why, and how it differs from the Phase 1 proposal (git history: `docs:
+add Phase 1 technical architecture proposal`). Phase 1.1 fixed the findings
+of the Phase 1 security audit; see §10.1.
 
 Claims marked **[verified]** were checked by an automated test or on the
 Android emulator (API 37, arm64) on 2026-10-30 (Phase 1–2) or 2026-11-02
 (Phase 3). Phase 4 was verified on 2026-11-03 by JVM and Jest tests, and its
 schema migration also on real SQLCipher (§5). Reminders were also checked on
-one physical device (§13.8). **No Phase 4 feature has run on a device or
-emulator yet** (§14.10). Everything else is design intent or a recommendation.
+one physical device (§13.8). Phases 4–7 later ran on a dedicated API 36
+emulator (attachment import and viewing, backup, restore, App Lock, Delete
+all data: §8.8, §15.5, §16.5), **not on a physical device**. Older sections
+keep the state of their phase; where they differ, STATUS.md and the code are
+current. Everything else is design intent or a recommendation.
 
 ---
 
@@ -286,7 +295,7 @@ is out of scope (§3).
 | First launch | No envelope, no DB → master key + database key created, DB created at schema v1 **[verified]** | — |
 | Normal launch | Envelope unwrapped → DB opened and verified **[verified]** | Kept |
 | App update (install over) | Keystore entry, envelope and DB all kept **[verified: debug → release install]** | Kept |
-| Uninstall / reinstall | Android deletes the app's Keystore entries and files | **Lost by design** (no restore yet; backup creation exists without UI, §8) |
+| Uninstall / reinstall | Android deletes the app's Keystore entries and files | **Lost by design**, unless the user made a backup file: restore it (§8.9) |
 | "Clear storage" in system settings | Files and Keystore entries removed → treated as a first launch | **Lost by design** |
 | Database file state can't be determined (I/O or permission error) | `DATABASE_STATE_UNKNOWN`; no key is created **[verified: Jest]** | Kept |
 | Vault returns a malformed key | `INVALID_KEY_FORMAT` before anything is opened **[verified: Jest]** | Kept |
@@ -295,7 +304,7 @@ is out of scope (§3).
 | Envelope tampered / corrupt | `UNWRAP_FAILED` **[verified: test]** | Kept on disk, unreadable |
 | Key permanently invalidated | `KEY_INVALIDATED` (not expected while the key isn't auth-bound) | Kept on disk, unreadable |
 | Android backup / device transfer | Excluded by manifest rules. Even if copied, the DB is useless without the device-bound master key | Not transferred |
-| New phone | Nothing migrates. An encrypted backup can be created (§8, no UI yet), but restore is not implemented | — |
+| New phone | The device keys never migrate. Back up on the old phone and restore the file on the new one (§8.9); data is re-encrypted under the new device's keys | Restored from the backup |
 
 The app **never** deletes, recreates or overwrites the database or a key in
 response to an error. The error screen offers *Try again* only.
@@ -666,12 +675,16 @@ Follows SQLite's documented procedure for schema changes:
 
 ## 8. Encrypted backup (Phase 6)
 
-Specification: Phase 6 spec v2.4 (backup format §3–§4, creation §6, Check
-backup §7, Annex B for the SQLCipher artifact). Implemented so far: the format
-library (Step 1) and **backup creation and Check backup** (Step 2), without UI.
-**Restore is not implemented**: no journal, quarantine, restore staging or
-settings/reminder restore exists, and nothing in the app can replace live data
-from a backup.
+Specification: Phase 6 spec v2.4 with its v2.5 amendment (historical copy in
+`docs/history/phase6-spec/`; the TZBK v1 format part is normative). Implemented:
+- the format library (Step 1);
+- backup creation and Check backup (Step 2, §8.3–8.6);
+- restore preparation (Step 3, §8.7);
+- the swap, crash recovery and Cancel restore (Step 4, §8.7.1);
+- the screens (Step 5, §8.9).
+
+The subsections below were written step by step; where an earlier one says
+something "is Step 4/5", it has since been built.
 
 ### 8.1 The file
 
@@ -1374,7 +1387,7 @@ platform APIs (`AndroidKeyStore`, `javax.crypto`, `SecureRandom`, `org.json`).
 | op-sqlite small maintainer base, frequent majors | Exact pin; driver isolated behind `SqlDatabase` |
 | Third-party OpenSSL Maven artifact | Supply-chain dependency. **Not yet done:** Gradle dependency verification (checksums) |
 | APK +20 MB universal (+6.6 MB per arm64 device) | Ship AAB / ABI splits before release |
-| Release still signed with the template debug key; R8 off | Must be fixed before any distribution (`keystore.properties` is git-ignored) |
+| Release still signed with the template debug key; R8 off | **Release blocker** (STATUS.md, finding 1). `android/app/build.gradle` signs release with `signingConfigs.debug`; the developer's `TREZOR_RELEASE_*` Gradle properties exist outside the repository but are not referenced. Never commit the keystore or its passwords (`keystore.properties` is git-ignored) |
 | Sample-data module bundled (unreachable) in release | Low risk; could be excluded with a Metro resolver rule later |
 | Only tested on one emulator (API 37). Not tested on API 24–33 or real devices | Test on low-API and StrongBox devices before release |
 | Opening view uses the system theme; with a forced dark theme on a light system, startup shows a light background for a moment | Cosmetic. The native launch window can't know the in-app preference |

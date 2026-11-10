@@ -7,10 +7,13 @@ must hold when you change it. For full detail it links to
 [DESIGN.md](DESIGN.md); where this guide and the code disagree, **the code
 wins**. Inspect it before acting.
 
-State described: `main` at `6786ceb`, 2026-11-03. That is Phase 4 plus three
-follow-up commits: review fixes `06004a0`, KeyVault hardening `04c4605` and
-UTF-8-safe export names `6786ceb`. Final Phase 4 acceptance is still pending. Statements were checked against the source. Anything that could
-not be checked is marked *(unverified)*.
+State described: `main` at `22a06ed` (Phase 7), 2026-11-10, the Android MVP
+before release preparation. The current status, validation gaps and release
+findings are in [STATUS.md](STATUS.md); a short session handoff is in
+[CLAUDE.md](../CLAUDE.md). Sections A–H were written for Phases 1–4. Backup
+and restore (TA §8), App Lock (TA §15) and Delete all data (TA §16) are
+described in TA, not repeated here. Statements were checked against the
+source. Anything that could not be checked is marked *(unverified)*.
 
 ---
 
@@ -612,9 +615,11 @@ checks on the device (logged with `[SELFTEST]`). It reuses the production
   don't restart or recover it.
 - **Physical device.**
 
-Phase 4 has reached the automated level only (Jest, JVM and the one-off
-real-SQLCipher migration check). Nothing from Phase 4 has run on an emulator
-or a physical device, and no instrumentation test was run.
+Phase 4 was verified at the automated level (Jest, JVM, the one-off
+real-SQLCipher migration check); attachment import and viewing later ran on
+the dedicated API 36 emulator during the Phase 6–7 runs. Save a copy, Share
+and `PdfRenderer` haven't run on Android, nothing from Phase 4 has run on a
+physical device, and no instrumentation test was run.
 
 Phase 6 Steps 1–5 are at the automated level (JVM, Jest and the one-off
 real-SQLCipher checks on macOS), and backup, Check, restore (from Settings
@@ -634,30 +639,21 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
 | 2 — Persistent items and search | Repository CRUD for all four types, pinning, filters and sorts, Unicode search, document expiry, debug sample data | TA §7 |
 | 3 — Reminders | Schema v2, six repeat modes, native alarms and notifications, notification privacy, reboot/time-change re-arming, exact alarms (`191ad7f`) | TA §13; commit `147699d` |
 | 4 — Cards, documents, attachments | Schema v3, TZA encrypted files, card issuer and front/back photos, up to 10 document files, viewer, save a copy, share, cleanup; review fixes | TA §14; steps `ade411f` … `3982135`, docs `1b15cf4`, review fixes `06004a0`, KeyVault hardening `04c4605`, UTF-8 export names `6786ceb`. Acceptance pending |
-| 6 — Encrypted backup (Steps 1–3 of 5) | TZBK v1 format library (`1dbcfae`); backup creation (SQLCipher export under the backup gate, attachment verification and DEK rewrap, SAF write with `fsync` and mandatory read-back) and non-destructive Check backup, as APIs without UI (`src/backup/backup.ts`); restore preparation (§8.2 steps 1–12: staging with rewrap, journal, quarantine, settings rewrite, schedule save/restore, cache purge, restore gate), exercised without the swap and always undone (swap, recovery and UI are Steps 4–5) | TA §8 |
+| 6 — Encrypted backup and restore | TZBK v1 format (`1dbcfae`); backup creation and Check; restore preparation, swap, crash recovery and Cancel restore (Steps 3–4, spec v2.5); the op-sqlite worker patch (`826d1ea`); the screens (Step 5, `d563dd1`) | TA §8; spec in `docs/history/phase6-spec/` |
+| 5 — App Lock (Android) | BiometricPrompt with the device-credential fallback, native lock state, `FLAG_SECURE` while locked or not in front, Settings switch (`41dde65`) | TA §15 |
+| 7 — Delete all data (Android) | In-place database wipe with a `wipe.pending` marker, native file wipe, startup resume, Settings flow (`22a06ed`) | TA §16 |
 
-**Not implemented** (shown as "Not available yet" or not present):
-- App Lock on iOS (Android only, TA §15.6);
-- barcode/QR scanning or display;
-- camera capture and OCR;
-- iOS.
+**Not implemented:** iOS (no native modules; TA §15.6 for App Lock),
+barcode/QR scanning or display, camera capture and OCR. See STATUS.md.
 
 ---
 
 ## J. Known limitations and outstanding verification
 
-**Public-release blockers:**
-- Phase 4 has not run on a device or emulator: pickers, Keystore `attachments`
-  key, view files and Fresco caching, `PdfRenderer`, the save-to picker and
-  providers, FileProvider grants, receiving apps.
-  - Installing on the maintainer's phone upgrades its real data to schema v3;
-    that needs explicit approval.
-  - Instrumentation tests are deferred.
-- Release signing still uses the template debug key; R8 is off.
-- OpenSSL 3.3.2 comes from a third-party Maven artifact, and there is no
-  Gradle dependency verification (TA §12).
-- The keyboard doesn't open for auto-focused fields. (The tab bar overlap is
-  fixed in `8d728c3`; confirmation on the A53 is pending.)
+**Release blockers and validation gaps** are tracked in
+[STATUS.md](STATUS.md) (release signing, physical-device validation, R8,
+OpenSSL provenance, device UI issues). The items below are the Phase 4
+record.
 
 **Accepted or documented limitations:**
 - PDF password protection is unsupported.
@@ -734,9 +730,9 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
   - card thumbnails decrypt the whole file on every mount;
   - files picked in debug sample-data mode stay until startup cleanup.
 
-- Key loss means data loss until restore exists (backup creation exists as
-  an API without UI, TA §8). Snapshots are never cleaned up or restored
-  automatically.
+- Key loss means data loss unless the user has a backup file (Settings →
+  Back up to a file, TA §8.9). Snapshots are never restored automatically;
+  only Delete all data removes them (TA §16).
 
 ---
 
@@ -835,4 +831,9 @@ closed there (`DESTINATION_UNVERIFIED`); device storage works.
 | `src/reminders/scheduler.ts`, `RemindersProvider.tsx`, `android/.../reminders/*` | Reminder reconciliation and native scheduling |
 | `android/app/src/main/AndroidManifest.xml`, `res/xml/*.xml`, `src/debug/AndroidManifest.xml` | Permissions, receivers, FileProvider, backup exclusions |
 | `jest.setup.js`, `test-utils/` | How native modules are faked; app harness |
-| `package.json` | Pinned versions, scripts, `op-sqlite` and codegen config |
+| `package.json`, `patches/` | Pinned versions, scripts, `op-sqlite` and codegen config, the op-sqlite patch (`postinstall`) |
+| `docs/STATUS.md`, `CLAUDE.md` | Current status and release findings; session handoff |
+| `src/backup/*`, `android/.../backup/*`, `android/.../restore/*` | Backup, Check, restore, recovery (`RestoreRecovery`, `RestoreLock`), `DataWipe`; TA §8, §16 |
+| `src/storage/deleteAll.ts` | Delete all data and its startup resume; TA §16 |
+| `src/lock/*`, `android/.../lock/*` | App Lock; TA §15 |
+| `docs/history/phase6-spec/` | The historical backup/restore specification (its TZBK v1 format part is normative) |
