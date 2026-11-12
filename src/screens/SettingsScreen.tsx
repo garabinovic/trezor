@@ -1,5 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Modal, StyleSheet, Switch, View } from 'react-native';
+import {
+  Linking,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Switch,
+  View,
+} from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   AlarmClockOff,
@@ -9,7 +16,6 @@ import {
   FileCheck,
   FlaskConical,
   Lock,
-  ShieldCheck,
   Trash2,
   Upload,
 } from 'lucide-react-native';
@@ -21,6 +27,7 @@ import {
   ListItem,
   Screen,
   Section,
+  Text,
   ValueRow,
 } from '../components';
 import { useItems } from '../data';
@@ -33,6 +40,8 @@ import { deleteAllData, DeleteAllError } from '../storage/deleteAll';
 import { useStorage } from '../storage/StorageProvider';
 import { Busy } from './backup/parts';
 import {
+  gutter,
+  minTouchTarget,
   spacing,
   ThemePreference,
   useTheme,
@@ -53,6 +62,79 @@ function appVersion(): string {
     NativeTrezorBackup.appVersion(),
   ) as { versionName: string; versionCode: number };
   return `${versionName} (${versionCode})`;
+}
+
+const FEEDBACK_EMAIL = 'andrijag@gmail.com';
+
+function AboutTrezor() {
+  return (
+    <View style={styles.about}>
+      <Text variant="headline" accessibilityRole="header">
+        About Trezor
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        Trezor is a simple personal organizer designed to help you keep the
+        important things in your life in one place.
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        Store your notes, reminders, loyalty cards and documents, and keep your
+        information organized and easy to access.
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        Trezor is built with privacy and simplicity in mind. Your data is stored
+        locally on your device, protected with encryption, and remains under
+        your control. You can create an encrypted backup to keep your data safe
+        when changing or resetting your device.
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        Our goal is simple: a useful, reliable space for your personal
+        information, without unnecessary complexity.
+      </Text>
+    </View>
+  );
+}
+
+/** Opens the default email app (a `mailto:` link; no SDK, no network). */
+function Feedback() {
+  const [noEmailApp, setNoEmailApp] = useState(false);
+  const write = () =>
+    Linking.openURL(`mailto:${FEEDBACK_EMAIL}`).then(
+      () => setNoEmailApp(false),
+      () => setNoEmailApp(true),
+    );
+  return (
+    <View style={styles.about}>
+      <Text variant="headline" accessibilityRole="header">
+        Feedback & Suggestions
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        Have an idea that could make Trezor better?
+      </Text>
+      <Text variant="callout" color="textSecondary">
+        We’d love to hear from you. Whether you have a suggestion, found an
+        issue, or simply want to share your experience, feel free to get in
+        touch.
+      </Text>
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={`Email ${FEEDBACK_EMAIL}`}
+        onPress={write}
+        style={styles.emailRow}
+      >
+        <Text variant="callout" color="textSecondary">
+          {'Email: '}
+          <Text variant="callout" color="accent">
+            {FEEDBACK_EMAIL}
+          </Text>
+        </Text>
+      </Pressable>
+      {noEmailApp && (
+        <Text variant="caption" color="textTertiary">
+          No email app is set up on this device.
+        </Text>
+      )}
+    </View>
+  );
 }
 
 export function SettingsScreen({ navigation }: Props) {
@@ -291,12 +373,8 @@ export function SettingsScreen({ navigation }: Props) {
 
         <Section title="About" grouped>
           <ValueRow label="Version" value={version} />
-          <ListItem
-            icon={ShieldCheck}
-            title="Private by design"
-            subtitle="No ads, no tracking and no account. Your data never leaves this device."
-            subtitleLines={3}
-          />
+          <AboutTrezor />
+          <Feedback />
         </Section>
       </View>
       <Dialog
@@ -331,4 +409,10 @@ export function SettingsScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   sections: { gap: spacing.xxxl, paddingTop: spacing.sm },
   deleting: { flex: 1, justifyContent: 'center' },
+  about: {
+    gap: spacing.sm,
+    paddingHorizontal: gutter,
+    paddingVertical: spacing.lg,
+  },
+  emailRow: { minHeight: minTouchTarget, justifyContent: 'center' },
 });

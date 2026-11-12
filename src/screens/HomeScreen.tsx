@@ -49,7 +49,7 @@ export function HomeScreen() {
     >
       <LargeHeader
         title="Trezor"
-        eyebrow={formatLongToday()}
+        subtitle={formatLongToday()}
         actions={<HeaderActions search={false} />}
       />
 

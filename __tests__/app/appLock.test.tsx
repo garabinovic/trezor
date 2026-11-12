@@ -1,10 +1,11 @@
 import React from 'react';
-import { AppState, DeviceEventEmitter } from 'react-native';
-import ReactTestRenderer from 'react-test-renderer';
+import { AppState, DeviceEventEmitter, StyleSheet } from 'react-native';
+import ReactTestRenderer, { ReactTestInstance } from 'react-test-renderer';
 import App from '../../App';
 import { runMigrations } from '../../src/storage/migrations';
 import { SqliteItemRepository } from '../../src/storage/SqliteItemRepository';
 import type { SqlDatabase } from '../../src/storage/sql';
+import { spacing } from '../../src/theme';
 import {
   hasText,
   pressLabel,
@@ -144,6 +145,41 @@ test('a cancelled prompt stays locked quietly; Unlock opens it again', async () 
   await pressText(app, 'Unlock');
   expect(mockNative.authenticate).toHaveBeenCalledTimes(2);
   expect(hasText(app, 'Safe combination')).toBe(true);
+});
+
+test('Unlock sits low and centered, below the explanation and above the navigation', async () => {
+  mockNative.authenticate.mockRejectedValueOnce(coded('CANCELLED'));
+  await render();
+  const textNode = (text: string) =>
+    app.root.find(
+      n =>
+        n.type === ('Text' as never) &&
+        ([] as unknown[]).concat(n.props.children).join('') === text,
+    );
+  const ancestors = (node: ReactTestInstance) => {
+    const list: ReactTestInstance[] = [];
+    for (let n = node.parent; n; n = n.parent) {
+      if (typeof n.type === 'string') {
+        list.push(n);
+      }
+    }
+    return list;
+  };
+  const style = (n: ReactTestInstance) => StyleSheet.flatten(n.props.style);
+  const screen = app.root.find(
+    n => typeof n.type === 'string' && n.props.accessibilityViewIsModal,
+  );
+  // The safe-area mock has no bottom inset: only the thumb-reach margin.
+  expect(style(screen).paddingBottom).toBe(spacing.huge);
+
+  const body = textNode('Trezor is locked').parent!;
+  const button = ancestors(textNode('Unlock'));
+  // Not in the centered explanation, but in its own centered area after it.
+  expect(button.includes(body)).toBe(false);
+  const area = button.find(n => style(n)?.alignSelf === 'center');
+  expect(area && style(area)).toMatchObject({ width: '100%', maxWidth: 360 });
+  // A direct child of the lock screen (compared as booleans: instances are huge).
+  expect(ancestors(area!)[0] === screen).toBe(true);
 });
 
 test('failures and lockout are explained and stay locked', async () => {

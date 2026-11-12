@@ -44,7 +44,7 @@ export function CategoryScreen<T extends ItemType>({
   );
 
   const create = () => navigation.navigate('ItemEditor', { type });
-  const eyebrow = countLabel
+  const countText = countLabel
     ? countLabel(all)
     : `${all.length} ${all.length === 1 ? 'item' : 'items'}`;
 
@@ -55,7 +55,7 @@ export function CategoryScreen<T extends ItemType>({
       header={
         <LargeHeader
           title={meta.plural}
-          eyebrow={all.length > 0 ? eyebrow : undefined}
+          subtitle={all.length > 0 ? countText : undefined}
           actions={<HeaderActions />}
         />
       }

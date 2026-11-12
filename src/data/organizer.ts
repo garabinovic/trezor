@@ -35,6 +35,10 @@ export const reminderFilters: ItemFilter<'reminder'>[] = [
   },
 ];
 
+/**
+ * One filter per stored document kind (the schema allows exactly these four,
+ * so nothing falls outside them).
+ */
 export const documentFilters: ItemFilter<'document'>[] = [
   {
     value: 'all',
@@ -43,21 +47,27 @@ export const documentFilters: ItemFilter<'document'>[] = [
     emptyMessage: '',
   },
   {
-    value: 'receipts',
+    value: 'receipt',
     label: 'Receipts',
     predicate: d => d.kind === 'receipt',
     emptyMessage: 'No receipts saved.',
   },
   {
-    value: 'warranties',
+    value: 'warranty',
     label: 'Warranties',
     predicate: d => d.kind === 'warranty',
     emptyMessage: 'No warranties saved.',
   },
   {
-    value: 'other',
-    label: 'Other',
-    predicate: d => d.kind === 'image' || d.kind === 'document',
+    value: 'image',
+    label: 'Images',
+    predicate: d => d.kind === 'image',
+    emptyMessage: 'No images saved.',
+  },
+  {
+    value: 'document',
+    label: 'Files',
+    predicate: d => d.kind === 'document',
     emptyMessage: 'No other documents saved.',
   },
 ];

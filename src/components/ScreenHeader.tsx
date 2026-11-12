@@ -2,30 +2,40 @@ import React, { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ArrowLeft, LucideIcon } from 'lucide-react-native';
 import { gutter, spacing } from '../theme';
+import { Divider } from './Divider';
 import { IconButton } from './IconButton';
 import { Text } from './Text';
 
 interface LargeHeaderProps {
   title: string;
-  /** Small line above the title, e.g. today's date or an item count. */
-  eyebrow?: string;
+  /** Secondary line below the divider, e.g. today's date or an item count. */
+  subtitle?: string;
   actions?: ReactNode;
 }
 
-/** Top-level screens: large title with optional actions on the right. */
-export function LargeHeader({ title, eyebrow, actions }: LargeHeaderProps) {
+/**
+ * Top-level screens: the title and actions on one row (as tall as BarHeader),
+ * a divider, then the optional subtitle.
+ */
+export function LargeHeader({ title, subtitle, actions }: LargeHeaderProps) {
   return (
-    <View style={styles.large}>
-      <View style={styles.titleColumn}>
-        {/* Always reserve the line so titles don't shift between screens. */}
-        <Text variant="label" color="textTertiary">
-          {eyebrow ?? ' '}
-        </Text>
-        <Text variant="display" accessibilityRole="header" numberOfLines={1}>
+    <View>
+      <View style={styles.large}>
+        <Text
+          variant="title"
+          accessibilityRole="header"
+          numberOfLines={1}
+          style={styles.largeTitle}
+        >
           {title}
         </Text>
+        <View style={styles.actionsRow}>{actions}</View>
       </View>
-      <View style={styles.actionsRow}>{actions}</View>
+      <Divider />
+      {/* Always reserve the line so content doesn't shift between screens. */}
+      <Text variant="label" color="textTertiary" style={styles.subtitle}>
+        {subtitle ?? ' '}
+      </Text>
     </View>
   );
 }
@@ -68,16 +78,21 @@ export function BarHeader({
 const styles = StyleSheet.create({
   large: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    height: 56,
+    marginTop: spacing.sm,
     paddingHorizontal: gutter,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.lg,
   },
-  titleColumn: { flex: 1 },
+  largeTitle: { flex: 1 },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: -spacing.sm,
+  },
+  subtitle: {
+    paddingHorizontal: gutter,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
   bar: {
     flexDirection: 'row',

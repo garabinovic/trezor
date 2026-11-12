@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, StatusBar, StyleSheet, View } from 'react-native';
 import { Lock } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Icon, Text } from '../components';
 import { gutter, spacing, useTheme } from '../theme';
 import { authErrorMessage } from './appLock';
@@ -14,6 +15,7 @@ import { useAppLock } from './AppLockProvider';
  */
 export function LockScreen() {
   const { colors, scheme } = useTheme();
+  const insets = useSafeAreaInsets();
   const { state, unlock, setEnabled } = useAppLock();
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,7 +52,15 @@ export function LockScreen() {
 
   return (
     <View
-      style={[styles.fill, { backgroundColor: colors.background }]}
+      style={[
+        styles.fill,
+        {
+          backgroundColor: colors.background,
+          paddingTop: insets.top,
+          // Lower on the screen, within thumb reach, above the system navigation.
+          paddingBottom: insets.bottom + spacing.huge,
+        },
+      ]}
       accessibilityViewIsModal
     >
       <StatusBar
@@ -71,21 +81,30 @@ export function LockScreen() {
                 {message}
               </Text>
             )}
-            <Button label="Unlock" onPress={tryUnlock} disabled={busy} />
           </>
         ) : (
-          <>
-            <Text variant="callout" color="textSecondary" align="center">
-              This device no longer has a fingerprint, face or screen lock set
-              up, so Trezor can’t confirm it’s you. Set a screen lock in Android
-              settings, or turn App Lock off.
-            </Text>
-            <Button
-              label="Turn off App Lock"
-              variant="secondary"
-              onPress={() => setEnabled(false).catch(() => undefined)}
-            />
-          </>
+          <Text variant="callout" color="textSecondary" align="center">
+            This device no longer has a fingerprint, face or screen lock set up,
+            so Trezor can’t confirm it’s you. Set a screen lock in Android
+            settings, or turn App Lock off.
+          </Text>
+        )}
+      </View>
+      <View style={styles.actions}>
+        {canAuthenticate ? (
+          <Button
+            label="Unlock"
+            onPress={tryUnlock}
+            disabled={busy}
+            fullWidth
+          />
+        ) : (
+          <Button
+            label="Turn off App Lock"
+            variant="secondary"
+            onPress={() => setEnabled(false).catch(() => undefined)}
+            fullWidth
+          />
         )}
       </View>
     </View>
@@ -94,11 +113,20 @@ export function LockScreen() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  /** The explanation, centered in the space above the button. */
   body: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.lg,
     paddingHorizontal: gutter,
+  },
+  /** One centered button, full width up to a comfortable maximum. */
+  actions: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 360,
+    paddingHorizontal: gutter,
+    paddingTop: spacing.xxl,
   },
 });

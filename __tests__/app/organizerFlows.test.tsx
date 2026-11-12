@@ -1,5 +1,6 @@
 import React from 'react';
-import ReactTestRenderer from 'react-test-renderer';
+import { Linking, StyleSheet } from 'react-native';
+import ReactTestRenderer, { ReactTestInstance } from 'react-test-renderer';
 import App from '../../App';
 import type { Item } from '../../src/data/types';
 import { runMigrations } from '../../src/storage/migrations';
@@ -7,6 +8,7 @@ import { serializeDatabase } from '../../src/storage/serialDatabase';
 import { SqliteSettingsRepository } from '../../src/storage/SettingsRepository';
 import { SqliteItemRepository } from '../../src/storage/SqliteItemRepository';
 import type { SqlDatabase } from '../../src/storage/sql';
+import { typography } from '../../src/theme';
 import {
   hasText,
   isSelected,
@@ -215,6 +217,72 @@ describe('Home', () => {
   });
 });
 
+describe('page headers', () => {
+  const isHost = (n: ReactTestInstance) => typeof n.type === 'string';
+  const hostParent = (n: ReactTestInstance) => {
+    let p = n.parent;
+    while (p && !isHost(p)) {
+      p = p.parent;
+    }
+    return p;
+  };
+  const hostChildren = (n: ReactTestInstance) =>
+    n.findAll(c => c !== n && isHost(c) && hostParent(c) === n);
+  const textOf = (n: ReactTestInstance) =>
+    ([] as unknown[]).concat(n.props.children).join('');
+
+  /** The header of the visible top-level screen titled `title`. */
+  function header(title: string) {
+    const titles = app.root.findAll(
+      n =>
+        isHost(n) &&
+        n.type === ('Text' as never) &&
+        n.props.accessibilityRole === 'header' &&
+        textOf(n) === title,
+    );
+    expect(titles).toHaveLength(1);
+    const row = hostParent(titles[0])!;
+    const [first, divider, subtitle] = hostChildren(hostParent(row)!);
+    return { title: titles[0], row, first, divider, subtitle };
+  }
+
+  test('title and actions share one row; date or count sits below the divider', async () => {
+    await launch();
+    const screens: [string, () => Promise<void>][] = [
+      ['Trezor', async () => undefined],
+      ['Notes', () => openTab(app, 'Notes')],
+      ['Reminders', () => openTab(app, 'Reminders')],
+      ['Cards', () => openTab(app, 'Cards')],
+      ['Documents', () => openTab(app, 'Documents')],
+    ];
+    for (const [title, open] of screens) {
+      await open();
+      const h = header(title);
+      // Balanced with the 22 pt action icons (the title token, not display).
+      expect([title, StyleSheet.flatten(h.title.props.style).fontSize]).toEqual(
+        [title, typography.title.fontSize],
+      );
+      expect(StyleSheet.flatten(h.row.props.style)).toMatchObject({
+        flexDirection: 'row',
+        alignItems: 'center',
+      });
+      const settings = h.row.findAll(
+        n => n.props.accessibilityLabel === 'Settings',
+      );
+      expect([title, settings.length > 0]).toEqual([title, true]);
+      expect([title, h.first === h.row]).toEqual([title, true]);
+      expect(StyleSheet.flatten(h.divider.props.style).height).toBe(
+        StyleSheet.hairlineWidth,
+      );
+      expect([
+        title,
+        h.subtitle.type,
+        textOf(h.subtitle).trim() !== '',
+      ]).toEqual([title, 'Text', true]);
+    }
+  });
+});
+
 describe('category tabs', () => {
   test('each tab lists its stored items and filters by category chips', async () => {
     await launch();
@@ -241,9 +309,16 @@ describe('category tabs', () => {
     expect(isSelected(app, 'Warranties')).toBe(true);
     expect(hasText(app, 'Fridge')).toBe(true);
     expect(hasText(app, 'Passport')).toBe(false);
-    await pressText(app, 'Other');
+    expect(hasText(app, 'Other')).toBe(false);
+    // The "document" kind is its own filter, labelled Files (not grouped
+    // under Other, and not named like the screen).
+    await pressText(app, 'Files');
+    expect(isSelected(app, 'Files')).toBe(true);
     expect(hasText(app, 'Passport')).toBe(true);
     expect(hasText(app, 'Fridge')).toBe(false);
+    await pressText(app, 'Images');
+    expect(hasText(app, 'Passport')).toBe(false);
+    expect(hasText(app, 'No images saved.')).toBe(true);
   });
 });
 
@@ -436,6 +511,27 @@ describe('settings', () => {
     await restart();
     await pressLabel(app, 'Settings');
     expect(isSelected(app, 'Dark')).toBe(true);
+  });
+
+  test('About Trezor and feedback: the email opens the mail app with mailto', async () => {
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    await launch();
+    await pressLabel(app, 'Settings');
+    expect(hasText(app, 'About Trezor')).toBe(true);
+    expect(hasText(app, 'Feedback & Suggestions')).toBe(true);
+    expect(texts(app).join(' ')).toContain(
+      'Your data is stored locally on your device, protected with encryption',
+    );
+    // The old claim that data never leaves the device is gone (backups do).
+    expect(texts(app).join(' ')).not.toContain('never leaves this device');
+    await pressLabel(app, 'Email andrijag@gmail.com');
+    expect(open).toHaveBeenCalledWith('mailto:andrijag@gmail.com');
+    expect(hasText(app, 'No email app is set up on this device.')).toBe(false);
+
+    open.mockRejectedValueOnce(new Error('no activity'));
+    await pressLabel(app, 'Email andrijag@gmail.com');
+    expect(hasText(app, 'No email app is set up on this device.')).toBe(true);
+    open.mockRestore();
   });
 
   test('About shows the installed build’s version from the native side', async () => {

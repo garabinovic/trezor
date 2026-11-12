@@ -40,17 +40,33 @@ describe('category filters', () => {
     expect(upcoming.length + done.length).toBe(reminders.length);
   });
 
-  test('documents filter by kind; "other" covers images and documents', () => {
+  test('documents: one filter per stored kind, no catch-all', () => {
     const docs = ofType('document');
     const ids = (value: string) =>
       docs
         .filter(filterBy(documentFilters, value).predicate)
         .map(d => d.id)
         .sort();
+    expect(documentFilters.map(f => [f.value, f.label])).toEqual([
+      ['all', 'All'],
+      ['receipt', 'Receipts'],
+      ['warranty', 'Warranties'],
+      ['image', 'Images'],
+      ['document', 'Files'],
+    ]);
     expect(ids('all')).toEqual(docs.map(d => d.id).sort());
-    expect(ids('receipts')).toEqual(['d2']);
-    expect(ids('warranties')).toEqual(['d1', 'd3']);
-    expect(ids('other')).toEqual(['d4', 'd5']);
+    expect(ids('receipt')).toEqual(['d2']);
+    expect(ids('warranty')).toEqual(['d1', 'd3']);
+    expect(ids('image')).toEqual(['d4']);
+    expect(ids('document')).toEqual(['d5']);
+    // Every document is in exactly one kind filter.
+    const kinds = documentFilters.slice(1);
+    for (const doc of docs) {
+      expect(kinds.filter(f => f.predicate(doc))).toHaveLength(1);
+    }
+    expect(kinds.reduce((n, f) => n + ids(f.value).length, 0)).toBe(
+      docs.length,
+    );
   });
 
   test('reminder count label', () => {
