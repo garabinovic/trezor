@@ -7,6 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.trezor.app.attachments.TrezorAttachmentsPackage
+import com.trezor.app.locale.TrezorLocalePackage
 import com.trezor.app.backup.TrezorBackupPackage
 import com.trezor.app.lock.TrezorAppLockPackage
 import com.trezor.app.reminders.TrezorRemindersPackage
@@ -28,6 +29,7 @@ class MainApplication : Application(), ReactApplication {
           add(TrezorBackupPackage())
           add(TrezorRestorePackage())
           add(TrezorAppLockPackage())
+          add(TrezorLocalePackage())
         },
     )
   }

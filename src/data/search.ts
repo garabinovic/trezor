@@ -1,4 +1,4 @@
-import { documentKinds } from './categories';
+import { strings } from '../i18n/strings';
 import { Item } from './types';
 
 /** Every text field a person would expect search to look at, per type. */
@@ -21,7 +21,7 @@ export function searchableText(item: Item): string[] {
         item.title,
         item.merchant,
         item.notes,
-        documentKinds[item.kind].label,
+        strings().documentKinds[item.kind],
         ...item.attachments.map(a => a.fileName),
       ];
   }

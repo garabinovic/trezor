@@ -4,52 +4,53 @@ import { LucideIcon, ShieldAlert, TriangleAlert } from 'lucide-react-native';
 import { canCancelRestore, cancelRestore } from '../backup/recovery';
 import { restoreEntryFor } from '../backup/restore';
 import { Button, Dialog, EmptyState, Screen, Text } from '../components';
+import { useStrings } from '../i18n';
+import type { Strings } from '../i18n/strings';
 import { StorageError, StorageErrorCode } from '../storage/errors';
 import { gutter, useTheme } from '../theme';
 import { RestoreFlow } from './backup/RestoreFlow';
 
+/** A key of the app language's `storageError` strings. */
+type Copy = {
+  [K in keyof Strings['storageError']]: Strings['storageError'][K] extends string
+    ? K
+    : never;
+}[keyof Strings['storageError']];
+
 interface ErrorCopy {
   icon: LucideIcon;
-  title: string;
-  message: string;
+  title: Copy;
+  message: Copy;
 }
-
-const KEEP_INSTALLED =
-  'Please don’t uninstall Trezor: that would permanently erase your data.';
 
 const keyProblem: ErrorCopy = {
   icon: ShieldAlert,
-  title: 'Trezor can’t unlock your data',
-  message:
-    'The encryption key that protects your data on this device is missing or no longer valid. Nothing has been deleted.',
+  title: 'keyTitle',
+  message: 'keyMessage',
 };
 
 const updateNeeded: ErrorCopy = {
   icon: TriangleAlert,
-  title: 'Update Trezor to continue',
-  message:
-    'Your data was saved by a newer version of Trezor. Install the latest version to open it. Nothing has been changed.',
+  title: 'newerTitle',
+  message: 'newerMessage',
 };
 
 const unreadable: ErrorCopy = {
   icon: TriangleAlert,
-  title: 'Your data couldn’t be opened',
-  message:
-    'The data file appears to be damaged or doesn’t match its key. Nothing has been deleted.',
+  title: 'corruptTitle',
+  message: 'corruptMessage',
 };
 
 const generic: ErrorCopy = {
   icon: TriangleAlert,
-  title: 'Trezor couldn’t open your data',
-  message:
-    'Something went wrong while opening secure storage. Nothing has been deleted.',
+  title: 'genericTitle',
+  message: 'genericMessage',
 };
 
 const migrationProblem: ErrorCopy = {
   icon: TriangleAlert,
-  title: 'Trezor couldn’t finish updating',
-  message:
-    'Your data couldn’t be upgraded to this version, so it was left exactly as it was.',
+  title: 'migrationTitle',
+  message: 'migrationMessage',
 };
 
 const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
@@ -67,38 +68,33 @@ const copyByCode: Partial<Record<StorageErrorCode, ErrorCopy>> = {
   SNAPSHOT_FAILED: migrationProblem,
   RESTORE_VERIFY_RETRY: {
     icon: TriangleAlert,
-    title: 'The restore isn’t finished yet',
-    message:
-      'Trezor couldn’t check the restored data just now. Your data from before the restore is kept until it can.',
+    title: 'restoreUnfinishedTitle',
+    message: 'restoreVerifyMessage',
   },
   RESTORE_RECOVERY_RETRY: {
     icon: TriangleAlert,
-    title: 'The restore isn’t finished yet',
-    message:
-      'A step of the restore couldn’t be completed. Nothing has been lost; trying again continues where it stopped.',
+    title: 'restoreUnfinishedTitle',
+    message: 'restoreRetryMessage',
   },
   RESTORE_STATE_UNKNOWN: {
     icon: ShieldAlert,
-    title: 'An unfinished restore needs attention',
-    message:
-      'Trezor found restore files it can’t account for. To protect your data, nothing is changed automatically.',
+    title: 'restoreUnknownTitle',
+    message: 'restoreUnknownMessage',
   },
   RESTORE_UNAVAILABLE: {
     icon: ShieldAlert,
-    title: 'Trezor can’t finish the restore',
-    message:
-      'The encryption key on this device is missing or no longer valid. All restore files are kept.',
+    title: 'restoreKeyTitle',
+    message: 'restoreKeyMessage',
   },
   WIPE_INCOMPLETE: {
     icon: TriangleAlert,
-    title: 'Deleting your data didn’t finish',
-    message:
-      'Some files couldn’t be removed yet. Try again to complete it; nothing is shown until it has.',
+    title: 'wipeTitle',
+    message: 'wipeMessage',
   },
   RESTORE_IN_PROGRESS: {
     icon: TriangleAlert,
-    title: 'A restore is still running',
-    message: 'Wait a moment, then try again.',
+    title: 'restoreRunningTitle',
+    message: 'restoreRunningMessage',
   },
 };
 
@@ -135,6 +131,7 @@ export function StorageErrorScreen({
   restoreCancel = nativeRestoreCancel,
 }: StorageErrorScreenProps) {
   const { scheme } = useTheme();
+  const t = useStrings().storageError;
   const copy = copyByCode[error.code] ?? generic;
   const [cancelOffered, setCancelOffered] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -220,42 +217,41 @@ export function StorageErrorScreen({
       <View style={styles.body}>
         <EmptyState
           icon={copy.icon}
-          title={copy.title}
-          message={`${copy.message} ${KEEP_INSTALLED}`}
-          actionLabel="Try again"
+          title={t[copy.title]}
+          message={`${t[copy.message]} ${t.keepInstalled}`}
+          actionLabel={t.tryAgain}
           onActionPress={retry}
           actionDisabled={busy}
         />
         {entry === 'restore' && (
           <Button
-            label="Restore from a backup"
+            label={t.restore}
             onPress={() => setRestoring(true)}
             variant="ghost"
           />
         )}
         {entry === 'unavailable' && (
           <Text variant="caption" color="textSecondary" align="center">
-            Restoring a backup isn’t possible on this device while its key is
-            missing or invalid (RESTORE_UNAVAILABLE).
+            {t.restoreUnavailable}
           </Text>
         )}
         {cancelOffered && (
           <Button
-            label="Cancel restore and return to previous data"
+            label={t.cancelRestore}
             onPress={() => setConfirming(true)}
             variant="ghost"
             disabled={cancelling}
           />
         )}
         <Text variant="caption" color="textTertiary" align="center">
-          Error code: {error.code}
+          {t.errorCode(error.code)}
         </Text>
       </View>
       <Dialog
         visible={confirming}
-        title="Cancel restore?"
-        message="The restored data will be discarded and Trezor returns to the data you had before the restore."
-        confirmLabel="Return to previous data"
+        title={t.cancelTitle}
+        message={t.cancelMessage}
+        confirmLabel={t.returnToPrevious}
         destructive
         onConfirm={confirmCancel}
         onCancel={() => setConfirming(false)}

@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { House, LucideIcon } from 'lucide-react-native';
 import { categories } from '../data';
+import { useStrings } from '../i18n';
 import { iconSize, iconStroke, spacing, typography, useTheme } from '../theme';
 import { HomeScreen } from '../screens/HomeScreen';
 import { NotesScreen } from '../screens/NotesScreen';
@@ -24,6 +25,7 @@ const TAB_BAR_CONTENT_HEIGHT = 56;
 
 export function TabNavigator() {
   const { colors } = useTheme();
+  const t = useStrings();
   // Clear Android's navigation buttons (3-button or gesture bar) with a little
   // room to spare, so the labels don't sit right on top of them.
   const bottom = useSafeAreaInsets().bottom + spacing.sm;
@@ -49,22 +51,31 @@ export function TabNavigator() {
       <Tab.Screen
         name="Home"
         component={HomeScreen}
-        options={{ tabBarIcon: tabIcon(House) }}
+        options={{ tabBarIcon: tabIcon(House), tabBarLabel: t.tabs.home }}
       />
       <Tab.Screen
         name="Notes"
         component={NotesScreen}
-        options={{ tabBarIcon: tabIcon(categories.note.icon) }}
+        options={{
+          tabBarIcon: tabIcon(categories.note.icon),
+          tabBarLabel: t.tabs.notes,
+        }}
       />
       <Tab.Screen
         name="Reminders"
         component={RemindersScreen}
-        options={{ tabBarIcon: tabIcon(categories.reminder.icon) }}
+        options={{
+          tabBarIcon: tabIcon(categories.reminder.icon),
+          tabBarLabel: t.tabs.reminders,
+        }}
       />
       <Tab.Screen
         name="Cards"
         component={CardsScreen}
-        options={{ tabBarIcon: tabIcon(categories.card.icon) }}
+        options={{
+          tabBarIcon: tabIcon(categories.card.icon),
+          tabBarLabel: t.tabs.cards,
+        }}
       />
       <Tab.Screen
         name="Documents"
@@ -73,8 +84,8 @@ export function TabNavigator() {
           tabBarIcon: tabIcon(categories.document.icon),
           // "Documents" doesn't fit a fifth of a phone screen; the screen
           // title and screen readers keep the full name.
-          tabBarLabel: 'Docs',
-          tabBarAccessibilityLabel: 'Documents, tab',
+          tabBarLabel: t.tabs.documents,
+          tabBarAccessibilityLabel: t.tabs.documentsAccessibility,
         }}
       />
     </Tab.Navigator>

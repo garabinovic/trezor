@@ -4,7 +4,8 @@ import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { X } from 'lucide-react-native';
 import { BarHeader, Button, Dialog, Screen } from '../components';
-import { attachmentIdsOf, categories, Item, useItem, useItems } from '../data';
+import { attachmentIdsOf, Item, useItem, useItems } from '../data';
+import { useStrings } from '../i18n';
 import { RootStackParamList } from '../navigation/types';
 import { useReminders } from '../reminders/RemindersProvider';
 import { gutter, spacing } from '../theme';
@@ -47,7 +48,8 @@ export function ItemEditorScreen({ route, navigation }: Props) {
   const savingRef = useRef(false);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
-  const noun = categories[type].singular.toLowerCase();
+  const t = useStrings();
+  const text = t.categories[type];
 
   usePreventRemove(saving || (dirty && !saved), ({ data }) => {
     if (savingRef.current) {
@@ -127,20 +129,18 @@ export function ItemEditorScreen({ route, navigation }: Props) {
       keyboardAware
       header={
         <BarHeader
-          title={existing ? `Edit ${noun}` : `New ${noun}`}
+          title={existing ? text.editTitle : text.newTitle}
           onBack={navigation.goBack}
           backIcon={X}
-          backLabel="Cancel"
-          actions={
-            <View style={styles.save}>
-              <Button
-                label="Save"
-                size="sm"
-                onPress={save}
-                disabled={attachments.busy || saving}
-              />
-            </View>
-          }
+          backLabel={t.common.cancel}
+        />
+      }
+      footer={
+        <Button
+          label={t.common.save}
+          onPress={save}
+          disabled={attachments.busy || saving}
+          fullWidth
         />
       }
     >
@@ -171,10 +171,10 @@ export function ItemEditorScreen({ route, navigation }: Props) {
 
       <Dialog
         visible={pendingLeave !== null}
-        title="Discard changes?"
-        message={`Your changes to this ${noun} will not be saved.`}
-        confirmLabel="Discard"
-        cancelLabel="Keep editing"
+        title={t.editor.discardTitle}
+        message={text.discardMessage}
+        confirmLabel={t.editor.discard}
+        cancelLabel={t.editor.keepEditing}
         destructive
         onCancel={() => setPendingLeave(null)}
         onConfirm={() => {
@@ -193,5 +193,4 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     gap: spacing.xxl,
   },
-  save: { paddingRight: spacing.sm },
 });

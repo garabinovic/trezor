@@ -10,7 +10,8 @@ import {
   SearchField,
   Text,
 } from '../components';
-import { categories, itemTypes, useItemSearch } from '../data';
+import { itemTypes, useItemSearch } from '../data';
+import { useStrings } from '../i18n';
 import { RootStackParamList } from '../navigation/types';
 import { gutter, spacing, useTheme } from '../theme';
 import { ItemRow } from './shared/ItemRow';
@@ -19,6 +20,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Search'>;
 
 export function SearchScreen({ navigation }: Props) {
   const { colors } = useTheme();
+  const t = useStrings();
   const [query, setQuery] = useState('');
   const search = useItemSearch(query);
 
@@ -28,11 +30,11 @@ export function SearchScreen({ navigation }: Props) {
     }
     return itemTypes
       .map(type => ({
-        title: categories[type].plural,
+        title: t.categories[type].plural,
         data: search.results.filter(i => i.type === type),
       }))
       .filter(section => section.data.length > 0);
-  }, [search]);
+  }, [search, t]);
 
   return (
     <Screen
@@ -41,12 +43,12 @@ export function SearchScreen({ navigation }: Props) {
         <View style={styles.header}>
           <IconButton
             icon={ArrowLeft}
-            label="Back"
+            label={t.common.back}
             onPress={navigation.goBack}
           />
           <View style={styles.field}>
             <SearchField
-              placeholder="Search everything"
+              placeholder={t.search.placeholder}
               value={query}
               onChangeText={setQuery}
               autoFocus
@@ -58,14 +60,14 @@ export function SearchScreen({ navigation }: Props) {
       {search.status === 'idle' ? (
         <EmptyState
           icon={Search}
-          title="Search everything"
-          message="Find notes, reminders, cards and documents by title or content."
+          title={t.search.idleTitle}
+          message={t.search.idleMessage}
         />
       ) : search.status === 'error' ? (
         <EmptyState
           icon={SearchX}
-          title="Search isn’t available"
-          message="Your items couldn’t be searched right now. Please try again."
+          title={t.search.errorTitle}
+          message={t.search.errorMessage}
         />
       ) : (
         <SectionList
@@ -92,8 +94,8 @@ export function SearchScreen({ navigation }: Props) {
             search.status === 'done' ? (
               <EmptyState
                 icon={SearchX}
-                title="No results"
-                message={`Nothing matches “${query.trim()}”.`}
+                title={t.search.noResults}
+                message={t.search.noMatch(query.trim())}
               />
             ) : undefined
           }

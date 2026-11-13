@@ -12,6 +12,7 @@ import { AppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import { Dialog } from '../components';
 import { useItems } from '../data';
 import type { SettingsRepository } from '../storage/SettingsRepository';
+import { useStrings } from '../i18n';
 import { nativeReminderPlatform, ReminderPlatform } from './platform';
 import {
   onCompletedElsewhere,
@@ -74,6 +75,7 @@ export function RemindersProvider({
   children,
 }: RemindersProviderProps) {
   const { items, readStored, completeStoredReminders } = useItems();
+  const t = useStrings().reminders;
   const [showDetails, setShowDetailsState] = useState(initialShowDetails);
   const [notificationsEnabled, setNotificationsEnabled] = useState<
     boolean | null
@@ -309,19 +311,19 @@ export function RemindersProvider({
       {children}
       <Dialog
         visible={explaining}
-        title="Allow reminder notifications?"
-        message="Trezor uses notifications to remind you at the time you set. Reminder details stay hidden unless you choose to show them in Settings."
-        confirmLabel="Continue"
-        cancelLabel="Not now"
+        title={t.permissionTitle}
+        message={t.permissionMessage}
+        confirmLabel={t.continue}
+        cancelLabel={t.notNow}
         onConfirm={askAndroid}
         onCancel={declineExplanation}
       />
       <Dialog
         visible={explainingExact}
-        title="Deliver reminders on time?"
-        message="Without this, Android may delay reminders to save battery, and some phones hold them until you open Trezor. Allow “Alarms & reminders” for Trezor on the next screen."
-        confirmLabel="Open settings"
-        cancelLabel="Not now"
+        title={t.exactTitle}
+        message={t.exactMessage}
+        confirmLabel={t.openSettings}
+        cancelLabel={t.notNow}
         onConfirm={confirmExact}
         onCancel={declineExact}
       />

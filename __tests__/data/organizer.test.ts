@@ -1,3 +1,4 @@
+import { en } from '../../src/i18n/en';
 import { describeAttachment, itemSummary } from '../../src/data/format';
 import {
   buildHomeOverview,
@@ -47,7 +48,7 @@ describe('category filters', () => {
         .filter(filterBy(documentFilters, value).predicate)
         .map(d => d.id)
         .sort();
-    expect(documentFilters.map(f => [f.value, f.label])).toEqual([
+    expect(documentFilters.map(f => [f.value, en.filters[f.label]])).toEqual([
       ['all', 'All'],
       ['receipt', 'Receipts'],
       ['warranty', 'Warranties'],

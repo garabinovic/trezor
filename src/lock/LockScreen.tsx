@@ -3,6 +3,7 @@ import { AppState, StatusBar, StyleSheet, View } from 'react-native';
 import { Lock } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Icon, Text } from '../components';
+import { useStrings } from '../i18n';
 import { gutter, spacing, useTheme } from '../theme';
 import { authErrorMessage } from './appLock';
 import { useAppLock } from './AppLockProvider';
@@ -16,6 +17,7 @@ import { useAppLock } from './AppLockProvider';
 export function LockScreen() {
   const { colors, scheme } = useTheme();
   const insets = useSafeAreaInsets();
+  const t = useStrings().lock;
   const { state, unlock, setEnabled } = useAppLock();
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -69,12 +71,12 @@ export function LockScreen() {
       <View style={styles.body}>
         <Icon icon={Lock} size="lg" />
         <Text variant="title" align="center">
-          Trezor is locked
+          {t.locked}
         </Text>
         {canAuthenticate ? (
           <>
             <Text variant="callout" color="textSecondary" align="center">
-              Unlock with your fingerprint, face or screen lock.
+              {t.unlockHint}
             </Text>
             {!!message && (
               <Text variant="callout" color="danger" align="center">
@@ -84,23 +86,21 @@ export function LockScreen() {
           </>
         ) : (
           <Text variant="callout" color="textSecondary" align="center">
-            This device no longer has a fingerprint, face or screen lock set up,
-            so Trezor can’t confirm it’s you. Set a screen lock in Android
-            settings, or turn App Lock off.
+            {t.noCredential}
           </Text>
         )}
       </View>
       <View style={styles.actions}>
         {canAuthenticate ? (
           <Button
-            label="Unlock"
+            label={t.unlock}
             onPress={tryUnlock}
             disabled={busy}
             fullWidth
           />
         ) : (
           <Button
-            label="Turn off App Lock"
+            label={t.turnOff}
             variant="secondary"
             onPress={() => setEnabled(false).catch(() => undefined)}
             fullWidth

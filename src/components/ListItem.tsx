@@ -21,6 +21,8 @@ interface ListItemProps {
   trailing?: ReactNode;
   chevron?: boolean;
   disabled?: boolean;
+  /** For a choice in a list (e.g. the language): announced as selected. */
+  selected?: boolean;
   onPress?: () => void;
   accessibilityHint?: string;
 }
@@ -40,6 +42,7 @@ export function ListItem({
   trailing,
   chevron = false,
   disabled = false,
+  selected,
   onPress,
   accessibilityHint,
 }: ListItemProps) {
@@ -48,7 +51,7 @@ export function ListItem({
   return (
     <Pressable
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, selected }}
       accessibilityHint={accessibilityHint}
       disabled={disabled || !onPress}
       onPress={onPress}

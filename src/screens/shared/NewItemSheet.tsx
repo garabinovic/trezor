@@ -2,13 +2,7 @@ import React from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { ListItem, Sheet } from '../../components';
 import { categories, ItemType, itemTypes } from '../../data';
-
-const descriptions: Record<ItemType, string> = {
-  note: 'Text, lists and ideas',
-  reminder: 'Something to do at a set time',
-  card: 'Loyalty or membership card',
-  document: 'Receipt, warranty or file',
-};
+import { useStrings } from '../../i18n';
 
 interface NewItemSheetProps {
   visible: boolean;
@@ -18,6 +12,7 @@ interface NewItemSheetProps {
 /** Type picker shown by the Home "+" button. */
 export function NewItemSheet({ visible, onClose }: NewItemSheetProps) {
   const navigation = useNavigation();
+  const t = useStrings();
 
   const create = (type: ItemType) => {
     onClose();
@@ -25,13 +20,13 @@ export function NewItemSheet({ visible, onClose }: NewItemSheetProps) {
   };
 
   return (
-    <Sheet visible={visible} title="Add new" onClose={onClose}>
+    <Sheet visible={visible} title={t.home.addNew} onClose={onClose}>
       {itemTypes.map(type => (
         <ListItem
           key={type}
           icon={categories[type].icon}
-          title={categories[type].singular}
-          subtitle={descriptions[type]}
+          title={t.categories[type].singular}
+          subtitle={t.categories[type].description}
           onPress={() => create(type)}
         />
       ))}

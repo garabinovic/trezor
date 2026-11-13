@@ -3,6 +3,8 @@ import { Image, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { ImageOff } from 'lucide-react-native';
 import { Icon, Text } from '../components';
 import type { Attachment } from '../data/types';
+import { useStrings } from '../i18n';
+import type { Strings } from '../i18n/strings';
 import { Theme, useStyles } from '../theme';
 import { AttachmentErrorCode, nativeAttachmentPlatform } from './platform';
 
@@ -69,16 +71,19 @@ function close(uri: string) {
     .catch(() => console.warn('[attachments] could not delete view file'));
 }
 
-function problemText(code: AttachmentErrorCode | 'UNDISPLAYABLE'): string {
+function problemText(
+  code: AttachmentErrorCode | 'UNDISPLAYABLE',
+  t: Strings['viewer']['photoProblems'],
+): string {
   switch (code) {
     case 'MISSING':
-      return 'Photo file is missing';
+      return t.missing;
     case 'DAMAGED':
-      return 'Photo file is damaged';
+      return t.damaged;
     case 'UNDISPLAYABLE':
-      return 'This photo can’t be shown on this device';
+      return t.unsupported;
     default:
-      return 'Photo can’t be shown right now';
+      return t.failed;
   }
 }
 
@@ -94,6 +99,7 @@ export function AttachmentImage({
   style?: StyleProp<ViewStyle>;
 }) {
   const styles = useStyles(createStyles);
+  const t = useStrings().viewer.photoProblems;
   const view = useAttachmentView(attachment);
   const [undisplayable, setUndisplayable] = useState<string | null>(null);
 
@@ -110,11 +116,11 @@ export function AttachmentImage({
         <View
           style={styles.problem}
           accessible
-          accessibilityLabel={`${label}: ${problemText(problem)}`}
+          accessibilityLabel={`${label}: ${problemText(problem, t)}`}
         >
           <Icon icon={ImageOff} color="textTertiary" />
           <Text variant="caption" color="textTertiary" align="center">
-            {problemText(problem)}
+            {problemText(problem, t)}
           </Text>
         </View>
       ) : (

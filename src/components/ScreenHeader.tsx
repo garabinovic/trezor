@@ -1,6 +1,7 @@
 import React, { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ArrowLeft, LucideIcon } from 'lucide-react-native';
+import { useStrings } from '../i18n';
 import { gutter, spacing } from '../theme';
 import { Divider } from './Divider';
 import { IconButton } from './IconButton';
@@ -54,13 +55,18 @@ export function BarHeader({
   title,
   onBack,
   backIcon = ArrowLeft,
-  backLabel = 'Back',
+  backLabel,
   actions,
 }: BarHeaderProps) {
+  const t = useStrings();
   return (
     <View style={styles.bar}>
       {onBack && (
-        <IconButton icon={backIcon} label={backLabel} onPress={onBack} />
+        <IconButton
+          icon={backIcon}
+          label={backLabel ?? t.common.back}
+          onPress={onBack}
+        />
       )}
       <Text
         variant="headline"

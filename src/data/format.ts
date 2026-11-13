@@ -6,49 +6,12 @@ import {
   LoyaltyCard,
   Reminder,
 } from './types';
-import { documentKinds } from './categories';
+import { strings } from '../i18n/strings';
 import { nextDue, repeatLabel } from '../reminders/reminderSchedule';
 
 // Formatting is done by hand so output is identical on every device,
-// regardless of system locale. The UI is English-only.
-
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-const WEEKDAYS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-const MONTHS_LONG = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
+// regardless of system locale: names and word order come from the app
+// language's strings (src/i18n), never from the device.
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -65,81 +28,84 @@ function dayDiff(date: Date, now: Date): number {
 }
 
 export function formatTime(date: Date): string {
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return strings().dates.time(date.getHours(), date.getMinutes());
 }
 
 /** "12 Oct 2026", or "12 Oct" within the current year. */
 export function formatDate(date: Date, now = new Date()): string {
-  const base = `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+  const { dayMonth, dayMonthYear } = strings().dates;
   return date.getFullYear() === now.getFullYear()
-    ? base
-    : `${base} ${date.getFullYear()}`;
+    ? dayMonth(date.getDate(), date.getMonth())
+    : dayMonthYear(date.getDate(), date.getMonth(), date.getFullYear());
 }
 
 /** "12 Oct 2026" */
 export function formatFullDate(date: Date): string {
-  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+  return strings().dates.dayMonthYear(
+    date.getDate(),
+    date.getMonth(),
+    date.getFullYear(),
+  );
 }
 
 /** "Thursday, 30 October" */
 export function formatLongToday(now = new Date()): string {
-  return `${WEEKDAYS[now.getDay()]}, ${now.getDate()} ${
-    MONTHS_LONG[now.getMonth()]
-  }`;
+  return strings().dates.longDate(now.getDay(), now.getDate(), now.getMonth());
 }
 
 /** "Today, 09:00", "Tomorrow, 18:30", "Mon, 09:00", "12 Nov, 09:00" */
 export function formatDue(iso: string, now = new Date()): string {
   const date = new Date(iso);
   const diff = dayDiff(date, now);
+  const t = strings().dates;
   let day: string;
   if (diff === 0) {
-    day = 'Today';
+    day = t.today;
   } else if (diff === 1) {
-    day = 'Tomorrow';
+    day = t.tomorrow;
   } else if (diff === -1) {
-    day = 'Yesterday';
+    day = t.yesterday;
   } else if (diff > 1 && diff < 7) {
-    day = WEEKDAYS[date.getDay()].slice(0, 3);
+    day = t.weekdaysShort[date.getDay()];
   } else {
     day = formatDate(date, now);
   }
-  return `${day}, ${formatTime(date)}`;
+  return t.dayAndTime(day, formatTime(date));
 }
 
 /** "Just now", "2 h ago", "Yesterday", "12 Oct" */
 export function formatRelative(iso: string, now = new Date()): string {
   const date = new Date(iso);
+  const t = strings().dates;
   const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);
   if (minutes < 1) {
-    return 'Just now';
+    return t.justNow;
   }
   if (minutes < 60) {
-    return `${minutes} min ago`;
+    return t.minutesAgo(minutes);
   }
   const diff = dayDiff(date, now);
   if (diff === 0) {
-    return `${Math.floor(minutes / 60)} h ago`;
+    return t.hoursAgo(Math.floor(minutes / 60));
   }
   if (diff === -1) {
-    return 'Yesterday';
+    return t.yesterday;
   }
   return formatDate(date, now);
 }
 
 /** "Edited just now", "Edited yesterday", "Edited 12 Oct" */
 export function formatEdited(iso: string, now = new Date()): string {
+  const t = strings().dates;
   const relative = formatRelative(iso, now);
-  return relative === 'Just now' || relative === 'Yesterday'
-    ? `Edited ${relative.toLowerCase()}`
-    : `Edited ${relative}`;
+  return relative === t.justNow
+    ? t.editedJustNow
+    : relative === t.yesterday
+    ? t.editedYesterday
+    : t.edited(relative);
 }
 
-export {
-  isOverdue,
-  repeatLabel,
-  repeatLabels,
-} from '../reminders/reminderSchedule';
+export { isOverdue, repeatLabel } from '../reminders/reminderSchedule';
 
 const currencySymbols: Record<string, string> = {
   EUR: '€',
@@ -149,7 +115,12 @@ const currencySymbols: Record<string, string> = {
 
 export function formatAmount(amount: number, currency: string): string {
   const symbol = currencySymbols[currency];
-  const value = amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const { decimal, group } = strings().numbers;
+  const [whole, cents] = amount.toFixed(2).split('.');
+  const value = `${whole.replace(
+    /\B(?=(\d{3})+(?!\d))/g,
+    group,
+  )}${decimal}${cents}`;
   return symbol ? `${symbol}${value}` : `${value} ${currency}`;
 }
 
@@ -166,25 +137,28 @@ export function maskCardNumber(cardNumber: string): string {
 
 export function formatFileSize(sizeBytes: number): string {
   const kb = sizeBytes === 0 ? 0 : Math.max(1, Math.round(sizeBytes / 1024));
-  return kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`;
+  const t = strings().numbers;
+  return kb >= 1024
+    ? `${(kb / 1024).toFixed(1).replace('.', t.decimal)} ${t.mb}`
+    : `${kb} ${t.kb}`;
 }
 
-const attachmentTypeLabels: Record<AttachmentMimeType, string> = {
-  'image/jpeg': 'JPEG image',
-  'image/png': 'PNG image',
-  'image/webp': 'WebP image',
-  'image/heic': 'HEIC image',
-  'image/heif': 'HEIF image',
-  'application/pdf': 'PDF',
-};
+const attachmentTypeKeys = {
+  'image/jpeg': 'jpeg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'application/pdf': 'pdf',
+} as const satisfies Record<AttachmentMimeType, string>;
 
 /** "PDF · 1.2 MB" */
 export function describeAttachment(
   a: Pick<Attachment, 'mimeType' | 'sizeBytes'>,
 ): string {
-  return `${attachmentTypeLabels[a.mimeType] ?? 'File'} · ${formatFileSize(
-    a.sizeBytes,
-  )}`;
+  const types = strings().attachmentTypes;
+  const key = attachmentTypeKeys[a.mimeType] as keyof typeof types | undefined;
+  return `${types[key ?? 'file']} · ${formatFileSize(a.sizeBytes)}`;
 }
 
 /** Parses a strict YYYY-MM-DD string; returns null when invalid. */
@@ -205,12 +179,17 @@ export function toIsoDate(date: Date): string {
 }
 
 function documentSummary(doc: DocumentItem, now: Date): string {
-  const parts = [documentKinds[doc.kind].label];
+  const t = strings();
+  const parts = [t.documentKinds[doc.kind]];
   const expires = doc.expiresOn ? parseIsoDate(doc.expiresOn) : null;
   if (expires) {
     const label =
-      expires < now ? 'Expired' : doc.kind === 'warranty' ? 'Until' : 'Expires';
-    parts.push(`${label} ${formatFullDate(expires)}`);
+      expires < now
+        ? t.summary.expired
+        : doc.kind === 'warranty'
+        ? t.summary.until
+        : t.summary.expires;
+    parts.push(label(formatFullDate(expires)));
   } else if (doc.date) {
     const date = parseIsoDate(doc.date);
     if (date) {

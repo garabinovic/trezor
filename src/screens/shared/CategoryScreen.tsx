@@ -11,6 +11,7 @@ import {
 } from '../../components';
 import { categories, ItemOfType, ItemType, useItemsOfType } from '../../data';
 import { ItemFilter } from '../../data/organizer';
+import { useLanguage, useStrings } from '../../i18n';
 import { spacing } from '../../theme';
 import { HeaderActions } from './HeaderActions';
 import { ItemRow } from './ItemRow';
@@ -33,7 +34,10 @@ export function CategoryScreen<T extends ItemType>({
   countLabel,
 }: CategoryScreenProps<T>) {
   const navigation = useNavigation();
+  const t = useStrings();
+  const { language } = useLanguage();
   const meta = categories[type];
+  const text = t.categories[type];
   const all = useItemsOfType(type);
   const [filterValue, setFilterValue] = useState(filters?.[0].value ?? '');
   const filter = filters?.find(f => f.value === filterValue);
@@ -44,9 +48,11 @@ export function CategoryScreen<T extends ItemType>({
   );
 
   const create = () => navigation.navigate('ItemEditor', { type });
-  const countText = countLabel
-    ? countLabel(all)
-    : `${all.length} ${all.length === 1 ? 'item' : 'items'}`;
+  const countText = countLabel ? countLabel(all) : t.counts.items(all.length);
+  const chips = useMemo(
+    () => filters?.map(f => ({ value: f.value, label: t.filters[f.label] })),
+    [filters, t],
+  );
 
   return (
     <Screen
@@ -54,21 +60,19 @@ export function CategoryScreen<T extends ItemType>({
       bottomInset={false}
       header={
         <LargeHeader
-          title={meta.plural}
+          title={text.plural}
           subtitle={all.length > 0 ? countText : undefined}
           actions={<HeaderActions />}
         />
       }
-      overlay={
-        <Fab label={`New ${meta.singular.toLowerCase()}`} onPress={create} />
-      }
+      overlay={<Fab label={text.newTitle} onPress={create} />}
     >
       {all.length === 0 ? (
         <EmptyState
           icon={meta.icon}
-          title={meta.emptyTitle}
-          message={meta.emptyMessage}
-          actionLabel={`Add ${meta.singular.toLowerCase()}`}
+          title={text.emptyTitle}
+          message={text.emptyMessage}
+          actionLabel={text.add}
           onActionPress={create}
         />
       ) : (
@@ -76,13 +80,15 @@ export function CategoryScreen<T extends ItemType>({
           data={visible}
           keyExtractor={item => item.id}
           renderItem={({ item }) => <ItemRow item={item} context="category" />}
+          // Rows show dates and labels in the app language.
+          extraData={language}
           ItemSeparatorComponent={Separator}
           ListHeaderComponent={
-            filters ? (
+            chips ? (
               <View style={styles.filters}>
                 <ChipGroup
-                  label={`Filter ${meta.plural.toLowerCase()}`}
-                  options={filters}
+                  label={text.filterLabel}
+                  options={chips}
                   value={filterValue}
                   onChange={setFilterValue}
                 />
@@ -92,8 +98,12 @@ export function CategoryScreen<T extends ItemType>({
           ListEmptyComponent={
             <EmptyState
               icon={meta.icon}
-              title="Nothing here"
-              message={filter?.emptyMessage}
+              title={t.filters.nothingHere}
+              message={
+                filter?.emptyMessage
+                  ? t.filters[filter.emptyMessage]
+                  : undefined
+              }
             />
           }
           contentContainerStyle={styles.list}

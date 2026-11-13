@@ -13,6 +13,8 @@ import {
 import { Button, Dialog, Text } from '../../components';
 import { nativeReminderPlatform } from '../../reminders/platform';
 import type { SerialDatabase } from '../../storage/serialDatabase';
+import { useStrings } from '../../i18n';
+import { strings } from '../../i18n/strings';
 import { restoreErrorMessage } from './messages';
 import { Busy, PasswordField, styles } from './parts';
 
@@ -36,9 +38,6 @@ interface RestoreFlowProps {
   onClose: () => void;
 }
 
-const REPLACE_WARNING =
-  'Everything in Trezor on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.';
-
 /**
  * Restore from a backup (spec v2.4 §8, v2.5 §6). Replace-only: after the
  * preconditions (§8.1), a file and its password, and a confirmation, the
@@ -53,6 +52,7 @@ export function RestoreFlow({
   onBusyChange,
   onClose,
 }: RestoreFlowProps) {
+  const t = useStrings();
   const [phase, setPhase] = useState<Phase>({ kind: 'checking' });
   const [uri, setUri] = useState<string | null>(null);
   const [password, setPassword] = useState('');
@@ -82,8 +82,7 @@ export function RestoreFlow({
         } else if (result.status === 'notOffered') {
           setPhase({
             kind: 'refused',
-            message:
-              'There’s no data file on this device to restore over. Try again instead.',
+            message: strings().restore.noDataFile,
           });
         } else {
           setPhase({
@@ -156,7 +155,7 @@ export function RestoreFlow({
       await retryRestoreCleanup();
       setPhase({
         kind: 'form',
-        error: 'The restore was stopped. Your data is as it was before.',
+        error: t.restore.stopped,
       });
     } catch (e) {
       setPhase({ kind: 'cleanup', error: restoreErrorMessage(e) });
@@ -167,30 +166,34 @@ export function RestoreFlow({
     case 'checking':
       return (
         <Busy
-          title="Preparing…"
-          message="Checking whether a restore is possible."
+          title={t.restore.preparing}
+          message={t.restore.preparingMessage}
         />
       );
     case 'refused':
       return (
         <View style={styles.form}>
           <Text variant="callout">{phase.message}</Text>
-          <Button label="Close" variant="secondary" onPress={onClose} />
+          <Button
+            label={t.common.close}
+            variant="secondary"
+            onPress={onClose}
+          />
         </View>
       );
     case 'running':
       return (
         <>
           <Busy
-            title="Restoring…"
-            message="The backup is being read and checked. Keep Trezor open until this is done."
+            title={t.restore.restoring}
+            message={t.restore.restoringMessage}
           />
           <Dialog
             visible={shares !== null}
-            title="A file is still being shared"
-            message="Trezor is handing a file to another app. Wait until that has finished, or cancel the restore."
-            confirmLabel="Check again"
-            cancelLabel="Cancel restore"
+            title={t.restore.sharingTitle}
+            message={t.restore.sharingMessage}
+            confirmLabel={t.restore.checkAgain}
+            cancelLabel={t.restore.cancelRestore}
             onConfirm={() => answerShares('wait')}
             onCancel={() => answerShares('cancel')}
           />
@@ -199,12 +202,12 @@ export function RestoreFlow({
     case 'replacing':
       return (
         <Busy
-          title="Finishing the restore…"
-          message="Trezor restarts by itself now. If it doesn’t: Restore isn’t finished yet. Close and reopen Trezor to complete it."
+          title={t.restore.finishing}
+          message={t.restore.finishingMessage}
         />
       );
     case 'cleaning':
-      return <Busy title="Putting your data back in order…" />;
+      return <Busy title={t.restore.cleaningUp} />;
     case 'cleanup':
       return (
         <View style={styles.form}>
@@ -212,27 +215,27 @@ export function RestoreFlow({
             {phase.error ??
               restoreErrorMessage({ code: 'RESTORE_RECOVERY_RETRY' })}
           </Text>
-          <Button label="Try again" onPress={finishCleanup} />
+          <Button label={t.common.tryAgain} onPress={finishCleanup} />
         </View>
       );
     case 'form':
       return (
         <View style={styles.form}>
           <Text variant="callout" color="textSecondary">
-            {REPLACE_WARNING}
+            {t.restore.warning}
           </Text>
           <Button
-            label={uri ? 'Choose another file' : 'Choose backup file'}
+            label={uri ? t.restore.chooseAnother : t.restore.chooseFile}
             variant="secondary"
             onPress={chooseFile}
           />
           {uri && (
             <Text variant="caption" color="textTertiary">
-              Backup file chosen.
+              {t.restore.fileChosen}
             </Text>
           )}
           <PasswordField
-            label="Backup password"
+            label={t.backup.password}
             value={password}
             onChangeText={setPassword}
           />
@@ -242,17 +245,17 @@ export function RestoreFlow({
             </Text>
           )}
           <Button
-            label="Restore"
+            label={t.restore.restore}
             variant="destructive"
             onPress={() => setConfirming(true)}
             disabled={!uri || password.length === 0}
           />
-          <Button label="Cancel" variant="ghost" onPress={onClose} />
+          <Button label={t.common.cancel} variant="ghost" onPress={onClose} />
           <Dialog
             visible={confirming}
-            title="Replace all data?"
-            message={REPLACE_WARNING}
-            confirmLabel="Replace"
+            title={t.restore.replaceTitle}
+            message={t.restore.warning}
+            confirmLabel={t.restore.replace}
             destructive
             onConfirm={restore}
             onCancel={() => setConfirming(false)}

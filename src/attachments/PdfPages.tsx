@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Image, PixelRatio, StyleSheet, View } from 'react-native';
 import { Text } from '../components';
 import type { Attachment } from '../data/types';
+import { useStrings } from '../i18n';
 import { Theme, useStyles } from '../theme';
 import {
   AttachmentErrorCode,
@@ -136,6 +137,7 @@ function PdfPage({
   height: number;
 }) {
   const styles = useStyles(createStyles);
+  const t = useStrings().viewer;
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const widthPx = Math.round(PixelRatio.getPixelSizeForLayoutSize(width));
@@ -164,13 +166,13 @@ function PdfPage({
     };
   }, [handle, index, widthPx]);
 
-  const label = `Page ${index + 1} of ${count}`;
+  const label = t.page(index + 1, count);
   return (
     <View style={[styles.page, { width, height }]}>
       {failed ? (
         <View style={styles.pageProblem} accessible accessibilityLabel={label}>
           <Text variant="caption" color="textTertiary" align="center">
-            This page can’t be shown
+            {t.pageUnavailable}
           </Text>
         </View>
       ) : (

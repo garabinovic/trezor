@@ -5,6 +5,8 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { createBackup } from '../backup/backup';
 import { BarHeader, Button, Screen, Text } from '../components';
 import { useItems } from '../data';
+import { useStrings } from '../i18n';
+import { strings } from '../i18n/strings';
 import { RootStackParamList } from '../navigation/types';
 import { useStorage } from '../storage/StorageProvider';
 import { backupErrorMessage } from './backup/messages';
@@ -17,18 +19,20 @@ type Phase =
   | { kind: 'running' }
   | { kind: 'done'; bytes: number };
 
-/** `Trezor backup 2026-11-10.tzbk`, in local time. */
+/** `Trezor backup 2026-11-10.tzbk` (in the app language), in local time. */
 export function backupFileName(now = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `Trezor backup ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
-    now.getDate(),
-  )}.tzbk`;
+  return strings().backup.fileName(
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+  );
 }
 
-const formatSize = (bytes: number) =>
-  bytes >= 1024 * 1024
-    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+function formatSize(bytes: number): string {
+  const t = strings().numbers;
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1).replace('.', t.decimal)} ${t.mb}`
+    : `${Math.max(1, Math.round(bytes / 1024))} ${t.kb}`;
+}
 
 /**
  * Back up to a file (spec v2.4 §6): a password entered twice, an empty
@@ -38,6 +42,7 @@ const formatSize = (bytes: number) =>
  */
 export function BackupScreen({ navigation }: Props) {
   const { state } = useStorage();
+  const t = useStrings();
   const { items } = useItems();
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
@@ -75,7 +80,7 @@ export function BackupScreen({ navigation }: Props) {
     <Screen
       header={
         <BarHeader
-          title="Back up"
+          title={t.backup.title}
           onBack={running ? undefined : navigation.goBack}
         />
       }
@@ -83,37 +88,30 @@ export function BackupScreen({ navigation }: Props) {
     >
       <View style={styles.body}>
         {phase.kind === 'running' && (
-          <Busy
-            title="Backing up…"
-            message="Your data is being written and then checked. Keep Trezor open until this is done."
-          />
+          <Busy title={t.backup.running} message={t.backup.runningMessage} />
         )}
         {phase.kind === 'done' && (
           <View style={styles.form}>
-            <Text variant="headline">Backup saved and verified</Text>
+            <Text variant="headline">{t.backup.savedTitle}</Text>
             <Text variant="callout" color="textSecondary">
-              {`The backup file (${formatSize(
-                phase.bytes,
-              )}) was read back and checked. Keep it somewhere safe, together with its password: without the password it can’t be restored.`}
+              {t.backup.savedMessage(formatSize(phase.bytes))}
             </Text>
-            <Button label="Done" onPress={navigation.goBack} />
+            <Button label={t.common.done} onPress={navigation.goBack} />
           </View>
         )}
         {phase.kind === 'form' && (
           <View style={styles.form}>
             <Text variant="callout" color="textSecondary">
-              The backup file contains all your notes, reminders, cards,
-              documents and attached files, encrypted with the password you
-              choose here. Trezor can’t recover a forgotten password.
+              {t.backup.intro}
             </Text>
             <PasswordField
-              label="Backup password"
+              label={t.backup.password}
               value={password}
               onChangeText={setPassword}
-              helper="10 to 256 characters."
+              helper={t.backup.passwordHelper}
             />
             <PasswordField
-              label="Repeat password"
+              label={t.backup.repeatPassword}
               value={confirmation}
               onChangeText={setConfirmation}
             />
@@ -123,7 +121,7 @@ export function BackupScreen({ navigation }: Props) {
               </Text>
             )}
             <Button
-              label="Choose where to save"
+              label={t.backup.chooseDestination}
               onPress={start}
               disabled={password.length === 0 || confirmation.length === 0}
             />

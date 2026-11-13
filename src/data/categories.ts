@@ -11,56 +11,21 @@ import {
 } from 'lucide-react-native';
 import { DocumentKind, ItemType } from './types';
 
-interface CategoryMeta {
-  /** Singular, for "New note", "Delete note?" */
-  singular: string;
-  /** Plural, for titles and tabs. */
-  plural: string;
-  icon: LucideIcon;
-  emptyTitle: string;
-  emptyMessage: string;
-}
+// Icons only: every label is in the app language's strings
+// (src/i18n: categories, documentKinds).
 
-export const categories: Record<ItemType, CategoryMeta> = {
-  note: {
-    singular: 'Note',
-    plural: 'Notes',
-    icon: NotebookPen,
-    emptyTitle: 'No notes yet',
-    emptyMessage: 'Write down ideas, lists and anything you want to remember.',
-  },
-  reminder: {
-    singular: 'Reminder',
-    plural: 'Reminders',
-    icon: Bell,
-    emptyTitle: 'No reminders yet',
-    emptyMessage: 'Add reminders for renewals, appointments and small tasks.',
-  },
-  card: {
-    singular: 'Card',
-    plural: 'Cards',
-    icon: CreditCard,
-    emptyTitle: 'No cards yet',
-    emptyMessage: 'Keep your loyalty and membership cards ready at checkout.',
-  },
-  document: {
-    singular: 'Document',
-    plural: 'Documents',
-    icon: Folder,
-    emptyTitle: 'No documents yet',
-    emptyMessage:
-      'Store receipts, warranties and important papers in one place.',
-  },
+export const categories: Record<ItemType, { icon: LucideIcon }> = {
+  note: { icon: NotebookPen },
+  reminder: { icon: Bell },
+  card: { icon: CreditCard },
+  document: { icon: Folder },
 };
 
 export const itemTypes: ItemType[] = ['note', 'reminder', 'card', 'document'];
 
-export const documentKinds: Record<
-  DocumentKind,
-  { label: string; icon: LucideIcon }
-> = {
-  receipt: { label: 'Receipt', icon: Receipt },
-  warranty: { label: 'Warranty', icon: ShieldCheck },
-  image: { label: 'Image', icon: Image },
-  document: { label: 'Document', icon: FileText },
+export const documentKinds: Record<DocumentKind, { icon: LucideIcon }> = {
+  receipt: { icon: Receipt },
+  warranty: { icon: ShieldCheck },
+  image: { icon: Image },
+  document: { icon: FileText },
 };

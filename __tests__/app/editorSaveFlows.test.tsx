@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import ReactTestRenderer, { ReactTestInstance } from 'react-test-renderer';
 import App from '../../App';
 import type { DocumentItem } from '../../src/data/types';
@@ -205,6 +206,53 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await ReactTestRenderer.act(async () => app?.unmount());
+});
+
+describe('Save is at the bottom of every editor, within thumb reach', () => {
+  const host = (n: ReactTestInstance) => typeof n.type === 'string';
+  const hostAncestors = (n: ReactTestInstance) => {
+    const list: ReactTestInstance[] = [];
+    for (let p = n.parent; p; p = p.parent) {
+      if (host(p)) {
+        list.push(p);
+      }
+    }
+    return list;
+  };
+
+  test.each([
+    ['Notes', 'New note'],
+    ['Reminders', 'New reminder'],
+    ['Cards', 'New card'],
+    ['Documents', 'New document'],
+  ])('%s', async (tab, newLabel) => {
+    await launch();
+    await openTab(app, tab);
+    await pressLabel(app, newLabel);
+    const saveText = app.root
+      .findAll(n => host(n) && n.type === ('Text' as never))
+      .filter(n => ([] as unknown[]).concat(n.props.children).includes('Save'))
+      .pop()!;
+    const saveAncestors = hostAncestors(saveText);
+    // Not in the header (which keeps Cancel) and not in the scrolling form.
+    const cancel = app.root
+      .findAll(n => n.props.accessibilityLabel === 'Cancel' && n.props.onPress)
+      .pop()!;
+    const header = hostAncestors(cancel)[0];
+    expect([tab, saveAncestors.includes(header)]).toEqual([tab, false]);
+    expect([
+      tab,
+      saveAncestors.some(n => n.type === ('RCTScrollView' as never)),
+    ]).toEqual([tab, false]);
+    // Full width, primary.
+    const button = saveAncestors.find(
+      n => n.props.accessibilityRole === 'button',
+    )!;
+    expect([tab, StyleSheet.flatten(button.props.style).alignSelf]).toEqual([
+      tab,
+      'stretch',
+    ]);
+  });
 });
 
 describe('the editor leaves only once its item is stored (V5)', () => {

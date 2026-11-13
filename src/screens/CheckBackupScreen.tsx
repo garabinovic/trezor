@@ -4,6 +4,7 @@ import { usePreventRemove } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { checkBackup } from '../backup/backup';
 import { BarHeader, Button, Screen, Text } from '../components';
+import { useStrings } from '../i18n';
 import { RootStackParamList } from '../navigation/types';
 import { backupErrorMessage } from './backup/messages';
 import { Busy, PasswordField, styles } from './backup/parts';
@@ -20,6 +21,7 @@ type Phase =
  * everything in it with its password. Nothing on this device is changed.
  */
 export function CheckBackupScreen({ navigation }: Props) {
+  const t = useStrings();
   const [password, setPassword] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
   const running = phase.kind === 'running';
@@ -45,37 +47,30 @@ export function CheckBackupScreen({ navigation }: Props) {
     <Screen
       header={
         <BarHeader
-          title="Check a backup"
+          title={t.check.title}
           onBack={running ? undefined : navigation.goBack}
         />
       }
       keyboardAware
     >
       <View style={styles.body}>
-        {phase.kind === 'running' && <Busy title="Checking the backup…" />}
+        {phase.kind === 'running' && <Busy title={t.check.running} />}
         {phase.kind === 'valid' && (
           <View style={styles.form}>
-            <Text variant="headline">The backup is complete</Text>
+            <Text variant="headline">{t.check.validTitle}</Text>
             <Text variant="callout" color="textSecondary">
-              {`Every part of the file was decrypted and verified${
-                phase.attachments > 0
-                  ? `, including ${phase.attachments} attached ${
-                      phase.attachments === 1 ? 'file' : 'files'
-                    }`
-                  : ''
-              }. It can be restored with this password. Nothing on this device was changed.`}
+              {t.check.validMessage(phase.attachments)}
             </Text>
-            <Button label="Done" onPress={navigation.goBack} />
+            <Button label={t.common.done} onPress={navigation.goBack} />
           </View>
         )}
         {phase.kind === 'form' && (
           <View style={styles.form}>
             <Text variant="callout" color="textSecondary">
-              Checks that a backup file is complete and that its password is
-              right. Nothing on this device is changed.
+              {t.check.intro}
             </Text>
             <PasswordField
-              label="Backup password"
+              label={t.backup.password}
               value={password}
               onChangeText={setPassword}
             />
@@ -85,7 +80,7 @@ export function CheckBackupScreen({ navigation }: Props) {
               </Text>
             )}
             <Button
-              label="Choose backup file"
+              label={t.check.chooseFile}
               onPress={start}
               disabled={password.length === 0}
             />

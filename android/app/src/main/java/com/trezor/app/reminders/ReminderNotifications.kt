@@ -9,11 +9,14 @@ import android.content.Intent
 import android.os.Build
 import com.trezor.app.MainActivity
 import com.trezor.app.R
+import com.trezor.app.locale.LocaleStore
+import com.trezor.app.locale.NativeText
 
 /**
  * Posts reminder notifications with framework APIs only. Content is generic unless the
  * user enabled "Show reminder details". A generic public version is always attached, so
- * Android's own lock-screen privacy settings decide what appears on the lock screen.
+ * Android's own lock-screen privacy settings decide what appears on the lock screen. The generic
+ * text and the channel are in the app's language ([LocaleStore]).
  */
 object ReminderNotifications {
 
@@ -21,7 +24,6 @@ object ReminderNotifications {
   const val ACTION_OPEN = "com.trezor.app.reminders.OPEN"
   private const val NOTIFICATION_ID = 1
   private const val GENERIC_TITLE = "Trezor"
-  private const val GENERIC_BODY = "You have a reminder."
 
   private fun manager(context: Context) =
       context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -32,10 +34,15 @@ object ReminderNotifications {
   fun ensureChannel(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val channel =
-        NotificationChannel(CHANNEL_ID, "Reminders", NotificationManager.IMPORTANCE_HIGH).apply {
-          description = "Reminders you set in Trezor"
-          lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-        }
+        NotificationChannel(
+                CHANNEL_ID,
+                LocaleStore.text(context, NativeText.CHANNEL_NAME),
+                NotificationManager.IMPORTANCE_HIGH,
+            )
+            .apply {
+              description = LocaleStore.text(context, NativeText.CHANNEL_DESCRIPTION)
+              lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            }
     manager(context).createNotificationChannel(channel)
   }
 
@@ -68,14 +75,15 @@ object ReminderNotifications {
     if (!enabled(context)) return // Permission denied or notifications turned off.
     ensureChannel(context)
     val detailed = showDetails && !entry.title.isNullOrEmpty()
+    val genericBody = LocaleStore.text(context, NativeText.REMINDER_BODY)
     val title = if (detailed) entry.title!! else GENERIC_TITLE
-    val body = if (detailed) entry.body?.takeIf { it.isNotBlank() } else GENERIC_BODY
+    val body = if (detailed) entry.body?.takeIf { it.isNotBlank() } else genericBody
 
     val publicVersion =
         builder(context)
             .setSmallIcon(R.drawable.ic_stat_reminder)
             .setContentTitle(GENERIC_TITLE)
-            .setContentText(GENERIC_BODY)
+            .setContentText(genericBody)
             .build()
 
     val notification =

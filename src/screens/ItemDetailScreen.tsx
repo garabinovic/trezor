@@ -50,6 +50,7 @@ import {
   useItems,
 } from '../data';
 import { AttachmentImage } from '../attachments/AttachmentImage';
+import { useStrings } from '../i18n';
 import { RootStackParamList } from '../navigation/types';
 import { nextDue } from '../reminders/reminderSchedule';
 import { gutter, Theme, useStyles } from '../theme';
@@ -58,6 +59,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ItemDetail'>;
 
 export function ItemDetailScreen({ route, navigation }: Props) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   const item = useItem(route.params.id);
   const { deleteItem, togglePinned } = useItems();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -67,18 +69,21 @@ export function ItemDetailScreen({ route, navigation }: Props) {
       <Screen header={<BarHeader onBack={navigation.goBack} />}>
         <EmptyState
           icon={Trash2}
-          title="Item not found"
-          message="It may have been deleted."
+          title={t.detail.notFoundTitle}
+          message={t.detail.notFoundMessage}
         />
       </Screen>
     );
   }
 
-  const meta = categories[item.type];
+  const text = t.categories[item.type];
   const kind =
     item.type === 'document'
-      ? documentKinds[item.kind]
-      : { label: meta.singular, icon: meta.icon };
+      ? {
+          label: t.documentKinds[item.kind],
+          icon: documentKinds[item.kind].icon,
+        }
+      : { label: text.singular, icon: categories[item.type].icon };
 
   return (
     <Screen
@@ -89,12 +94,12 @@ export function ItemDetailScreen({ route, navigation }: Props) {
             <>
               <IconButton
                 icon={item.pinned ? PinOff : Pin}
-                label={item.pinned ? 'Unpin' : 'Pin to Home'}
+                label={item.pinned ? t.detail.unpin : t.detail.pin}
                 onPress={() => togglePinned(item.id)}
               />
               <IconButton
                 icon={Pencil}
-                label="Edit"
+                label={t.common.edit}
                 onPress={() =>
                   navigation.navigate('ItemEditor', {
                     type: item.type,
@@ -104,7 +109,7 @@ export function ItemDetailScreen({ route, navigation }: Props) {
               />
               <IconButton
                 icon={Trash2}
-                label="Delete"
+                label={t.common.delete}
                 onPress={() => setConfirmDelete(true)}
               />
             </>
@@ -117,7 +122,7 @@ export function ItemDetailScreen({ route, navigation }: Props) {
           <Icon icon={kind.icon} size="sm" color="textTertiary" />
           <Text variant="label" color="textTertiary">
             {kind.label}
-            {item.pinned ? ' · Pinned' : ''}
+            {item.pinned ? t.detail.pinnedSuffix : ''}
           </Text>
         </View>
         <Text variant="title">{item.title}</Text>
@@ -133,9 +138,9 @@ export function ItemDetailScreen({ route, navigation }: Props) {
 
       <Dialog
         visible={confirmDelete}
-        title={`Delete ${meta.singular.toLowerCase()}?`}
-        message={`“${item.title}” will be permanently deleted.`}
-        confirmLabel="Delete"
+        title={text.deleteTitle}
+        message={t.detail.deleteMessage(item.title)}
+        confirmLabel={t.common.delete}
         destructive
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => {
@@ -150,11 +155,12 @@ export function ItemDetailScreen({ route, navigation }: Props) {
 
 function NotesBlock({ text }: { text: string }) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   if (!text) {
     return null;
   }
   return (
-    <Section title="Notes">
+    <Section title={t.detail.notes}>
       <Text style={styles.paragraph} selectable>
         {text}
       </Text>
@@ -173,6 +179,7 @@ function NoteBody({ note }: { note: Note }) {
 
 function ReminderBody({ reminder }: { reminder: Reminder }) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   const { setReminderCompleted } = useItems();
   const overdue = isOverdue(reminder);
   const due = nextDue(reminder);
@@ -182,16 +189,20 @@ function ReminderBody({ reminder }: { reminder: Reminder }) {
       <Section grouped>
         <ValueRow
           icon={Calendar}
-          label={reminder.repeat === 'once' ? 'Due' : 'Next'}
+          label={reminder.repeat === 'once' ? t.detail.due : t.detail.next}
           value={due === null ? '—' : formatDue(new Date(due).toISOString())}
           valueColor={overdue ? 'danger' : 'text'}
         />
-        <ValueRow icon={Repeat} label="Repeat" value={repeatLabel(reminder)} />
+        <ValueRow
+          icon={Repeat}
+          label={t.detail.repeat}
+          value={repeatLabel(reminder)}
+        />
       </Section>
       <NotesBlock text={reminder.notes} />
       <View style={styles.actions}>
         <Button
-          label={reminder.completed ? 'Mark as not done' : 'Mark as done'}
+          label={reminder.completed ? t.items.markNotDone : t.items.markDone}
           variant={reminder.completed ? 'secondary' : 'primary'}
           fullWidth
           onPress={() => setReminderCompleted(reminder.id, !reminder.completed)}
@@ -203,22 +214,33 @@ function ReminderBody({ reminder }: { reminder: Reminder }) {
 
 function CardBody({ card }: { card: LoyaltyCard }) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   const navigation = useNavigation();
   const photos = [
-    { photo: card.frontImage, side: 'Front', name: 'front' },
-    { photo: card.backImage, side: 'Back', name: 'back' },
+    {
+      photo: card.frontImage,
+      side: t.detail.cardFront,
+      open: t.detail.openFrontPhoto,
+      label: t.detail.frontPhoto,
+    },
+    {
+      photo: card.backImage,
+      side: t.detail.cardBack,
+      open: t.detail.openBackPhoto,
+      label: t.detail.backPhoto,
+    },
   ].filter(p => p.photo !== null);
 
   return (
     <View style={styles.body}>
       {photos.length > 0 && (
         <View style={styles.photos}>
-          {photos.map(({ photo, side, name }) => (
+          {photos.map(({ photo, side, open, label }) => (
             <Pressable
               key={side}
               style={styles.photo}
               accessibilityRole="button"
-              accessibilityLabel={`Open ${name} photo`}
+              accessibilityLabel={open}
               onPress={() =>
                 navigation.navigate('AttachmentViewer', {
                   itemId: card.id,
@@ -226,10 +248,7 @@ function CardBody({ card }: { card: LoyaltyCard }) {
                 })
               }
             >
-              <AttachmentImage
-                attachment={photo!}
-                label={`Photo of the ${name} of the card`}
-              />
+              <AttachmentImage attachment={photo!} label={label} />
               <Text variant="caption" color="textTertiary" align="center">
                 {side}
               </Text>
@@ -242,16 +261,24 @@ function CardBody({ card }: { card: LoyaltyCard }) {
           {formatCardNumber(card.cardNumber)}
         </Text>
         <Text variant="caption" color="textTertiary" align="center">
-          Card number · No barcode saved
+          {t.detail.cardNumberCaption}
         </Text>
       </View>
       {(!!card.issuer || !!card.holderName) && (
         <Section grouped>
           {!!card.issuer && (
-            <ValueRow icon={Store} label="Issuer" value={card.issuer} />
+            <ValueRow
+              icon={Store}
+              label={t.detail.issuer}
+              value={card.issuer}
+            />
           )}
           {!!card.holderName && (
-            <ValueRow icon={User} label="Cardholder" value={card.holderName} />
+            <ValueRow
+              icon={User}
+              label={t.detail.cardholder}
+              value={card.holderName}
+            />
           )}
         </Section>
       )}
@@ -262,6 +289,7 @@ function CardBody({ card }: { card: LoyaltyCard }) {
 
 function DocumentBody({ doc }: { doc: DocumentItem }) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   const navigation = useNavigation();
   const date = doc.date ? parseIsoDate(doc.date) : null;
   const expires = doc.expiresOn ? parseIsoDate(doc.expiresOn) : null;
@@ -271,7 +299,11 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
     <View style={styles.body}>
       {doc.attachments.length > 0 && (
         <Section
-          title={doc.attachments.length > 1 ? 'Attachments' : 'Attachment'}
+          title={
+            doc.attachments.length > 1
+              ? t.detail.attachments
+              : t.detail.attachment
+          }
           grouped
         >
           {doc.attachments.map(a => (
@@ -291,17 +323,21 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
           ))}
         </Section>
       )}
-      <Section title="Details" grouped>
+      <Section title={t.detail.details} grouped>
         {!!doc.merchant && (
-          <ValueRow icon={Store} label="Store or issuer" value={doc.merchant} />
+          <ValueRow
+            icon={Store}
+            label={t.detail.storeOrIssuer}
+            value={doc.merchant}
+          />
         )}
         {date && (
           <ValueRow
             icon={Calendar}
             label={
               doc.kind === 'receipt' || doc.kind === 'warranty'
-                ? 'Purchase date'
-                : 'Issue date'
+                ? t.detail.purchaseDate
+                : t.detail.issueDate
             }
             value={formatFullDate(date)}
           />
@@ -312,11 +348,11 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
             label={
               doc.kind === 'warranty'
                 ? expired
-                  ? 'Warranty ended'
-                  : 'Warranty until'
+                  ? t.detail.warrantyEnded
+                  : t.detail.warrantyUntil
                 : expired
-                ? 'Expired'
-                : 'Expires on'
+                ? t.detail.expired
+                : t.detail.expiresOn
             }
             value={formatFullDate(expires)}
             valueColor={expired ? 'danger' : 'text'}
@@ -325,7 +361,7 @@ function DocumentBody({ doc }: { doc: DocumentItem }) {
         {doc.amount != null && (
           <ValueRow
             icon={Wallet}
-            label="Amount"
+            label={t.detail.amount}
             value={formatAmount(doc.amount, doc.currency)}
           />
         )}

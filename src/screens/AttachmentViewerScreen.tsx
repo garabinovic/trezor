@@ -33,6 +33,8 @@ import {
   Item,
   useItem,
 } from '../data';
+import { useStrings } from '../i18n';
+import { strings } from '../i18n/strings';
 import { RootStackParamList } from '../navigation/types';
 import { gutter, spacing } from '../theme';
 
@@ -42,13 +44,14 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AttachmentViewer'>;
 export function viewableAttachments(
   item: Item | undefined,
 ): { attachment: Attachment; title: string }[] {
+  const t = strings().viewer;
   if (item?.type === 'card') {
     return [
       ...(item.frontImage
-        ? [{ attachment: item.frontImage, title: 'Front of card' }]
+        ? [{ attachment: item.frontImage, title: t.frontOfCard }]
         : []),
       ...(item.backImage
-        ? [{ attachment: item.backImage, title: 'Back of card' }]
+        ? [{ attachment: item.backImage, title: t.backOfCard }]
         : []),
     ];
   }
@@ -63,40 +66,29 @@ export function viewableAttachments(
 
 type Problem = AttachmentErrorCode | 'UNDISPLAYABLE';
 
-const problems: Partial<Record<Problem, { title: string; message: string }>> = {
-  MISSING: {
-    title: 'File is missing',
-    message:
-      'Its encrypted copy is no longer on this device. You can remove or replace it by editing.',
-  },
-  DAMAGED: {
-    title: 'File is damaged',
-    message:
-      'It doesn’t match the file that was saved, so it isn’t shown. You can remove or replace it by editing.',
-  },
-  KEY_UNAVAILABLE: {
-    title: 'File can’t be opened',
-    message: 'Its encryption key is unavailable on this device.',
-  },
-  PDF_PROTECTED: {
-    title: 'PDF is password-protected',
-    message: 'Trezor can’t open PDFs that need a password.',
-  },
-  PDF_UNSUPPORTED: {
-    title: 'PDF can’t be shown',
-    message: 'Android can’t display this PDF.',
-  },
-  UNDISPLAYABLE: {
-    title: 'Image can’t be shown',
-    message: 'This image format isn’t supported on this version of Android.',
-  },
-};
+function problemText(code: Problem): { title: string; message: string } {
+  const p = strings().viewer.problems;
+  switch (code) {
+    case 'MISSING':
+      return { title: p.missingTitle, message: p.missingMessage };
+    case 'DAMAGED':
+      return { title: p.damagedTitle, message: p.damagedMessage };
+    case 'KEY_UNAVAILABLE':
+      return { title: p.cantOpenTitle, message: p.keyMessage };
+    case 'PDF_PROTECTED':
+      return { title: p.passwordTitle, message: p.passwordMessage };
+    case 'PDF_UNSUPPORTED':
+      return { title: p.pdfTitle, message: p.pdfMessage };
+    case 'UNDISPLAYABLE':
+      return { title: p.imageTitle, message: p.imageMessage };
+    default:
+      return { title: p.cantOpenTitle, message: p.genericMessage };
+  }
+}
 
 function ViewerProblem({ code }: { code: Problem }) {
-  const text = problems[code] ?? {
-    title: 'File can’t be opened',
-    message: 'Something went wrong. Try again.',
-  };
+  useStrings();
+  const text = problemText(code);
   return (
     <View style={styles.centre}>
       <EmptyState
@@ -115,30 +107,31 @@ export function actionMessage(
   action: Action,
   code: AttachmentErrorCode,
 ): string | null {
-  const done = action === 'save' ? 'saved' : 'shared';
+  const t = strings().viewer.saveErrors;
+  const save = action === 'save';
   switch (code) {
     case 'BUSY':
       return null;
     case 'MISSING':
-      return `The file is missing and can’t be ${done}.`;
+      return save ? t.missingSaved : t.missingShared;
     case 'DAMAGED':
-      return `The file is damaged and can’t be ${done}.`;
+      return save ? t.damagedSaved : t.damagedShared;
     case 'KEY_UNAVAILABLE':
-      return `The file can’t be ${done}: its encryption key is unavailable.`;
+      return save ? t.keySaved : t.keyShared;
     case 'DESTINATION_NOT_EMPTY':
-      return 'That file already exists and was left unchanged. Choose a new name.';
+      return t.notEmpty;
     case 'DESTINATION_UNVERIFIED':
-      return 'This location can’t confirm the file is new, so nothing was saved. An empty file may remain there. Choose another location.';
+      return t.unverified;
     case 'EXPORT_FAILED':
-      return 'The copy couldn’t be saved. The incomplete copy was removed.';
+      return t.failed;
     case 'EXPORT_INCOMPLETE':
-      return 'The copy couldn’t be saved. An incomplete file may remain where you chose to save it.';
+      return t.incomplete;
     case 'PICKER_UNAVAILABLE':
-      return 'No app on this device can save files.';
+      return t.noSaver;
     case 'SHARE_UNAVAILABLE':
-      return 'No app on this device can receive this file.';
+      return t.noReceiver;
     default:
-      return `The file couldn’t be ${done}. Try again.`;
+      return save ? t.genericSaved : t.genericShared;
   }
 }
 
@@ -148,6 +141,7 @@ export function actionMessage(
  * encrypted file is only read.
  */
 function FileActions({ attachment }: { attachment: Attachment }) {
+  const t = useStrings();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(
     null,
@@ -160,7 +154,7 @@ function FileActions({ attachment }: { attachment: Attachment }) {
       if (action === 'save') {
         const result = await nativeAttachmentPlatform.saveCopy(attachment);
         if (result === 'saved') {
-          setStatus({ text: 'Copy saved.', error: false });
+          setStatus({ text: t.viewer.copySaved, error: false });
         }
       } else {
         await nativeAttachmentPlatform.share(attachment);
@@ -187,7 +181,7 @@ function FileActions({ attachment }: { attachment: Attachment }) {
       <View style={styles.actionRow}>
         <View style={styles.fill}>
           <Button
-            label="Save a copy"
+            label={t.viewer.saveCopy}
             icon={Download}
             variant="secondary"
             fullWidth
@@ -197,7 +191,7 @@ function FileActions({ attachment }: { attachment: Attachment }) {
         </View>
         <View style={styles.fill}>
           <Button
-            label="Share"
+            label={t.viewer.share}
             icon={Share2}
             variant="secondary"
             fullWidth
@@ -211,10 +205,11 @@ function FileActions({ attachment }: { attachment: Attachment }) {
 }
 
 function Loading() {
+  const t = useStrings();
   return (
     <View style={styles.centre}>
       <Text variant="callout" color="textTertiary" align="center">
-        Opening…
+        {t.viewer.opening}
       </Text>
     </View>
   );
@@ -226,6 +221,7 @@ function Loading() {
  * leaving the viewer deletes it. Save a copy and Share act on the file shown.
  */
 export function AttachmentViewerScreen({ route, navigation }: Props) {
+  const t = useStrings();
   const item = useItem(route.params.itemId);
   const files = viewableAttachments(item);
   const [index, setIndex] = useState(() =>
@@ -245,9 +241,9 @@ export function AttachmentViewerScreen({ route, navigation }: Props) {
   };
 
   const position = [
-    files.length > 1 ? `${index + 1} of ${files.length}` : null,
+    files.length > 1 ? t.common.position(index + 1, files.length) : null,
     current ? describeAttachment(current.attachment) : null,
-    page && page.count > 1 ? `Page ${page.index + 1} of ${page.count}` : null,
+    page && page.count > 1 ? t.viewer.page(page.index + 1, page.count) : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -260,19 +256,19 @@ export function AttachmentViewerScreen({ route, navigation }: Props) {
           title={current?.title ?? ''}
           onBack={navigation.goBack}
           backIcon={X}
-          backLabel="Close"
+          backLabel={t.common.close}
           actions={
             files.length > 1 && (
               <>
                 <IconButton
                   icon={ChevronLeft}
-                  label="Previous file"
+                  label={t.viewer.previousFile}
                   color={index > 0 ? 'text' : 'textTertiary'}
                   onPress={() => index > 0 && go(index - 1)}
                 />
                 <IconButton
                   icon={ChevronRight}
-                  label="Next file"
+                  label={t.viewer.nextFile}
                   color={index < files.length - 1 ? 'text' : 'textTertiary'}
                   onPress={() => index < files.length - 1 && go(index + 1)}
                 />
@@ -312,8 +308,8 @@ export function AttachmentViewerScreen({ route, navigation }: Props) {
         <View style={styles.centre}>
           <EmptyState
             icon={FileX}
-            title="File not found"
-            message="It may have been removed."
+            title={t.viewer.notFoundTitle}
+            message={t.viewer.notFoundMessage}
           />
         </View>
       )}

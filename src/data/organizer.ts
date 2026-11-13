@@ -1,6 +1,7 @@
 // Pure organizer rules shared by screens: per-category filters and sort
 // orders, and the Home overview. Kept out of components so they can be tested.
 import { nextDue } from '../reminders/reminderSchedule';
+import { strings, Strings } from '../i18n/strings';
 import { itemTypes } from './categories';
 import {
   DocumentItem,
@@ -12,26 +13,29 @@ import {
   Reminder,
 } from './types';
 
+/** A key of the app language's `filters` strings. */
+export type FilterText = keyof Strings['filters'];
+
 export interface ItemFilter<T extends ItemType> {
   value: string;
-  label: string;
+  label: FilterText;
   predicate: (item: ItemOfType<T>) => boolean;
   /** Shown when this filter has no matches but the category isn't empty. */
-  emptyMessage: string;
+  emptyMessage: FilterText | null;
 }
 
 export const reminderFilters: ItemFilter<'reminder'>[] = [
   {
     value: 'upcoming',
-    label: 'Upcoming',
+    label: 'upcoming',
     predicate: r => !r.completed,
-    emptyMessage: 'You are all caught up.',
+    emptyMessage: 'upcomingEmpty',
   },
   {
     value: 'done',
-    label: 'Done',
+    label: 'done',
     predicate: r => r.completed,
-    emptyMessage: 'Completed reminders will appear here.',
+    emptyMessage: 'doneEmpty',
   },
 ];
 
@@ -40,35 +44,30 @@ export const reminderFilters: ItemFilter<'reminder'>[] = [
  * so nothing falls outside them).
  */
 export const documentFilters: ItemFilter<'document'>[] = [
-  {
-    value: 'all',
-    label: 'All',
-    predicate: () => true,
-    emptyMessage: '',
-  },
+  { value: 'all', label: 'all', predicate: () => true, emptyMessage: null },
   {
     value: 'receipt',
-    label: 'Receipts',
+    label: 'receipts',
     predicate: d => d.kind === 'receipt',
-    emptyMessage: 'No receipts saved.',
+    emptyMessage: 'receiptsEmpty',
   },
   {
     value: 'warranty',
-    label: 'Warranties',
+    label: 'warranties',
     predicate: d => d.kind === 'warranty',
-    emptyMessage: 'No warranties saved.',
+    emptyMessage: 'warrantiesEmpty',
   },
   {
     value: 'image',
-    label: 'Images',
+    label: 'images',
     predicate: d => d.kind === 'image',
-    emptyMessage: 'No images saved.',
+    emptyMessage: 'imagesEmpty',
   },
   {
     value: 'document',
-    label: 'Files',
+    label: 'files',
     predicate: d => d.kind === 'document',
-    emptyMessage: 'No other documents saved.',
+    emptyMessage: 'filesEmpty',
   },
 ];
 
@@ -101,7 +100,8 @@ export const sortDocuments = (a: DocumentItem, b: DocumentItem) =>
 
 export function reminderCountLabel(reminders: Reminder[]): string {
   const open = reminders.filter(r => !r.completed).length;
-  return open === 0 ? 'Nothing due' : `${open} upcoming`;
+  const t = strings().counts;
+  return open === 0 ? t.nothingDue : t.upcoming(open);
 }
 
 export const COMING_UP_LIMIT = 3;

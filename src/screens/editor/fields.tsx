@@ -36,13 +36,14 @@ import {
   ItemOfType,
   ItemType,
   LoyaltyCard,
-  formatDate,
   formatTime,
   parseIsoDate,
   Reminder,
   ReminderRepeat,
   toIsoDate,
 } from '../../data';
+import { useStrings } from '../../i18n';
+import { strings } from '../../i18n/strings';
 import { spacing, Theme, useStyles } from '../../theme';
 import type { AttachmentSession } from './attachmentSession';
 import {
@@ -64,83 +65,65 @@ export interface FieldsProps<T extends ItemType> {
 }
 
 export function NoteFields({ draft, onChange, errors }: FieldsProps<'note'>) {
+  const t = useStrings().editor;
   return (
     <>
       <TextField
-        label="Title"
+        label={t.title}
         value={draft.title}
         onChangeText={title => onChange({ title })}
-        placeholder="e.g. Gift ideas"
+        placeholder={t.noteTitlePlaceholder}
         error={errors.title}
         autoFocus={!draft.title}
         returnKeyType="next"
       />
       <TextField
-        label="Note"
+        label={t.note}
         value={draft.body}
         onChangeText={body => onChange({ body })}
-        placeholder="Write anything you want to keep"
+        placeholder={t.noteBodyPlaceholder}
         multiline
       />
     </>
   );
 }
 
-const repeatOptions: ChipOption<ReminderRepeat>[] = [
-  { value: 'once', label: 'Once' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'monthly', label: 'Monthly' },
-  { value: 'yearly', label: 'Yearly' },
-  { value: 'interval', label: 'Interval' },
+const REPEATS: ReminderRepeat[] = [
+  'once',
+  'daily',
+  'weekly',
+  'monthly',
+  'yearly',
+  'interval',
 ];
-
-const intervalOptions: ChipOption<string>[] = INTERVAL_PRESETS.map(m => ({
-  value: String(m),
-  label: m === 60 ? '1 hour' : `${m / 60} hours`,
-}));
 
 const DEFAULT_INTERVAL = 240;
 
-const WEEKDAYS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
 /** One plain sentence describing when notifications will come. */
 export function scheduleHint(reminder: Reminder): string {
+  const t = strings();
+  const hint = t.editor.hint;
   const due = new Date(reminder.dueAt);
   const time = formatTime(due);
   const day = due.getDate();
   switch (reminder.repeat) {
     case 'once':
-      return 'Notifies once at this time.';
+      return hint.once;
     case 'daily':
-      return `Notifies every day at ${time}.`;
+      return hint.daily(time);
     case 'weekly':
-      return `Notifies every ${WEEKDAYS[due.getDay()]} at ${time}.`;
+      return hint.weekly(due.getDay(), time);
     case 'monthly':
-      return `Notifies on day ${day} of every month at ${time}.${
-        day > 28 ? ' In shorter months, on the last day.' : ''
-      }`;
+      return hint.monthly(day, time) + (day > 28 ? hint.monthlyShort : '');
     case 'yearly':
-      return `Notifies every year on ${formatDate(due, new Date(0)).replace(
-        / \d{4}$/,
-        '',
-      )} at ${time}.${
-        due.getMonth() === 1 && day === 29
-          ? ' In other years, on 28 February.'
-          : ''
-      }`;
+      return (
+        hint.yearly(t.dates.dayMonth(day, due.getMonth()), time) +
+        (due.getMonth() === 1 && day === 29 ? hint.leapDay : '')
+      );
     case 'interval':
-      return `Notifies ${intervalLabel(
-        reminder.intervalMinutes ?? DEFAULT_INTERVAL,
-      ).toLowerCase()}, starting at the date and time above.`;
+      return hint.interval(
+        intervalLabel(reminder.intervalMinutes ?? DEFAULT_INTERVAL),
+      );
   }
 }
 
@@ -153,7 +136,16 @@ export function ReminderFields({
   /** Exact alarms allowed; otherwise Android may deliver late. */
   onTime?: boolean;
 }) {
+  const t = useStrings().editor;
   const due = new Date(draft.dueAt);
+  const repeatOptions: ChipOption<ReminderRepeat>[] = REPEATS.map(value => ({
+    value,
+    label: t.repeatOptions[value],
+  }));
+  const intervalOptions: ChipOption<string>[] = INTERVAL_PRESETS.map(m => ({
+    value: String(m),
+    label: t.hours(m / 60),
+  }));
 
   // Date and time update the instant and the floating local start together.
   const setStart = (next: Date) => {
@@ -186,25 +178,25 @@ export function ReminderFields({
   return (
     <>
       <TextField
-        label="Title"
+        label={t.title}
         value={draft.title}
         onChangeText={title => onChange({ title })}
-        placeholder="e.g. Renew car insurance"
+        placeholder={t.reminderTitlePlaceholder}
         error={errors.title}
         autoFocus={!draft.title}
       />
       <View style={styles.row}>
         <DateField
-          label="Date"
+          label={t.date}
           value={due}
           onChange={setDate}
           error={errors.dueAt}
         />
-        <DateField label="Time" mode="time" value={due} onChange={setTime} />
+        <DateField label={t.time} mode="time" value={due} onChange={setTime} />
       </View>
-      <FieldGroup label="Repeat">
+      <FieldGroup label={t.repeat}>
         <ChipGroup
-          label="Repeat"
+          label={t.repeat}
           options={repeatOptions}
           value={draft.repeat}
           onChange={setRepeat}
@@ -212,9 +204,9 @@ export function ReminderFields({
         />
       </FieldGroup>
       {draft.repeat === 'interval' && (
-        <FieldGroup label="Every">
+        <FieldGroup label={t.every}>
           <ChipGroup
-            label="Interval"
+            label={t.interval}
             options={intervalOptions}
             value={String(draft.intervalMinutes ?? DEFAULT_INTERVAL)}
             onChange={value => onChange({ intervalMinutes: Number(value) })}
@@ -226,16 +218,15 @@ export function ReminderFields({
         {scheduleHint(draft)}
       </Text>
       <TextField
-        label="Notes"
+        label={t.notes}
         value={draft.notes}
         onChangeText={notes => onChange({ notes })}
-        placeholder="Optional"
+        placeholder={t.optional}
         multiline
       />
       {!onTime && (
         <Text variant="caption" color="textTertiary">
-          Notifications may arrive late as Android saves battery. Allow “Alarms
-          & reminders” in Settings so they arrive on time.
+          {t.batteryNote}
         </Text>
       )}
     </>
@@ -250,30 +241,31 @@ export function CardFields({
 }: FieldsProps<'card'> & { attachmentSession: AttachmentSession }) {
   // The stored code type (barcode / QR) is kept but not offered until codes
   // can be scanned or shown for real.
+  const t = useStrings().editor;
   return (
     <>
       <TextField
-        label="Card name"
+        label={t.cardName}
         value={draft.title}
         onChangeText={title => onChange({ title })}
-        placeholder="e.g. Greenleaf Rewards"
+        placeholder={t.cardNamePlaceholder}
         error={errors.title}
         autoFocus={!draft.title}
       />
       <TextField
-        label="Issuer"
+        label={t.issuer}
         value={draft.issuer}
         onChangeText={issuer => onChange({ issuer })}
-        placeholder="Store or programme, optional"
+        placeholder={t.issuerPlaceholder}
         autoCapitalize="words"
       />
       <TextField
-        label="Card number"
+        label={t.cardNumber}
         value={draft.cardNumber}
         onChangeText={cardNumber => onChange({ cardNumber })}
-        placeholder="As printed on the card"
+        placeholder={t.cardNumberPlaceholder}
         error={errors.cardNumber}
-        helper="Scanning a card with the camera will come in a later version."
+        helper={t.cardNumberHelper}
         autoCapitalize="characters"
         autoCorrect={false}
       />
@@ -283,17 +275,17 @@ export function CardFields({
         session={attachmentSession}
       />
       <TextField
-        label="Cardholder"
+        label={t.cardholder}
         value={draft.holderName}
         onChangeText={holderName => onChange({ holderName })}
-        placeholder="Optional"
+        placeholder={t.optional}
         autoCapitalize="words"
       />
       <TextField
-        label="Notes"
+        label={t.notes}
         value={draft.notes}
         onChangeText={notes => onChange({ notes })}
-        placeholder="Optional"
+        placeholder={t.optional}
         multiline
       />
     </>
@@ -301,11 +293,6 @@ export function CardFields({
 }
 
 type CardSide = 'frontImage' | 'backImage';
-
-const sideNames: Record<CardSide, string> = {
-  frontImage: 'front',
-  backImage: 'back',
-};
 
 function CardPhotos({
   draft,
@@ -316,8 +303,27 @@ function CardPhotos({
   onChange: (patch: Partial<LoyaltyCard>) => void;
   session: AttachmentSession;
 }) {
+  const t = useStrings().editor;
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const sides = {
+    frontImage: {
+      title: t.front,
+      photo: t.frontPhoto,
+      add: t.addFront,
+      addPhoto: t.addFrontPhoto,
+      replace: t.replaceFrontPhoto,
+      remove: t.removeFrontPhoto,
+    },
+    backImage: {
+      title: t.back,
+      photo: t.backPhoto,
+      add: t.addBack,
+      addPhoto: t.addBackPhoto,
+      replace: t.replaceBackPhoto,
+      remove: t.removeBackPhoto,
+    },
+  };
 
   const pick = async (side: CardSide) => {
     const previous = draft[side];
@@ -358,34 +364,31 @@ function CardPhotos({
   };
 
   return (
-    <FieldGroup label="Card photos">
+    <FieldGroup label={t.cardPhotos}>
       <View style={styles.row}>
         {(['frontImage', 'backImage'] as const).map(side => {
           const photo = draft[side];
-          const name = sideNames[side];
+          const text = sides[side];
           return (
             <View key={side} style={styles.photoSlot}>
               <Text variant="caption" color="textSecondary">
-                {name === 'front' ? 'Front' : 'Back'}
+                {text.title}
               </Text>
               {photo ? (
                 <>
-                  <AttachmentImage
-                    attachment={photo}
-                    label={`Photo of the ${name} of the card`}
-                  />
+                  <AttachmentImage attachment={photo} label={text.photo} />
                   <View style={styles.photoActions}>
                     <Button
-                      label="Replace"
-                      accessibilityLabel={`Replace ${name} photo`}
+                      label={t.replace}
+                      accessibilityLabel={text.replace}
                       size="sm"
                       variant="ghost"
                       disabled={busy}
                       onPress={() => pick(side)}
                     />
                     <Button
-                      label="Remove"
-                      accessibilityLabel={`Remove ${name} photo`}
+                      label={t.remove}
+                      accessibilityLabel={text.remove}
                       size="sm"
                       variant="ghost"
                       disabled={busy}
@@ -395,8 +398,8 @@ function CardPhotos({
                 </>
               ) : (
                 <Button
-                  label={`Add ${name}`}
-                  accessibilityLabel={`Add ${name} photo`}
+                  label={text.add}
+                  accessibilityLabel={text.addPhoto}
                   icon={ImagePlus}
                   variant="secondary"
                   size="sm"
@@ -411,7 +414,7 @@ function CardPhotos({
       </View>
       {busy && (
         <Text variant="caption" color="textSecondary">
-          Adding photo…
+          {t.addingPhoto}
         </Text>
       )}
       {problem && (
@@ -420,15 +423,13 @@ function CardPhotos({
         </Text>
       )}
       <Text variant="caption" color="textTertiary">
-        Optional. Photos are encrypted and stay on this device.
+        {t.photosNote}
       </Text>
     </FieldGroup>
   );
 }
 
-const kindOptions: ChipOption<DocumentKind>[] = (
-  Object.keys(documentKinds) as DocumentKind[]
-).map(value => ({ value, label: documentKinds[value].label }));
+const KINDS = Object.keys(documentKinds) as DocumentKind[];
 
 function isoToDate(value: string | null): Date | null {
   return value ? parseIsoDate(value) : null;
@@ -440,6 +441,12 @@ export function DocumentFields({
   errors,
   attachmentSession,
 }: FieldsProps<'document'> & { attachmentSession: AttachmentSession }) {
+  const all = useStrings();
+  const t = all.editor;
+  const kindOptions: ChipOption<DocumentKind>[] = KINDS.map(value => ({
+    value,
+    label: all.documentKinds[value],
+  }));
   const [amountText, setAmountText] = useState(
     draft.amount != null ? String(draft.amount) : '',
   );
@@ -453,9 +460,9 @@ export function DocumentFields({
 
   return (
     <>
-      <FieldGroup label="Type">
+      <FieldGroup label={t.type}>
         <ChipGroup
-          label="Document type"
+          label={t.documentType}
           options={kindOptions}
           value={draft.kind}
           onChange={kind => onChange({ kind })}
@@ -463,27 +470,29 @@ export function DocumentFields({
         />
       </FieldGroup>
       <TextField
-        label="Title"
+        label={t.title}
         value={draft.title}
         onChangeText={title => onChange({ title })}
-        placeholder={purchase ? 'e.g. Washing machine' : 'e.g. Apartment lease'}
+        placeholder={
+          purchase ? t.purchaseTitlePlaceholder : t.documentTitlePlaceholder
+        }
         error={errors.title}
         autoFocus={!draft.title}
       />
       <TextField
-        label="Store or issuer"
+        label={t.storeOrIssuer}
         value={draft.merchant}
         onChangeText={merchant => onChange({ merchant })}
-        placeholder="Optional"
+        placeholder={t.optional}
       />
       <DateField
-        label={purchase ? 'Purchase date' : 'Issue date'}
+        label={purchase ? t.purchaseDate : t.issueDate}
         value={isoToDate(draft.date)}
         onChange={d => onChange({ date: d ? toIsoDate(d) : null })}
         clearable
       />
       <DateField
-        label={draft.kind === 'warranty' ? 'Warranty until' : 'Expires on'}
+        label={draft.kind === 'warranty' ? t.warrantyUntil : t.expiresOn}
         value={isoToDate(draft.expiresOn)}
         onChange={d => onChange({ expiresOn: d ? toIsoDate(d) : null })}
         error={errors.expiresOn}
@@ -493,7 +502,7 @@ export function DocumentFields({
         <View style={styles.row}>
           <View style={styles.amount}>
             <TextField
-              label="Amount"
+              label={t.amount}
               value={amountText}
               onChangeText={changeAmount}
               placeholder="0.00"
@@ -503,7 +512,7 @@ export function DocumentFields({
           </View>
           <View style={styles.currency}>
             <TextField
-              label="Currency"
+              label={t.currency}
               value={draft.currency}
               onChangeText={currency => onChange({ currency })}
               autoCapitalize="characters"
@@ -519,10 +528,10 @@ export function DocumentFields({
         error={errors.attachments}
       />
       <TextField
-        label="Notes"
+        label={t.notes}
         value={draft.notes}
         onChangeText={notes => onChange({ notes })}
-        placeholder="Optional"
+        placeholder={t.optional}
         multiline
       />
     </>
@@ -546,6 +555,7 @@ function DocumentAttachments({
   error?: string;
 }) {
   const themed = useStyles(createThemedStyles);
+  const t = useStrings().editor;
   const [busy, setBusy] = useState(false);
   const [problems, setProblems] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -621,7 +631,7 @@ function DocumentAttachments({
   };
 
   return (
-    <FieldGroup label="Attachments">
+    <FieldGroup label={t.attachments}>
       {files.map(a => (
         <View key={a.id} style={themed.fileRow}>
           <Icon icon={isImage(a) ? ImageIcon : FileText} />
@@ -635,7 +645,7 @@ function DocumentAttachments({
           </View>
           <IconButton
             icon={EllipsisVertical}
-            label={`Options for ${a.fileName}`}
+            label={t.fileOptions(a.fileName)}
             color="textSecondary"
             onPress={() => !busy && setSelectedId(a.id)}
           />
@@ -644,7 +654,7 @@ function DocumentAttachments({
       <View style={styles.row}>
         <View style={styles.flex}>
           <Button
-            label="Add photos"
+            label={t.addPhotos}
             icon={ImagePlus}
             variant="secondary"
             size="sm"
@@ -655,7 +665,7 @@ function DocumentAttachments({
         </View>
         <View style={styles.flex}>
           <Button
-            label="Add files"
+            label={t.addFiles}
             icon={FilePlus}
             variant="secondary"
             size="sm"
@@ -667,7 +677,7 @@ function DocumentAttachments({
       </View>
       {busy && (
         <Text variant="caption" color="textSecondary">
-          Adding files…
+          {t.addingFiles}
         </Text>
       )}
       {[...(error ? [error] : []), ...problems].map(text => (
@@ -677,8 +687,8 @@ function DocumentAttachments({
       ))}
       <Text variant="caption" color="textTertiary">
         {remaining > 0
-          ? `Photos or PDFs, up to ${MAX_DOCUMENT_ATTACHMENTS} files of 25 MB each. Files are encrypted and stay on this device.`
-          : `${MAX_DOCUMENT_ATTACHMENTS} of ${MAX_DOCUMENT_ATTACHMENTS} files attached. Remove one to add another.`}
+          ? t.attachmentsNote(MAX_DOCUMENT_ATTACHMENTS)
+          : t.attachmentsFull(MAX_DOCUMENT_ATTACHMENTS)}
       </Text>
       <Sheet
         visible={selected !== null}
@@ -689,25 +699,25 @@ function DocumentAttachments({
           <>
             <ListItem
               icon={ArrowUp}
-              title="Move up"
+              title={t.moveUp}
               disabled={selectedIndex === 0}
               onPress={() => move(selectedIndex, selectedIndex - 1)}
             />
             <ListItem
               icon={ArrowDown}
-              title="Move down"
+              title={t.moveDown}
               disabled={selectedIndex === files.length - 1}
               onPress={() => move(selectedIndex, selectedIndex + 1)}
             />
             <ListItem
               icon={RefreshCw}
-              title="Replace"
-              subtitle="Choose another photo or PDF"
+              title={t.replace}
+              subtitle={t.replaceSubtitle}
               onPress={() => replace(selected)}
             />
             <ListItem
               icon={Trash2}
-              title="Remove"
+              title={t.remove}
               titleColor="danger"
               onPress={() => remove(selected)}
             />

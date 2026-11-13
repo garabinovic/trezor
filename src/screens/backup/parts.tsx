@@ -2,6 +2,7 @@ import React, { ComponentRef, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { IconButton, Text, TextField } from '../../components';
+import { useStrings } from '../../i18n';
 import { gutter, spacing, useTheme } from '../../theme';
 
 /**
@@ -11,6 +12,7 @@ import { gutter, spacing, useTheme } from '../../theme';
  */
 export function Busy({ title, message }: { title: string; message?: string }) {
   const { colors } = useTheme();
+  const t = useStrings();
   return (
     <View style={styles.busy} accessibilityLiveRegion="polite">
       <ActivityIndicator size="large" color={colors.accent} />
@@ -18,7 +20,7 @@ export function Busy({ title, message }: { title: string; message?: string }) {
         {title}
       </Text>
       <Text variant="callout" color="textSecondary" align="center">
-        {message ?? 'Keep Trezor open until this is done.'}
+        {message ?? t.backup.keepOpen}
       </Text>
     </View>
   );
@@ -45,6 +47,7 @@ export function PasswordField(props: {
   helper?: string;
   error?: string;
 }) {
+  const t = useStrings();
   const [visible, setVisible] = useState(false);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const selection = useRef<{ start: number; end: number } | null>(null);
@@ -71,7 +74,7 @@ export function PasswordField(props: {
       trailing={
         <IconButton
           icon={visible ? EyeOff : Eye}
-          label={visible ? 'Hide password' : 'Show password'}
+          label={visible ? t.backup.hidePassword : t.backup.showPassword}
           color="textSecondary"
           onPress={() => {
             toggled.current = true;

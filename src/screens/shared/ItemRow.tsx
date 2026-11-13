@@ -13,6 +13,7 @@ import {
   Reminder,
   useItems,
 } from '../../data';
+import { useStrings } from '../../i18n';
 import { minTouchTarget, Theme, useStyles } from '../../theme';
 
 interface ItemRowProps {
@@ -27,6 +28,8 @@ interface ItemRowProps {
 /** Renders any item as a list row, with type-appropriate leading content. */
 export function ItemRow({ item, context }: ItemRowProps) {
   const navigation = useNavigation();
+  // Subscribes the row to language changes (summaries are localized).
+  useStrings();
   const open = () => navigation.navigate('ItemDetail', { id: item.id });
   const summary = itemSummary(item);
   const pinIndicator =
@@ -85,6 +88,7 @@ function ReminderRow({
   onPress: () => void;
 }) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
   const { setReminderCompleted } = useItems();
   const overdue = isOverdue(reminder);
 
@@ -92,14 +96,14 @@ function ReminderRow({
     <ListItem
       title={reminder.title}
       titleColor={reminder.completed ? 'textTertiary' : 'text'}
-      subtitle={overdue ? `Overdue · ${summary}` : summary}
+      subtitle={overdue ? t.items.overdue(summary) : summary}
       subtitleColor={overdue ? 'danger' : 'textSecondary'}
       leading={
         <Pressable
           accessibilityRole="checkbox"
           accessibilityState={{ checked: reminder.completed }}
           accessibilityLabel={
-            reminder.completed ? 'Mark as not done' : 'Mark as done'
+            reminder.completed ? t.items.markNotDone : t.items.markDone
           }
           onPress={() => setReminderCompleted(reminder.id, !reminder.completed)}
           style={styles.check}

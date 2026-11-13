@@ -13,6 +13,7 @@ import { nativeBackupPlatform } from './backup/platform';
 import { Dialog } from './components';
 import { ItemsProvider } from './data';
 import { AppLockProvider, useAppLock } from './lock/AppLockProvider';
+import { LanguageProvider, useStrings } from './i18n';
 import { LockScreen } from './lock/LockScreen';
 import { RootNavigator } from './navigation/RootNavigator';
 import { RemindersProvider } from './reminders/RemindersProvider';
@@ -33,11 +34,13 @@ if (__DEV__) {
 export function App() {
   return (
     <SafeAreaProvider>
-      <AppLockProvider>
-        <StorageProvider>
-          <LockedApp />
-        </StorageProvider>
-      </AppLockProvider>
+      <LanguageProvider>
+        <AppLockProvider>
+          <StorageProvider>
+            <LockedApp />
+          </StorageProvider>
+        </AppLockProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }
@@ -129,6 +132,7 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
 
   // A backup that a previous run couldn't finish, whose file couldn't be
   // deleted: the user is told once (spec v2.4 §6.4). Native clears the record.
+  const t = useStrings();
   const [incompleteBackup, setIncompleteBackup] = useState<string | null>(null);
   useEffect(() => {
     nativeBackupPlatform.takeIncompleteNotice().then(
@@ -165,9 +169,9 @@ function ReadyApp({ storage }: { storage: OpenedStorage }) {
           <WriteErrorDialog />
           <Dialog
             visible={incompleteBackup !== null}
-            title="An incomplete backup file may remain"
-            message={`A backup didn’t finish, and Trezor couldn’t delete its file “${incompleteBackup}”. Delete it where you saved it; it can’t be restored.`}
-            confirmLabel="OK"
+            title={t.backup.incompleteTitle}
+            message={t.backup.incompleteMessage(incompleteBackup ?? '')}
+            confirmLabel={t.common.ok}
             cancelLabel={null}
             onConfirm={() => setIncompleteBackup(null)}
             onCancel={() => setIncompleteBackup(null)}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Search, X } from 'lucide-react-native';
+import { useStrings } from '../i18n';
 import { Theme, useStyles, useTheme } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -15,7 +16,7 @@ interface SearchFieldProps {
 }
 
 export function SearchField({
-  placeholder = 'Search',
+  placeholder: placeholderProp,
   value,
   onChangeText,
   autoFocus,
@@ -23,6 +24,8 @@ export function SearchField({
 }: SearchFieldProps) {
   const theme = useTheme();
   const styles = useStyles(createStyles);
+  const t = useStrings();
+  const placeholder = placeholderProp ?? t.common.search;
 
   if (onPress) {
     return (
@@ -57,7 +60,7 @@ export function SearchField({
       {!!value && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Clear search"
+          accessibilityLabel={t.common.clearSearch}
           hitSlop={12}
           onPress={() => onChangeText?.('')}
         >

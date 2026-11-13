@@ -10,6 +10,8 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.UiThreadUtil
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.trezor.app.locale.LocaleStore
+import com.trezor.app.locale.NativeText
 import com.trezor.app.vault.NativeTrezorAppLockSpec
 import org.json.JSONObject
 
@@ -65,13 +67,13 @@ class TrezorAppLockModule(private val reactContext: ReactApplicationContext) :
       }
 
   override fun authenticate(promise: Promise) =
-      prompt(promise, "Unlock Trezor", null) {
+      prompt(promise, text(NativeText.UNLOCK_TITLE), null) {
         AppLock.unlock()
         promise.resolve(null)
       }
 
   override fun confirm(title: String, promise: Promise) =
-      prompt(promise, title, "Confirm it’s you") { promise.resolve(null) }
+      prompt(promise, title, text(NativeText.CONFIRM_SUBTITLE)) { promise.resolve(null) }
 
   override fun setEnabled(enabled: Boolean, promise: Promise) {
     val available = availability() == "available"
@@ -85,12 +87,19 @@ class TrezorAppLockModule(private val reactContext: ReactApplicationContext) :
             promise.resolve(null)
           }
       else ->
-          prompt(promise, if (enabled) "Turn on App Lock" else "Turn off App Lock", "Confirm it’s you") {
+          prompt(
+              promise,
+              text(if (enabled) NativeText.APP_LOCK_ON_TITLE else NativeText.APP_LOCK_OFF_TITLE),
+              text(NativeText.CONFIRM_SUBTITLE),
+          ) {
             AppLock.setEnabled(reactContext, enabled)
             promise.resolve(null)
           }
     }
   }
+
+  /** Prompt text in the app's language. */
+  private fun text(text: NativeText) = LocaleStore.text(reactContext, text)
 
   private fun prompt(promise: Promise, title: String, subtitle: String?, onSuccess: () -> Unit) {
     UiThreadUtil.runOnUiThread {

@@ -16,6 +16,7 @@ import {
   Size,
   ZoomTransform,
 } from './zoom';
+import { useStrings } from '../i18n';
 
 /**
  * The image is laid out at this multiple of the view and scaled down, so it
@@ -35,6 +36,7 @@ export function ZoomableImage({
   label: string;
   onError: () => void;
 }) {
+  const zoomHint = useStrings().viewer.zoomHint;
   const [size, setSize] = useState<Size>({ width: 0, height: 0 });
   const container = useRef<React.ComponentRef<typeof View>>(null);
   const origin = useRef<Point>({ x: 0, y: 0 });
@@ -134,7 +136,7 @@ export function ZoomableImage({
       testID="image-viewer"
       style={styles.container}
       onLayout={onLayout}
-      accessibilityHint="Pinch or double-tap to zoom"
+      accessibilityHint={zoomHint}
       {...responder.panHandlers}
     >
       {size.width > 0 && (

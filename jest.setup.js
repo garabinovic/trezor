@@ -44,6 +44,27 @@ jest.mock('./src/native/NativeTrezorBackup', () => ({
   ),
 }));
 
+// The app language is stored natively; this fake keeps it in memory for the
+// test file (reset with __reset). New installations start in English.
+jest.mock('./src/native/NativeTrezorLocale', () => {
+  const store = { language: 'en', texts: {} };
+  return {
+    __esModule: true,
+    default: {
+      store,
+      getLanguage: jest.fn(() => store.language),
+      setLanguage: jest.fn(async (language, textsJson) => {
+        store.language = language;
+        store.texts = JSON.parse(textsJson);
+      }),
+      __reset() {
+        store.language = 'en';
+        store.texts = {};
+      },
+    },
+  };
+});
+
 // App Lock is native; by default it is off (tests of the lock mock this).
 jest.mock('./src/native/NativeTrezorAppLock', () => ({
   __esModule: true,

@@ -1,4 +1,5 @@
 import { createId, Item, ItemType, MAX_DOCUMENT_ATTACHMENTS } from '../../data';
+import { strings } from '../../i18n/strings';
 import { INTERVAL_PRESETS, withStart } from '../../reminders/reminderSchedule';
 
 export type FieldErrors = Partial<Record<string, string>>;
@@ -75,9 +76,9 @@ export function validate(
   now: number = Date.now(),
 ): FieldErrors {
   const errors: FieldErrors = {};
+  const t = strings().editor.validation;
   if (!item.title.trim()) {
-    errors.title =
-      item.type === 'card' ? 'Enter the card name.' : 'Enter a title.';
+    errors.title = item.type === 'card' ? t.cardName : t.title;
   }
   if (item.type === 'reminder' && !item.completed) {
     const retimed =
@@ -87,7 +88,7 @@ export function validate(
       original.repeat !== item.repeat ||
       original.completed;
     if (item.repeat === 'once' && retimed && Date.parse(item.dueAt) <= now) {
-      errors.dueAt = 'Choose a time in the future.';
+      errors.dueAt = t.futureTime;
     }
     if (
       item.repeat === 'interval' &&
@@ -95,26 +96,24 @@ export function validate(
         item.intervalMinutes as (typeof INTERVAL_PRESETS)[number],
       )
     ) {
-      errors.intervalMinutes = 'Choose how often to repeat.';
+      errors.intervalMinutes = t.interval;
     }
   }
   if (item.type === 'card' && !item.cardNumber.trim()) {
-    errors.cardNumber = 'Enter the card number.';
+    errors.cardNumber = t.cardNumber;
   }
   if (item.type === 'document') {
     if (item.attachments.length > MAX_DOCUMENT_ATTACHMENTS) {
-      errors.attachments = `A document can have at most ${MAX_DOCUMENT_ATTACHMENTS} attachments. Remove ${
-        item.attachments.length - MAX_DOCUMENT_ATTACHMENTS
-      }.`;
+      errors.attachments = t.tooManyAttachments(
+        MAX_DOCUMENT_ATTACHMENTS,
+        item.attachments.length - MAX_DOCUMENT_ATTACHMENTS,
+      );
     }
     if (item.amount != null && Number.isNaN(item.amount)) {
-      errors.amount = 'Enter a valid amount, e.g. 24.90';
+      errors.amount = t.amount;
     }
     if (item.date && item.expiresOn && item.expiresOn < item.date) {
-      errors.expiresOn =
-        item.kind === 'warranty'
-          ? 'Warranty end must be after the purchase date.'
-          : 'Expiry date must be after the issue date.';
+      errors.expiresOn = item.kind === 'warranty' ? t.warrantyEnd : t.expiry;
     }
   }
   return errors;

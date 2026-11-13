@@ -2,6 +2,7 @@ import type {
   AttachmentErrorCode,
   ImportFailureCode,
 } from '../../attachments/platform';
+import { strings } from '../../i18n/strings';
 
 /** What the picker was for: card photos take images only. */
 export type PickKind = 'photo' | 'file';
@@ -11,18 +12,19 @@ export function importFailureText(
   failure: { fileName: string; code: ImportFailureCode },
   kind: PickKind = 'photo',
 ): string {
-  const name = `“${failure.fileName}”`;
+  const t = strings().editor.importFailure;
+  const name = failure.fileName;
   switch (failure.code) {
     case 'TOO_LARGE':
-      return `${name} is larger than 25 MB.`;
+      return t.tooLarge(name);
     case 'UNSUPPORTED_TYPE':
       return kind === 'photo'
-        ? `${name} isn’t a supported photo. Use JPEG, PNG, WebP or HEIC.`
-        : `${name} isn’t supported. Use a photo (JPEG, PNG, WebP, HEIC) or a PDF.`;
+        ? t.unsupportedPhoto(name)
+        : t.unsupportedFile(name);
     case 'READ_FAILED':
-      return `${name} couldn’t be read.`;
+      return t.readFailed(name);
     case 'IMPORT_FAILED':
-      return `${name} couldn’t be saved. Try again.`;
+      return t.importFailed(name);
   }
 }
 
@@ -31,25 +33,21 @@ export function pickErrorText(
   code: AttachmentErrorCode,
   kind: PickKind = 'photo',
 ): string | null {
+  const t = strings().editor.pickError;
+  const photo = kind === 'photo';
   switch (code) {
     case 'BUSY':
       return null;
     case 'KEY_UNAVAILABLE':
-      return `${
-        kind === 'photo' ? 'Photos' : 'Files'
-      } can’t be added: the encryption key is unavailable.`;
+      return photo ? t.photosKeyUnavailable : t.filesKeyUnavailable;
     case 'PICKER_UNAVAILABLE':
-      return `No ${
-        kind === 'photo' ? 'photo' : 'file'
-      } picker is available on this device.`;
+      return photo ? t.noPhotoPicker : t.noFilePicker;
     default:
-      return `The ${kind} couldn’t be added. Try again.`;
+      return photo ? t.photoFailed : t.fileFailed;
   }
 }
 
 /** Files picked beyond the per-document limit. */
 export function skippedText(skipped: number, limit: number): string {
-  return `${skipped} ${
-    skipped === 1 ? 'file wasn’t' : 'files weren’t'
-  } added: a document can have at most ${limit} attachments.`;
+  return strings().editor.skipped(skipped, limit);
 }

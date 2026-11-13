@@ -8,6 +8,7 @@ import { serializeDatabase } from '../../src/storage/serialDatabase';
 import { SqliteSettingsRepository } from '../../src/storage/SettingsRepository';
 import { SqliteItemRepository } from '../../src/storage/SqliteItemRepository';
 import type { SqlDatabase } from '../../src/storage/sql';
+import { fabClearance } from '../../src/components';
 import { typography } from '../../src/theme';
 import {
   hasText,
@@ -25,6 +26,13 @@ jest.mock(
   'react-native-safe-area-context',
   () => require('react-native-safe-area-context/jest/mock').default,
 );
+
+// The window size, so Home can be rotated (portrait unless a test says so).
+const mockWindow = { width: 400, height: 800, scale: 2, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
 
 // The app's real storage stack (repositories + serialized connection) on a
 // plain SQLite database; only the SQLCipher open step is replaced.
@@ -184,7 +192,7 @@ describe('Home', () => {
     const t = texts(app);
     // Counts in the overview, in tab order: 1 note, 2 reminders, 1 card, 2 documents.
     const overview = t.slice(
-      t.indexOf('Search everything') + 1,
+      t.indexOf('Notes') - 1,
       t.indexOf('Documents') + 1,
     );
     expect(overview).toEqual([
@@ -214,6 +222,118 @@ describe('Home', () => {
     }
     await launch();
     expect(hasText(app, 'Welcome to Trezor')).toBe(true);
+  });
+});
+
+describe('Home layout', () => {
+  test('header and search stay fixed while the content scrolls; search sits above Add', async () => {
+    await launch();
+    const host = (n: ReactTestInstance) => typeof n.type === 'string';
+    const inScroll = (n: ReactTestInstance) => {
+      for (let p = n.parent; p; p = p.parent) {
+        if (p.type === ('RCTScrollView' as never)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const visibleHome = (label: string) =>
+      app.root
+        .findAll(n => host(n) && n.props.accessibilityLabel === label)
+        .filter(n => n.props.accessibilityRole !== undefined);
+    const title = app.root.find(
+      n =>
+        host(n) &&
+        n.props.accessibilityRole === 'header' &&
+        n.props.children === 'Trezor',
+    );
+    const [search] = visibleHome('Search everything');
+    const coming = app.root
+      .findAll(n => host(n) && n.props.children === 'Coming up')
+      .pop()!;
+    expect(inScroll(title)).toBe(false);
+    expect(inScroll(search)).toBe(false);
+    expect(inScroll(coming)).toBe(true);
+    // Raised by exactly the Add button's height and margin, so they don't overlap.
+    let container = search.parent!;
+    while (!host(container)) {
+      container = container.parent!;
+    }
+    expect(StyleSheet.flatten(container.props.style).marginBottom).toBe(
+      fabClearance,
+    );
+
+    // Both still work as before.
+    await pressLabel(app, 'Add new');
+    expect(hasText(app, 'Text, lists and ideas')).toBe(true);
+    await pressLabel(app, 'Close');
+    await pressLabel(app, 'Search everything');
+    await typeInto(app, 'Search everything', 'co');
+    await settle(200);
+    expect(hasText(app, 'Garage code')).toBe(true);
+  });
+});
+
+describe('Home Search by orientation', () => {
+  afterEach(() => {
+    mockWindow.width = 400;
+    mockWindow.height = 800;
+  });
+
+  const homeHeaderRow = () => {
+    const title = app.root.find(
+      n =>
+        typeof n.type === 'string' &&
+        n.props.accessibilityRole === 'header' &&
+        n.props.children === 'Trezor',
+    );
+    let row = title.parent!;
+    while (typeof row.type !== 'string') {
+      row = row.parent!;
+    }
+    return row;
+  };
+  const pressable = (root: ReactTestInstance, label: string) =>
+    root.findAll(
+      n =>
+        n.props.accessibilityLabel === label &&
+        typeof n.props.onPress === 'function',
+    );
+
+  test('portrait: Search at the bottom, none in the header; Add available', async () => {
+    await launch();
+    expect(pressable(app.root, 'Search everything').length).toBeGreaterThan(0);
+    expect(pressable(homeHeaderRow(), 'Search')).toHaveLength(0);
+    expect(pressable(homeHeaderRow(), 'Settings').length).toBeGreaterThan(0);
+    expect(pressable(app.root, 'Add new').length).toBeGreaterThan(0);
+  });
+
+  test('landscape: Search in the header next to Settings, none at the bottom; Add available', async () => {
+    mockWindow.width = 800;
+    mockWindow.height = 400;
+    await launch();
+    expect(pressable(app.root, 'Search everything')).toHaveLength(0);
+    expect(pressable(homeHeaderRow(), 'Search').length).toBeGreaterThan(0);
+    expect(pressable(homeHeaderRow(), 'Settings').length).toBeGreaterThan(0);
+    expect(pressable(app.root, 'Add new').length).toBeGreaterThan(0);
+    await pressLabel(app, 'Add new');
+    expect(hasText(app, 'Text, lists and ideas')).toBe(true);
+  });
+
+  test('both open the same Search screen', async () => {
+    const reachSearch = async (label: string) => {
+      await launch();
+      await pressLabel(app, label);
+      await typeInto(app, 'Search everything', 'co');
+      await settle(200);
+      expect([label, hasText(app, 'Garage code')]).toEqual([label, true]);
+      await ReactTestRenderer.act(async () => app.unmount());
+    };
+    await reachSearch('Search everything'); // portrait, bottom field
+    mockWindow.width = 800;
+    mockWindow.height = 400;
+    await reachSearch('Search'); // landscape, header icon
+    await launch(); // for afterEach's unmount
   });
 });
 

@@ -12,6 +12,7 @@ import {
   AlarmClockOff,
   Bell,
   BellOff,
+  Check,
   Download,
   FileCheck,
   FlaskConical,
@@ -22,8 +23,8 @@ import {
 import {
   BarHeader,
   ChipGroup,
-  ChipOption,
   Dialog,
+  Icon,
   ListItem,
   Screen,
   Section,
@@ -31,6 +32,7 @@ import {
   ValueRow,
 } from '../components';
 import { useItems } from '../data';
+import { LANGUAGES, languageNames, useLanguage, useStrings } from '../i18n';
 import NativeTrezorBackup from '../native/NativeTrezorBackup';
 import { authErrorMessage } from '../lock/appLock';
 import { useAppLock } from '../lock/AppLockProvider';
@@ -50,11 +52,7 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
-const themeOptions: ChipOption<ThemePreference>[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-];
+const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
 
 /** The installed build's version (Android versionName and versionCode). */
 function appVersion(): string {
@@ -67,35 +65,24 @@ function appVersion(): string {
 const FEEDBACK_EMAIL = 'andrijag@gmail.com';
 
 function AboutTrezor() {
+  const t = useStrings().settings;
   return (
     <View style={styles.about}>
       <Text variant="headline" accessibilityRole="header">
-        About Trezor
+        {t.aboutTitle}
       </Text>
-      <Text variant="callout" color="textSecondary">
-        Trezor is a simple personal organizer designed to help you keep the
-        important things in your life in one place.
-      </Text>
-      <Text variant="callout" color="textSecondary">
-        Store your notes, reminders, loyalty cards and documents, and keep your
-        information organized and easy to access.
-      </Text>
-      <Text variant="callout" color="textSecondary">
-        Trezor is built with privacy and simplicity in mind. Your data is stored
-        locally on your device, protected with encryption, and remains under
-        your control. You can create an encrypted backup to keep your data safe
-        when changing or resetting your device.
-      </Text>
-      <Text variant="callout" color="textSecondary">
-        Our goal is simple: a useful, reliable space for your personal
-        information, without unnecessary complexity.
-      </Text>
+      {t.aboutParagraphs.map(paragraph => (
+        <Text key={paragraph} variant="callout" color="textSecondary">
+          {paragraph}
+        </Text>
+      ))}
     </View>
   );
 }
 
 /** Opens the default email app (a `mailto:` link; no SDK, no network). */
 function Feedback() {
+  const t = useStrings().settings;
   const [noEmailApp, setNoEmailApp] = useState(false);
   const write = () =>
     Linking.openURL(`mailto:${FEEDBACK_EMAIL}`).then(
@@ -105,24 +92,21 @@ function Feedback() {
   return (
     <View style={styles.about}>
       <Text variant="headline" accessibilityRole="header">
-        Feedback & Suggestions
+        {t.feedbackTitle}
       </Text>
-      <Text variant="callout" color="textSecondary">
-        Have an idea that could make Trezor better?
-      </Text>
-      <Text variant="callout" color="textSecondary">
-        We’d love to hear from you. Whether you have a suggestion, found an
-        issue, or simply want to share your experience, feel free to get in
-        touch.
-      </Text>
+      {t.feedbackParagraphs.map(paragraph => (
+        <Text key={paragraph} variant="callout" color="textSecondary">
+          {paragraph}
+        </Text>
+      ))}
       <Pressable
         accessibilityRole="link"
-        accessibilityLabel={`Email ${FEEDBACK_EMAIL}`}
+        accessibilityLabel={t.emailAccessibility(FEEDBACK_EMAIL)}
         onPress={write}
         style={styles.emailRow}
       >
         <Text variant="callout" color="textSecondary">
-          {'Email: '}
+          {t.email}
           <Text variant="callout" color="accent">
             {FEEDBACK_EMAIL}
           </Text>
@@ -130,15 +114,40 @@ function Feedback() {
       </Pressable>
       {noEmailApp && (
         <Text variant="caption" color="textTertiary">
-          No email app is set up on this device.
+          {t.noEmailApp}
         </Text>
       )}
     </View>
   );
 }
 
+/** Settings → Language: each language under its own name; applies at once. */
+function LanguageChoice() {
+  const { language, setLanguage } = useLanguage();
+  const t = useStrings().settings;
+  return (
+    <Section title={t.language} grouped>
+      {LANGUAGES.map(code => (
+        <ListItem
+          key={code}
+          title={languageNames[code]}
+          selected={code === language}
+          trailing={
+            code === language ? (
+              <Icon icon={Check} size="md" color="accent" />
+            ) : undefined
+          }
+          onPress={() => setLanguage(code)}
+        />
+      ))}
+    </Section>
+  );
+}
+
 export function SettingsScreen({ navigation }: Props) {
   const { colors, scheme } = useTheme();
+  const all = useStrings();
+  const t = all.settings;
   const {
     showDetails,
     setShowDetails,
@@ -176,7 +185,7 @@ export function SettingsScreen({ navigation }: Props) {
       await deleteAllData({
         database: storage.storage.database,
         confirmIdentity: appLock.state.enabled
-          ? () => appLock.confirm('Delete all data')
+          ? () => appLock.confirm(all.lock.confirmDeleteAll)
           : undefined,
       });
     } catch (e) {
@@ -185,10 +194,10 @@ export function SettingsScreen({ navigation }: Props) {
         code === 'CANCELLED'
           ? null
           : code === 'RESTORE_IN_PROGRESS'
-          ? 'A restore is in progress. Nothing was deleted.'
+          ? t.deleteRestoreInProgress
           : code === 'LOCKOUT'
           ? authErrorMessage(e)
-          : 'Nothing was deleted. Try again.',
+          : t.deleteFailed,
       );
       setDeleting(false);
       deleteStarted.current = false;
@@ -208,34 +217,40 @@ export function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <Screen header={<BarHeader title="Settings" onBack={navigation.goBack} />}>
+    <Screen header={<BarHeader title={t.title} onBack={navigation.goBack} />}>
       <View style={styles.sections}>
-        <Section title="Appearance">
+        <Section title={t.appearance}>
           <ChipGroup
-            label="Theme"
-            options={themeOptions}
+            label={t.theme}
+            options={THEMES.map(value => ({
+              value,
+              label:
+                value === 'system'
+                  ? t.themeSystem
+                  : value === 'light'
+                  ? t.themeLight
+                  : t.themeDark,
+            }))}
             value={preference}
             onChange={setPreference}
           />
         </Section>
 
+        <LanguageChoice />
+
         <Section
-          title="Notification privacy"
+          title={t.notificationPrivacy}
           grouped
-          footer={
-            scheduleFailed
-              ? 'Reminders couldn’t be scheduled just now. Trezor will try again automatically.'
-              : 'Android’s own notification and lock-screen settings always apply.'
-          }
+          footer={scheduleFailed ? t.scheduleFailed : t.androidSettingsApply}
         >
           <ListItem
             icon={Bell}
-            title="Show reminder details"
-            subtitle="Allow reminder titles and descriptions to appear in notifications."
+            title={t.showDetails}
+            subtitle={t.showDetailsSubtitle}
             subtitleLines={3}
             trailing={
               <Switch
-                accessibilityLabel="Show reminder details"
+                accessibilityLabel={t.showDetails}
                 value={showDetails}
                 onValueChange={setShowDetails}
                 trackColor={{
@@ -249,8 +264,8 @@ export function SettingsScreen({ navigation }: Props) {
           {notificationsEnabled === false && (
             <ListItem
               icon={BellOff}
-              title="Notifications are off"
-              subtitle="Turn them on in Android settings to receive reminders."
+              title={t.notificationsOff}
+              subtitle={t.notificationsOffSubtitle}
               subtitleLines={2}
               chevron
               onPress={openSystemSettings}
@@ -259,8 +274,8 @@ export function SettingsScreen({ navigation }: Props) {
           {notificationsEnabled !== false && exactAlarmsAllowed === false && (
             <ListItem
               icon={AlarmClockOff}
-              title="Reminders may be late"
-              subtitle="Allow “Alarms & reminders” in Android settings so reminders arrive on time."
+              title={t.remindersLate}
+              subtitle={t.remindersLateSubtitle}
               subtitleLines={3}
               chevron
               onPress={openExactAlarmSettings}
@@ -269,25 +284,22 @@ export function SettingsScreen({ navigation }: Props) {
         </Section>
 
         <Section
-          title="Security"
+          title={t.security}
           grouped
-          footer={
-            lockMessage ??
-            'App lock hides Trezor whenever you leave it, until you unlock it with your fingerprint, face or screen lock. Your data is encrypted either way.'
-          }
+          footer={lockMessage ?? t.appLockFooter}
         >
           <ListItem
             icon={Lock}
-            title="App lock"
+            title={t.appLock}
             subtitle={
               appLock.state.enabled || lockAvailable
-                ? 'Ask for your fingerprint, face or screen lock'
-                : 'Set up a screen lock in Android settings first'
+                ? t.appLockSubtitle
+                : t.appLockNeedsScreenLock
             }
             subtitleLines={2}
             trailing={
               <Switch
-                accessibilityLabel="App lock"
+                accessibilityLabel={t.appLock}
                 value={appLock.state.enabled}
                 onValueChange={toggleAppLock}
                 disabled={
@@ -303,61 +315,50 @@ export function SettingsScreen({ navigation }: Props) {
           />
         </Section>
 
-        <Section
-          title="Data"
-          grouped
-          footer={
-            deleteMessage ??
-            'Trezor stores everything on this device. There is no account and no cloud sync. A backup is a file you keep yourself, encrypted with its own password.'
-          }
-        >
+        <Section title={t.data} grouped footer={deleteMessage ?? t.dataFooter}>
           <ListItem
             icon={Download}
-            title="Back up to a file"
-            subtitle="Everything, encrypted with a password you choose"
+            title={t.backup}
+            subtitle={t.backupSubtitle}
             subtitleLines={2}
             chevron
             onPress={() => navigation.navigate('Backup')}
           />
           <ListItem
             icon={FileCheck}
-            title="Check a backup"
-            subtitle="Verify a backup file without changing anything"
+            title={t.checkBackup}
+            subtitle={t.checkBackupSubtitle}
             subtitleLines={2}
             chevron
             onPress={() => navigation.navigate('CheckBackup')}
           />
           <ListItem
             icon={Upload}
-            title="Restore from a backup"
-            subtitle="Replaces all data on this device"
+            title={t.restore}
+            subtitle={t.restoreSubtitle}
             subtitleLines={2}
             chevron
             onPress={() => navigation.navigate('Restore')}
           />
           <ListItem
             icon={Trash2}
-            title="Delete all data"
-            subtitle="Everything on this device; backup files are kept"
+            title={t.deleteAll}
+            subtitle={t.deleteAllSubtitle}
             subtitleLines={2}
             onPress={() => setConfirmingDelete(true)}
           />
         </Section>
 
         {__DEV__ && (
-          <Section
-            title="Preview"
-            grouped
-            footer="Development builds only. Sample data is kept in memory and is never mixed with your saved items."
-          >
+          <Section title={t.preview} grouped footer={t.previewFooter}>
             <ListItem
               icon={FlaskConical}
-              title="Show sample data"
-              subtitle="Turn off to see the first-launch experience"
+              title={t.sampleData}
+              subtitle={t.sampleDataSubtitle}
               subtitleLines={2}
               trailing={
                 <Switch
-                  accessibilityLabel="Show sample data"
+                  accessibilityLabel={t.sampleData}
                   value={sampleDataEnabled}
                   onValueChange={setSampleDataEnabled}
                   trackColor={{
@@ -371,19 +372,19 @@ export function SettingsScreen({ navigation }: Props) {
           </Section>
         )}
 
-        <Section title="About" grouped>
-          <ValueRow label="Version" value={version} />
+        <Section title={t.about} grouped>
+          <ValueRow label={t.version} value={version} />
           <AboutTrezor />
           <Feedback />
         </Section>
       </View>
       <Dialog
         visible={confirmingDelete}
-        title="Delete all data?"
-        message="All notes, reminders, cards, documents and attached files on this device are permanently deleted, and Trezor starts empty. Backup files you saved outside Trezor are not affected. This can’t be undone."
-        confirmLabel="Delete everything"
+        title={t.deleteAllTitle}
+        message={t.deleteAllMessage}
+        confirmLabel={t.deleteEverything}
         destructive
-        secondaryLabel="Back up first"
+        secondaryLabel={t.backUpFirst}
         onSecondary={() => {
           setConfirmingDelete(false);
           navigation.navigate('Backup');
@@ -399,7 +400,7 @@ export function SettingsScreen({ navigation }: Props) {
         onRequestClose={() => undefined}
       >
         <View style={[styles.deleting, { backgroundColor: colors.background }]}>
-          <Busy title="Deleting…" />
+          <Busy title={t.deleting} />
         </View>
       </Modal>
     </Screen>

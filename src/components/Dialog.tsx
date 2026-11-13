@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useStrings } from '../i18n';
 import { Theme, useStyles } from '../theme';
 import { Button } from './Button';
 import { Text } from './Text';
@@ -9,7 +10,7 @@ interface DialogProps {
   title: string;
   message?: string;
   confirmLabel: string;
-  /** `null` hides the cancel button (single-action notice). */
+  /** `null` hides the cancel button (single-action notice); default "Cancel". */
   cancelLabel?: string | null;
   destructive?: boolean;
   onConfirm: () => void;
@@ -25,7 +26,7 @@ export function Dialog({
   title,
   message,
   confirmLabel,
-  cancelLabel = 'Cancel',
+  cancelLabel,
   destructive = false,
   onConfirm,
   onCancel,
@@ -33,6 +34,8 @@ export function Dialog({
   onSecondary,
 }: DialogProps) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
+  const cancel = cancelLabel === undefined ? t.common.cancel : cancelLabel;
   return (
     <Modal
       visible={visible}
@@ -46,7 +49,7 @@ export function Dialog({
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onCancel}
-          accessibilityLabel="Close dialog"
+          accessibilityLabel={t.common.closeDialog}
         />
         <View style={styles.dialog} accessibilityViewIsModal>
           <Text variant="headline">{title}</Text>
@@ -64,9 +67,9 @@ export function Dialog({
                 size="sm"
               />
             )}
-            {cancelLabel !== null && (
+            {cancel !== null && (
               <Button
-                label={cancelLabel}
+                label={cancel}
                 onPress={onCancel}
                 variant="ghost"
                 size="sm"

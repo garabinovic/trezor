@@ -1,6 +1,7 @@
 // Pure helpers connecting the Reminder model to recurrence rules. Used by the
 // UI (labels, next due, overdue) and the scheduler (what to arm).
-import type { Reminder, ReminderRepeat } from '../data/types';
+import type { Reminder } from '../data/types';
+import { strings } from '../i18n/strings';
 import {
   deviceZone,
   formatLocalDateTime,
@@ -14,28 +15,18 @@ import {
 /** Interval choices offered in the editor (minutes). */
 export const INTERVAL_PRESETS = [60, 120, 240, 480, 720] as const;
 
-export const repeatLabels: Record<ReminderRepeat, string> = {
-  once: 'Does not repeat',
-  daily: 'Every day',
-  weekly: 'Every week',
-  monthly: 'Every month',
-  yearly: 'Every year',
-  interval: 'At an interval',
-};
-
 export function intervalLabel(minutes: number): string {
-  if (minutes % 60 === 0) {
-    const hours = minutes / 60;
-    return hours === 1 ? 'Every hour' : `Every ${hours} hours`;
-  }
-  return `Every ${minutes} minutes`;
+  const t = strings().repeat;
+  return minutes % 60 === 0
+    ? t.everyHours(minutes / 60)
+    : t.everyMinutes(minutes);
 }
 
-/** "Every day", "Every 4 hours", … */
+/** "Every day", "Every 4 hours", … in the app language. */
 export function repeatLabel(reminder: Reminder): string {
   return reminder.repeat === 'interval' && reminder.intervalMinutes
     ? intervalLabel(reminder.intervalMinutes)
-    : repeatLabels[reminder.repeat];
+    : strings().repeat[reminder.repeat];
 }
 
 export function specOf(reminder: Reminder): RecurrenceSpec | null {

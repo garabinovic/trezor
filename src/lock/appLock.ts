@@ -1,4 +1,5 @@
 import { DeviceEventEmitter } from 'react-native';
+import { strings } from '../i18n/strings';
 import NativeTrezorAppLock from '../native/NativeTrezorAppLock';
 
 /** Whether the device can confirm it's the user: biometrics or a screen lock. */
@@ -46,14 +47,15 @@ export function authErrorCode(e: unknown): string {
 
 /** What to say after a failed attempt; nothing for a cancel. */
 export function authErrorMessage(e: unknown): string | null {
+  const t = strings().lock;
   switch (authErrorCode(e)) {
     case 'CANCELLED':
       return null;
     case 'LOCKOUT':
-      return 'Too many attempts. Wait a moment, then try again, or use your screen lock.';
+      return t.lockout;
     case 'UNAVAILABLE':
-      return 'No fingerprint, face or screen lock is set up on this device.';
+      return t.unavailable;
     default:
-      return 'Trezor couldn’t confirm it’s you. Try again.';
+      return t.failed;
   }
 }

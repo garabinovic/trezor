@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Calendar, Clock, X } from 'lucide-react-native';
 import { formatFullDate, formatTime } from '../data/format';
+import { useStrings } from '../i18n';
 import { Theme, useStyles } from '../theme';
 import { Icon } from './Icon';
 import { Text } from './Text';
@@ -27,11 +28,12 @@ export function DateField({
   value,
   onChange,
   mode = 'date',
-  placeholder = 'Not set',
+  placeholder,
   clearable = false,
   error,
 }: DateFieldProps) {
   const styles = useStyles(createStyles);
+  const t = useStrings();
 
   const open = () =>
     DateTimePickerAndroid.open({
@@ -45,7 +47,7 @@ export function DateField({
     ? mode === 'date'
       ? formatFullDate(value)
       : formatTime(value)
-    : placeholder;
+    : placeholder ?? t.common.notSet;
 
   return (
     <View style={styles.container}>
@@ -69,7 +71,7 @@ export function DateField({
         {clearable && value && (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Clear ${label.toLowerCase()}`}
+            accessibilityLabel={t.common.clear(label)}
             hitSlop={12}
             onPress={() => onChange(null)}
           >
