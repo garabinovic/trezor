@@ -2,7 +2,12 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import App from '../../App';
 import type { DocumentItem, Note } from '../../src/data/types';
-import { LANGUAGES, languageNames, nativeTexts } from '../../src/i18n';
+import {
+  LANGUAGES,
+  languageNames,
+  nativeTexts,
+  stringsFor,
+} from '../../src/i18n';
 import NativeTrezorLocale from '../../src/native/NativeTrezorLocale';
 import { runMigrations } from '../../src/storage/migrations';
 import { serializeDatabase } from '../../src/storage/serialDatabase';
@@ -209,3 +214,22 @@ test('Serbian Latin and Cyrillic are different; user content stays exactly as wr
   const settings = await mockDb.execute('SELECT key FROM settings');
   expect(JSON.stringify(settings)).not.toMatch(/lang|locale/i);
 });
+
+test.each([
+  ['en', 'Stash', 'About Stash'],
+  ['sr-Latn', 'Štek', 'O Šteku'],
+  ['sr-Cyrl', 'Штек', 'О Штеку'],
+  ['ru', 'Тайник', 'О Тайнике'],
+  ['es', 'Stash', 'Acerca de Stash'],
+] as const)(
+  'the app name follows the language chosen in the app (%s): About and Home',
+  async (language, name, about) => {
+    await launch();
+    await pressLabel(app, 'Settings');
+    await pressText(app, languageNames[language]);
+    expect(hasText(app, about)).toBe(true);
+    await pressLabel(app, stringsFor(language).common.back);
+    expect(hasText(app, name)).toBe(true);
+    expect(hasText(app, 'Trezor')).toBe(false);
+  },
+);

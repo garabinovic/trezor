@@ -39,12 +39,13 @@ export const en = {
     mb: 'MB',
   },
 
-  /** Strings Android shows on Trezor's behalf (see NativeText.kt). */
+  /** Strings Android shows on the app's behalf (see NativeText.kt). */
   native: {
+    reminderTitle: 'Stash',
     reminderBody: 'You have a reminder.',
     channelName: 'Reminders',
-    channelDescription: 'Reminders you set in Trezor',
-    unlockTitle: 'Unlock Trezor',
+    channelDescription: 'Reminders you set in Stash',
+    unlockTitle: 'Unlock Stash',
     confirmSubtitle: 'Confirm it’s you',
     appLockOnTitle: 'Turn on App Lock',
     appLockOffTitle: 'Turn off App Lock',
@@ -227,7 +228,7 @@ export const en = {
   },
 
   home: {
-    title: 'Trezor',
+    title: 'Stash',
     searchPlaceholder: 'Search everything',
     countAccessibility: (category: string, count: number) =>
       `${category}, ${count}`,
@@ -235,7 +236,7 @@ export const en = {
     seeAll: 'See all',
     pinned: 'Pinned',
     recent: 'Recently updated',
-    welcomeTitle: 'Welcome to Trezor',
+    welcomeTitle: 'Welcome to Stash',
     welcomeMessage:
       'Keep notes, reminders, loyalty cards and important documents together in one private place.',
     welcomePrivacy:
@@ -465,7 +466,7 @@ export const en = {
       cantOpenTitle: 'File can’t be opened',
       keyMessage: 'Its encryption key is unavailable on this device.',
       passwordTitle: 'PDF is password-protected',
-      passwordMessage: 'Trezor can’t open PDFs that need a password.',
+      passwordMessage: 'Stash can’t open PDFs that need a password.',
       pdfTitle: 'PDF can’t be shown',
       pdfMessage: 'Android can’t display this PDF.',
       imageTitle: 'Image can’t be shown',
@@ -510,7 +511,7 @@ export const en = {
     language: 'Language',
     notificationPrivacy: 'Notification privacy',
     scheduleFailed:
-      'Reminders couldn’t be scheduled just now. Trezor will try again automatically.',
+      'Reminders couldn’t be scheduled just now. Stash will try again automatically.',
     androidSettingsApply:
       'Android’s own notification and lock-screen settings always apply.',
     showDetails: 'Show reminder details',
@@ -524,13 +525,13 @@ export const en = {
       'Allow “Alarms & reminders” in Android settings so reminders arrive on time.',
     security: 'Security',
     appLockFooter:
-      'App lock hides Trezor whenever you leave it, until you unlock it with your fingerprint, face or screen lock. Your data is encrypted either way.',
+      'App lock hides Stash whenever you leave it, until you unlock it with your fingerprint, face or screen lock. Your data is encrypted either way.',
     appLock: 'App lock',
     appLockSubtitle: 'Ask for your fingerprint, face or screen lock',
     appLockNeedsScreenLock: 'Set up a screen lock in Android settings first',
     data: 'Data',
     dataFooter:
-      'Trezor stores everything on this device. There is no account and no cloud sync. A backup is a file you keep yourself, encrypted with its own password.',
+      'Stash stores everything on this device. There is no account and no cloud sync. A backup is a file you keep yourself, encrypted with its own password.',
     backup: 'Back up to a file',
     backupSubtitle: 'Everything, encrypted with a password you choose',
     checkBackup: 'Check a backup',
@@ -541,7 +542,7 @@ export const en = {
     deleteAllSubtitle: 'Everything on this device; backup files are kept',
     deleteAllTitle: 'Delete all data?',
     deleteAllMessage:
-      'All notes, reminders, cards, documents and attached files on this device are permanently deleted, and Trezor starts empty. Backup files you saved outside Trezor are not affected. This can’t be undone.',
+      'All notes, reminders, cards, documents and attached files on this device are permanently deleted, and Stash starts empty. Backup files you saved outside Stash are not affected. This can’t be undone.',
     deleteEverything: 'Delete everything',
     backUpFirst: 'Back up first',
     deleting: 'Deleting…',
@@ -554,16 +555,16 @@ export const en = {
     sampleDataSubtitle: 'Turn off to see the first-launch experience',
     about: 'About',
     version: 'Version',
-    aboutTitle: 'About Trezor',
+    aboutTitle: 'About Stash',
     aboutParagraphs: [
-      'Trezor is a simple personal organizer designed to help you keep the important things in your life in one place.',
+      'Stash is a simple personal organizer designed to help you keep the important things in your life in one place.',
       'Store your notes, reminders, loyalty cards and documents, and keep your information organized and easy to access.',
-      'Trezor is built with privacy and simplicity in mind. Your data is stored locally on your device, protected with encryption, and remains under your control. You can create an encrypted backup to keep your data safe when changing or resetting your device.',
+      'Stash is built with privacy and simplicity in mind. Your data is stored locally on your device, protected with encryption, and remains under your control. You can create an encrypted backup to keep your data safe when changing or resetting your device.',
       'Our goal is simple: a useful, reliable space for your personal information, without unnecessary complexity.',
     ],
     feedbackTitle: 'Feedback & Suggestions',
     feedbackParagraphs: [
-      'Have an idea that could make Trezor better?',
+      'Have an idea that could make Stash better?',
       'We’d love to hear from you. Whether you have a suggestion, found an issue, or simply want to share your experience, feel free to get in touch.',
     ],
     email: 'Email: ',
@@ -574,7 +575,7 @@ export const en = {
   backup: {
     title: 'Back up',
     intro:
-      'The backup file contains all your notes, reminders, cards, documents and attached files, encrypted with the password you choose here. Trezor can’t recover a forgotten password.',
+      'The backup file contains all your notes, reminders, cards, documents and attached files, encrypted with the password you choose here. Stash can’t recover a forgotten password.',
     password: 'Backup password',
     passwordHelper: '10 to 256 characters.',
     repeatPassword: 'Repeat password',
@@ -583,15 +584,15 @@ export const en = {
     chooseDestination: 'Choose where to save',
     running: 'Backing up…',
     runningMessage:
-      'Your data is being written and then checked. Keep Trezor open until this is done.',
-    keepOpen: 'Keep Trezor open until this is done.',
+      'Your data is being written and then checked. Keep Stash open until this is done.',
+    keepOpen: 'Keep Stash open until this is done.',
     savedTitle: 'Backup saved and verified',
     savedMessage: (size: string) =>
       `The backup file (${size}) was read back and checked. Keep it somewhere safe, together with its password: without the password it can’t be restored.`,
     incompleteTitle: 'An incomplete backup file may remain',
     incompleteMessage: (fileName: string) =>
-      `A backup didn’t finish, and Trezor couldn’t delete its file “${fileName}”. Delete it where you saved it; it can’t be restored.`,
-    fileName: (date: string) => `Trezor backup ${date}.tzbk`,
+      `A backup didn’t finish, and Stash couldn’t delete its file “${fileName}”. Delete it where you saved it; it can’t be restored.`,
+    fileName: (date: string) => `Stash backup ${date}.tzbk`,
   },
 
   check: {
@@ -616,7 +617,7 @@ export const en = {
   restore: {
     title: 'Restore',
     warning:
-      'Everything in Trezor on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.',
+      'Everything in Stash on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.',
     noDataFile:
       'There’s no data file on this device to restore over. Try again instead.',
     stopped: 'The restore was stopped. Your data is as it was before.',
@@ -624,15 +625,15 @@ export const en = {
     preparingMessage: 'Checking whether a restore is possible.',
     restoring: 'Restoring…',
     restoringMessage:
-      'The backup is being read and checked. Keep Trezor open until this is done.',
+      'The backup is being read and checked. Keep Stash open until this is done.',
     sharingTitle: 'A file is still being shared',
     sharingMessage:
-      'Trezor is handing a file to another app. Wait until that has finished, or cancel the restore.',
+      'Stash is handing a file to another app. Wait until that has finished, or cancel the restore.',
     checkAgain: 'Check again',
     cancelRestore: 'Cancel restore',
     finishing: 'Finishing the restore…',
     finishingMessage:
-      'Trezor restarts by itself now. If it doesn’t: Restore isn’t finished yet. Close and reopen Trezor to complete it.',
+      'Stash restarts by itself now. If it doesn’t: Restore isn’t finished yet. Close and reopen Stash to complete it.',
     cleaningUp: 'Putting your data back in order…',
     chooseFile: 'Choose backup file',
     chooseAnother: 'Choose another file',
@@ -650,13 +651,13 @@ export const en = {
     PASSWORD_LENGTH: 'The password must be 10 to 256 characters long.',
     PASSWORD_MISMATCH: 'The two passwords don’t match.',
     BACKUP_PASSWORD_OR_HEADER:
-      'The password is wrong, or this isn’t a Trezor backup file.',
+      'The password is wrong, or this isn’t a Stash backup file.',
     BACKUP_CORRUPT:
       'The backup file is damaged or incomplete. It can’t be used.',
     BACKUP_INCONSISTENT:
       'The backup file’s contents don’t match each other. It can’t be used.',
     BACKUP_UNSUPPORTED:
-      'This backup was made by a different version of Trezor and can’t be used here.',
+      'This backup was made by a different version of Stash and can’t be used here.',
     BACKUP_TOO_LARGE: 'The backup file is too large to use.',
     BACKUP_INSUFFICIENT_MEMORY:
       'There isn’t enough free memory right now. Close other apps and try again.',
@@ -665,10 +666,10 @@ export const en = {
     DESTINATION_NOT_EMPTY:
       'The chosen file isn’t empty. Choose a new file name instead.',
     DESTINATION_UNVERIFIED:
-      'Trezor couldn’t verify the backup in that location. Choose a folder on this device’s own storage instead (in the file picker’s menu, the device’s name), then copy the backup wherever you like.',
+      'Stash couldn’t verify the backup in that location. Choose a folder on this device’s own storage instead (in the file picker’s menu, the device’s name), then copy the backup wherever you like.',
     KEY_UNAVAILABLE:
       'Your attached files can’t be read with this device’s key. Nothing was changed.',
-    NO_ACTIVITY: 'Trezor needs to be open in the foreground to choose a file.',
+    NO_ACTIVITY: 'Stash needs to be open in the foreground to choose a file.',
     BUSY: 'A file picker is already open.',
     PICKER_UNAVAILABLE: 'No app is available to choose a file.',
     BACKUP_CHANGED:
@@ -676,13 +677,13 @@ export const en = {
     RESTORE_UNAVAILABLE:
       'Restoring isn’t possible: the encryption key on this device is missing or no longer valid. Nothing was changed.',
     RESTORE_STATE_UNKNOWN:
-      'An earlier restore left files Trezor can’t account for, so it won’t start another one. Nothing was changed.',
+      'An earlier restore left files Stash can’t account for, so it won’t start another one. Nothing was changed.',
     RESTORE_IN_PROGRESS: 'A restore is already in progress.',
     RESTORE_CANCELLED: 'The restore was cancelled. Nothing was changed.',
     RESTORE_RECOVERY_RETRY:
-      'The restore was stopped, but Trezor couldn’t finish putting your data back in order. Try again.',
+      'The restore was stopped, but Stash couldn’t finish putting your data back in order. Try again.',
     STORAGE_ERROR:
-      'Trezor couldn’t read your attached files. Nothing was changed.',
+      'Stash couldn’t read your attached files. Nothing was changed.',
     generic: 'Something went wrong. Nothing was changed.',
     /** BACKUP_ATTACHMENT_UNREADABLE names the item and file. */
     attachment: (
@@ -708,31 +709,31 @@ export const en = {
 
   storageError: {
     keepInstalled:
-      'Please don’t uninstall Trezor: that would permanently erase your data.',
-    keyTitle: 'Trezor can’t unlock your data',
+      'Please don’t uninstall Stash: that would permanently erase your data.',
+    keyTitle: 'Stash can’t unlock your data',
     keyMessage:
       'The encryption key that protects your data on this device is missing or no longer valid. Nothing has been deleted.',
-    newerTitle: 'Update Trezor to continue',
+    newerTitle: 'Update Stash to continue',
     newerMessage:
-      'Your data was saved by a newer version of Trezor. Install the latest version to open it. Nothing has been changed.',
+      'Your data was saved by a newer version of Stash. Install the latest version to open it. Nothing has been changed.',
     corruptTitle: 'Your data couldn’t be opened',
     corruptMessage:
       'The data file appears to be damaged or doesn’t match its key. Nothing has been deleted.',
-    genericTitle: 'Trezor couldn’t open your data',
+    genericTitle: 'Stash couldn’t open your data',
     genericMessage:
       'Something went wrong while opening secure storage. Nothing has been deleted.',
-    migrationTitle: 'Trezor couldn’t finish updating',
+    migrationTitle: 'Stash couldn’t finish updating',
     migrationMessage:
       'Your data couldn’t be upgraded to this version, so it was left exactly as it was.',
     restoreUnfinishedTitle: 'The restore isn’t finished yet',
     restoreVerifyMessage:
-      'Trezor couldn’t check the restored data just now. Your data from before the restore is kept until it can.',
+      'Stash couldn’t check the restored data just now. Your data from before the restore is kept until it can.',
     restoreRetryMessage:
       'A step of the restore couldn’t be completed. Nothing has been lost; trying again continues where it stopped.',
     restoreUnknownTitle: 'An unfinished restore needs attention',
     restoreUnknownMessage:
-      'Trezor found restore files it can’t account for. To protect your data, nothing is changed automatically.',
-    restoreKeyTitle: 'Trezor can’t finish the restore',
+      'Stash found restore files it can’t account for. To protect your data, nothing is changed automatically.',
+    restoreKeyTitle: 'Stash can’t finish the restore',
     restoreKeyMessage:
       'The encryption key on this device is missing or no longer valid. All restore files are kept.',
     wipeTitle: 'Deleting your data didn’t finish',
@@ -747,7 +748,7 @@ export const en = {
     cancelRestore: 'Cancel restore and return to previous data',
     cancelTitle: 'Cancel restore?',
     cancelMessage:
-      'The restored data will be discarded and Trezor returns to the data you had before the restore.',
+      'The restored data will be discarded and Stash returns to the data you had before the restore.',
     returnToPrevious: 'Return to previous data',
     errorCode: (code: string) => `Error code: ${code}`,
   },
@@ -755,27 +756,27 @@ export const en = {
   reminders: {
     permissionTitle: 'Allow reminder notifications?',
     permissionMessage:
-      'Trezor uses notifications to remind you at the time you set. Reminder details stay hidden unless you choose to show them in Settings.',
+      'Stash uses notifications to remind you at the time you set. Reminder details stay hidden unless you choose to show them in Settings.',
     continue: 'Continue',
     notNow: 'Not now',
     exactTitle: 'Deliver reminders on time?',
     exactMessage:
-      'Without this, Android may delay reminders to save battery, and some phones hold them until you open Trezor. Allow “Alarms & reminders” for Trezor on the next screen.',
+      'Without this, Android may delay reminders to save battery, and some phones hold them until you open Stash. Allow “Alarms & reminders” for Stash on the next screen.',
     openSettings: 'Open settings',
   },
 
   lock: {
-    locked: 'Trezor is locked',
+    locked: 'Stash is locked',
     unlockHint: 'Unlock with your fingerprint, face or screen lock.',
     unlock: 'Unlock',
     noCredential:
-      'This device no longer has a fingerprint, face or screen lock set up, so Trezor can’t confirm it’s you. Set a screen lock in Android settings, or turn App Lock off.',
+      'This device no longer has a fingerprint, face or screen lock set up, so Stash can’t confirm it’s you. Set a screen lock in Android settings, or turn App Lock off.',
     turnOff: 'Turn off App Lock',
     lockout:
       'Too many attempts. Wait a moment, then try again, or use your screen lock.',
     unavailable:
       'No fingerprint, face or screen lock is set up on this device.',
-    failed: 'Trezor couldn’t confirm it’s you. Try again.',
+    failed: 'Stash couldn’t confirm it’s you. Try again.',
     confirmDeleteAll: 'Delete all data',
   },
 };

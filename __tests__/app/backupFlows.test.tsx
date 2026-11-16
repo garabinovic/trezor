@@ -181,7 +181,7 @@ describe('Back up to a file', () => {
     expect(options.password).toBe('correct horse battery');
     expect(options.confirmation).toBe('correct horse battery');
     expect(options.suggestedName).toMatch(
-      /^Trezor backup \d{4}-\d{2}-\d{2}\.tzbk$/,
+      /^Stash backup \d{4}-\d{2}-\d{2}\.tzbk$/,
     );
     expect(typeof options.database.exclusive).toBe('function');
     // Blocking: progress only, no way back while the gate may be held.
@@ -220,7 +220,7 @@ describe('Back up to a file', () => {
       ],
       [
         new BackupError('DESTINATION_UNVERIFIED', undefined, 'remains'),
-        'Trezor couldn’t verify the backup in that location. Choose a folder on this device’s own storage instead (in the file picker’s menu, the device’s name), then copy the backup wherever you like. An incomplete file may remain where you saved it; delete it there.',
+        'Stash couldn’t verify the backup in that location. Choose a folder on this device’s own storage instead (in the file picker’s menu, the device’s name), then copy the backup wherever you like. An incomplete file may remain where you saved it; delete it there.',
       ],
       [
         new BackupError('BACKUP_ATTACHMENT_UNREADABLE', {
@@ -378,10 +378,7 @@ describe('Check a backup', () => {
     );
     await pressText(app, 'Choose backup file');
     expect(
-      hasText(
-        app,
-        'The password is wrong, or this isn’t a Trezor backup file.',
-      ),
+      hasText(app, 'The password is wrong, or this isn’t a Stash backup file.'),
     ).toBe(true);
 
     mockCheckBackup.mockRejectedValueOnce(new BackupError('BACKUP_CORRUPT'));
@@ -437,7 +434,7 @@ describe('Restore from a backup', () => {
     expect(typeof options.firedOnceIds).toBe('function');
     expect(hasText(app, 'Finishing the restore…')).toBe(true);
     expect(texts(app).join(' ')).toContain(
-      'Restore isn’t finished yet. Close and reopen Trezor to complete it.',
+      'Restore isn’t finished yet. Close and reopen Stash to complete it.',
     );
     await expectNoBack();
   });
@@ -456,10 +453,7 @@ describe('Restore from a backup', () => {
     await fillRestoreForm();
     await pressText(app, 'Replace');
     expect(
-      hasText(
-        app,
-        'The password is wrong, or this isn’t a Trezor backup file.',
-      ),
+      hasText(app, 'The password is wrong, or this isn’t a Stash backup file.'),
     ).toBe(true);
     // The password is cleared; the file stays chosen.
     expect(hasText(app, 'Backup file chosen.')).toBe(true);
@@ -535,13 +529,13 @@ describe('Restore from a backup', () => {
 
 test('an incomplete backup file left by an earlier run is reported once', async () => {
   ReactTestRenderer.act(() => app.unmount());
-  mockIncompleteNotice.mockResolvedValueOnce('Trezor backup 2026-11-09.tzbk');
+  mockIncompleteNotice.mockResolvedValueOnce('Stash backup 2026-11-09.tzbk');
   await ReactTestRenderer.act(async () => {
     app = ReactTestRenderer.create(<App />);
   });
   await settle();
   expect(hasText(app, 'An incomplete backup file may remain')).toBe(true);
-  expect(texts(app).join(' ')).toContain('Trezor backup 2026-11-09.tzbk');
+  expect(texts(app).join(' ')).toContain('Stash backup 2026-11-09.tzbk');
   await pressText(app, 'OK');
   expect(hasText(app, 'An incomplete backup file may remain')).toBe(false);
 });
@@ -605,7 +599,7 @@ describe('the bottom action area', () => {
     expect(
       hasText(
         app,
-        'Everything in Trezor on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.',
+        'Everything in Stash on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.',
       ),
     ).toBe(true);
     const restore = button('Restore');

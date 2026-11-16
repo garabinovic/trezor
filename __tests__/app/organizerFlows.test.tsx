@@ -212,7 +212,7 @@ describe('Home', () => {
     expect(hasText(app, 'Garage code')).toBe(true);
     expect(hasText(app, 'Recently updated')).toBe(true);
     expect(hasText(app, 'Book Corner')).toBe(true);
-    expect(hasText(app, 'Welcome to Trezor')).toBe(false);
+    expect(hasText(app, 'Welcome to Stash')).toBe(false);
   });
 
   test('shows the welcome state when the database is empty', async () => {
@@ -221,7 +221,7 @@ describe('Home', () => {
       await repo.delete(item.id);
     }
     await launch();
-    expect(hasText(app, 'Welcome to Trezor')).toBe(true);
+    expect(hasText(app, 'Welcome to Stash')).toBe(true);
   });
 });
 
@@ -245,7 +245,7 @@ describe('Home layout', () => {
       n =>
         host(n) &&
         n.props.accessibilityRole === 'header' &&
-        n.props.children === 'Trezor',
+        n.props.children === 'Stash',
     );
     const [search] = visibleHome('Search everything');
     const coming = app.root
@@ -285,7 +285,7 @@ describe('Home Search by orientation', () => {
       n =>
         typeof n.type === 'string' &&
         n.props.accessibilityRole === 'header' &&
-        n.props.children === 'Trezor',
+        n.props.children === 'Stash',
     );
     let row = title.parent!;
     while (typeof row.type !== 'string') {
@@ -369,7 +369,7 @@ describe('page headers', () => {
   test('title and actions share one row; date or count sits below the divider', async () => {
     await launch();
     const screens: [string, () => Promise<void>][] = [
-      ['Trezor', async () => undefined],
+      ['Stash', async () => undefined],
       ['Notes', () => openTab(app, 'Notes')],
       ['Reminders', () => openTab(app, 'Reminders')],
       ['Cards', () => openTab(app, 'Cards')],
@@ -633,11 +633,11 @@ describe('settings', () => {
     expect(isSelected(app, 'Dark')).toBe(true);
   });
 
-  test('About Trezor and feedback: the email opens the mail app with mailto', async () => {
+  test('About Stash and feedback: the email opens the mail app with mailto', async () => {
     const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
     await launch();
     await pressLabel(app, 'Settings');
-    expect(hasText(app, 'About Trezor')).toBe(true);
+    expect(hasText(app, 'About Stash')).toBe(true);
     expect(hasText(app, 'Feedback & Suggestions')).toBe(true);
     expect(texts(app).join(' ')).toContain(
       'Your data is stored locally on your device, protected with encryption',

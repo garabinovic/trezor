@@ -302,7 +302,7 @@ describe('notification privacy and permission', () => {
     expect(
       hasText(
         app,
-        'Reminders couldn’t be scheduled just now. Trezor will try again automatically.',
+        'Reminders couldn’t be scheduled just now. Stash will try again automatically.',
       ),
     ).toBe(true);
     expect(await storedReminder('x')).toBeDefined();

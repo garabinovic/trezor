@@ -87,10 +87,11 @@ export const es: Strings = {
   },
 
   native: {
+    reminderTitle: 'Stash',
     reminderBody: 'Tienes un recordatorio.',
     channelName: 'Recordatorios',
-    channelDescription: 'Recordatorios que creaste en Trezor',
-    unlockTitle: 'Desbloquear Trezor',
+    channelDescription: 'Recordatorios que creaste en Stash',
+    unlockTitle: 'Desbloquear Stash',
     confirmSubtitle: 'Confirma que eres tú',
     appLockOnTitle: 'Activar el bloqueo de la app',
     appLockOffTitle: 'Desactivar el bloqueo de la app',
@@ -233,7 +234,7 @@ export const es: Strings = {
   },
 
   home: {
-    title: 'Trezor',
+    title: 'Stash',
     searchPlaceholder: 'Buscar en todo',
     countAccessibility: (category: string, count: number) =>
       `${category}, ${count}`,
@@ -241,7 +242,7 @@ export const es: Strings = {
     seeAll: 'Ver todo',
     pinned: 'Fijados',
     recent: 'Actualizados recientemente',
-    welcomeTitle: 'Te damos la bienvenida a Trezor',
+    welcomeTitle: 'Te damos la bienvenida a Stash',
     welcomeMessage:
       'Guarda notas, recordatorios, tarjetas de fidelidad y documentos importantes juntos, en un único lugar privado.',
     welcomePrivacy:
@@ -477,7 +478,7 @@ export const es: Strings = {
       cantOpenTitle: 'No se puede abrir el archivo',
       keyMessage: 'Su clave de cifrado no está disponible en este dispositivo.',
       passwordTitle: 'El PDF está protegido con contraseña',
-      passwordMessage: 'Trezor no puede abrir PDF que piden contraseña.',
+      passwordMessage: 'Stash no puede abrir PDF que piden contraseña.',
       pdfTitle: 'No se puede mostrar el PDF',
       pdfMessage: 'Android no puede mostrar este PDF.',
       imageTitle: 'No se puede mostrar la imagen',
@@ -524,7 +525,7 @@ export const es: Strings = {
     language: 'Idioma',
     notificationPrivacy: 'Privacidad de las notificaciones',
     scheduleFailed:
-      'Ahora no se pudieron programar los recordatorios. Trezor lo volverá a intentar automáticamente.',
+      'Ahora no se pudieron programar los recordatorios. Stash lo volverá a intentar automáticamente.',
     androidSettingsApply:
       'Siempre se aplican los ajustes de notificaciones y de pantalla de bloqueo de Android.',
     showDetails: 'Mostrar detalles',
@@ -538,14 +539,14 @@ export const es: Strings = {
       'Permite “Alarmas y recordatorios” en los ajustes de Android para que lleguen a tiempo.',
     security: 'Seguridad',
     appLockFooter:
-      'El bloqueo de la app oculta Trezor cada vez que sales de ella, hasta que la desbloqueas con tu huella, tu cara o el bloqueo de pantalla. Tus datos están cifrados en cualquier caso.',
+      'El bloqueo de la app oculta Stash cada vez que sales de ella, hasta que la desbloqueas con tu huella, tu cara o el bloqueo de pantalla. Tus datos están cifrados en cualquier caso.',
     appLock: 'Bloqueo de la app',
     appLockSubtitle: 'Pedir huella, cara o bloqueo de pantalla',
     appLockNeedsScreenLock:
       'Primero configura un bloqueo de pantalla en los ajustes de Android',
     data: 'Datos',
     dataFooter:
-      'Trezor guarda todo en este dispositivo. No hay cuenta ni sincronización en la nube. Una copia de seguridad es un archivo que guardas tú, cifrado con su propia contraseña.',
+      'Stash guarda todo en este dispositivo. No hay cuenta ni sincronización en la nube. Una copia de seguridad es un archivo que guardas tú, cifrado con su propia contraseña.',
     backup: 'Hacer una copia de seguridad',
     backupSubtitle: 'Todo, cifrado con la contraseña que elijas',
     checkBackup: 'Comprobar una copia',
@@ -557,7 +558,7 @@ export const es: Strings = {
       'Todo lo de este dispositivo; los archivos de copia se conservan',
     deleteAllTitle: '¿Eliminar todos los datos?',
     deleteAllMessage:
-      'Todas las notas, recordatorios, tarjetas, documentos y archivos adjuntos de este dispositivo se eliminarán de forma permanente y Trezor empezará vacío. Las copias de seguridad que guardaste fuera de Trezor no se ven afectadas. No se puede deshacer.',
+      'Todas las notas, recordatorios, tarjetas, documentos y archivos adjuntos de este dispositivo se eliminarán de forma permanente y Stash empezará vacío. Las copias de seguridad que guardaste fuera de Stash no se ven afectadas. No se puede deshacer.',
     deleteEverything: 'Eliminar todo',
     backUpFirst: 'Hacer copia antes',
     deleting: 'Eliminando…',
@@ -571,16 +572,16 @@ export const es: Strings = {
     sampleDataSubtitle: 'Desactívalo para ver la primera ejecución',
     about: 'Acerca de',
     version: 'Versión',
-    aboutTitle: 'Acerca de Trezor',
+    aboutTitle: 'Acerca de Stash',
     aboutParagraphs: [
-      'Trezor es un organizador personal sencillo, pensado para ayudarte a tener en un solo lugar las cosas importantes de tu vida.',
+      'Stash es un organizador personal sencillo, pensado para ayudarte a tener en un solo lugar las cosas importantes de tu vida.',
       'Guarda tus notas, recordatorios, tarjetas de fidelidad y documentos, y mantén tu información ordenada y a mano.',
-      'Trezor está hecho pensando en la privacidad y la sencillez. Tus datos se guardan localmente en tu dispositivo, protegidos con cifrado, y siguen bajo tu control. Puedes crear una copia de seguridad cifrada para proteger tus datos cuando cambies o restablezcas tu dispositivo.',
+      'Stash está hecho pensando en la privacidad y la sencillez. Tus datos se guardan localmente en tu dispositivo, protegidos con cifrado, y siguen bajo tu control. Puedes crear una copia de seguridad cifrada para proteger tus datos cuando cambies o restablezcas tu dispositivo.',
       'Nuestro objetivo es sencillo: un espacio útil y fiable para tu información personal, sin complicaciones innecesarias.',
     ],
     feedbackTitle: 'Opiniones y sugerencias',
     feedbackParagraphs: [
-      '¿Tienes una idea para mejorar Trezor?',
+      '¿Tienes una idea para mejorar Stash?',
       'Nos encantará saber de ti. Si tienes una sugerencia, encontraste un problema o simplemente quieres contarnos tu experiencia, escríbenos.',
     ],
     email: 'Correo: ',
@@ -591,7 +592,7 @@ export const es: Strings = {
   backup: {
     title: 'Copia de seguridad',
     intro:
-      'El archivo de copia contiene todas tus notas, recordatorios, tarjetas, documentos y archivos adjuntos, cifrados con la contraseña que elijas aquí. Trezor no puede recuperar una contraseña olvidada.',
+      'El archivo de copia contiene todas tus notas, recordatorios, tarjetas, documentos y archivos adjuntos, cifrados con la contraseña que elijas aquí. Stash no puede recuperar una contraseña olvidada.',
     password: 'Contraseña de la copia',
     passwordHelper: 'De 10 a 256 caracteres.',
     repeatPassword: 'Repite la contraseña',
@@ -600,15 +601,15 @@ export const es: Strings = {
     chooseDestination: 'Elegir dónde guardar',
     running: 'Haciendo la copia…',
     runningMessage:
-      'Tus datos se están escribiendo y después se comprobarán. Mantén Trezor abierto hasta que termine.',
-    keepOpen: 'Mantén Trezor abierto hasta que termine.',
+      'Tus datos se están escribiendo y después se comprobarán. Mantén Stash abierto hasta que termine.',
+    keepOpen: 'Mantén Stash abierto hasta que termine.',
     savedTitle: 'Copia guardada y verificada',
     savedMessage: (size: string) =>
       `El archivo de copia (${size}) se volvió a leer y se comprobó. Guárdalo en un lugar seguro junto con su contraseña: sin ella no se puede restaurar.`,
     incompleteTitle: 'Puede quedar un archivo de copia incompleto',
     incompleteMessage: (fileName: string) =>
-      `Una copia no terminó y Trezor no pudo eliminar su archivo “${fileName}”. Elimínalo donde lo guardaste; no se puede restaurar.`,
-    fileName: (date: string) => `Copia de Trezor ${date}.tzbk`,
+      `Una copia no terminó y Stash no pudo eliminar su archivo “${fileName}”. Elimínalo donde lo guardaste; no se puede restaurar.`,
+    fileName: (date: string) => `Copia de Stash ${date}.tzbk`,
   },
 
   check: {
@@ -633,7 +634,7 @@ export const es: Strings = {
   restore: {
     title: 'Restaurar',
     warning:
-      'Todo lo que hay en Trezor en este dispositivo se reemplazará por el contenido de la copia: tus notas, recordatorios, tarjetas, documentos y archivos adjuntos actuales. No se puede deshacer.',
+      'Todo lo que hay en Stash en este dispositivo se reemplazará por el contenido de la copia: tus notas, recordatorios, tarjetas, documentos y archivos adjuntos actuales. No se puede deshacer.',
     noDataFile:
       'No hay ningún archivo de datos en este dispositivo sobre el que restaurar. Vuelve a intentarlo en su lugar.',
     stopped: 'La restauración se detuvo. Tus datos están como antes.',
@@ -641,15 +642,15 @@ export const es: Strings = {
     preparingMessage: 'Comprobando si se puede restaurar.',
     restoring: 'Restaurando…',
     restoringMessage:
-      'La copia se está leyendo y comprobando. Mantén Trezor abierto hasta que termine.',
+      'La copia se está leyendo y comprobando. Mantén Stash abierto hasta que termine.',
     sharingTitle: 'Aún se está compartiendo un archivo',
     sharingMessage:
-      'Trezor está pasando un archivo a otra app. Espera a que termine o cancela la restauración.',
+      'Stash está pasando un archivo a otra app. Espera a que termine o cancela la restauración.',
     checkAgain: 'Volver a comprobar',
     cancelRestore: 'Cancelar la restauración',
     finishing: 'Terminando la restauración…',
     finishingMessage:
-      'Trezor se reinicia solo ahora. Si no lo hace, la restauración aún no ha terminado: cierra y vuelve a abrir Trezor para completarla.',
+      'Stash se reinicia solo ahora. Si no lo hace, la restauración aún no ha terminado: cierra y vuelve a abrir Stash para completarla.',
     cleaningUp: 'Poniendo tus datos en orden…',
     chooseFile: 'Elegir archivo de copia',
     chooseAnother: 'Elegir otro archivo',
@@ -667,13 +668,13 @@ export const es: Strings = {
     PASSWORD_LENGTH: 'La contraseña debe tener entre 10 y 256 caracteres.',
     PASSWORD_MISMATCH: 'Las dos contraseñas no coinciden.',
     BACKUP_PASSWORD_OR_HEADER:
-      'La contraseña es incorrecta o este no es un archivo de copia de Trezor.',
+      'La contraseña es incorrecta o este no es un archivo de copia de Stash.',
     BACKUP_CORRUPT:
       'El archivo de copia está dañado o incompleto. No se puede usar.',
     BACKUP_INCONSISTENT:
       'El contenido del archivo de copia no es coherente. No se puede usar.',
     BACKUP_UNSUPPORTED:
-      'Esta copia se hizo con otra versión de Trezor y no se puede usar aquí.',
+      'Esta copia se hizo con otra versión de Stash y no se puede usar aquí.',
     BACKUP_TOO_LARGE: 'El archivo de copia es demasiado grande.',
     BACKUP_INSUFFICIENT_MEMORY:
       'Ahora no hay suficiente memoria libre. Cierra otras apps y vuelve a intentarlo.',
@@ -682,11 +683,11 @@ export const es: Strings = {
     DESTINATION_NOT_EMPTY:
       'El archivo elegido no está vacío. Elige un nombre de archivo nuevo.',
     DESTINATION_UNVERIFIED:
-      'Trezor no pudo verificar la copia en esa ubicación. Elige una carpeta del almacenamiento propio del dispositivo (en el menú del selector de archivos, el nombre del dispositivo) y después copia la copia de seguridad donde quieras.',
+      'Stash no pudo verificar la copia en esa ubicación. Elige una carpeta del almacenamiento propio del dispositivo (en el menú del selector de archivos, el nombre del dispositivo) y después copia la copia de seguridad donde quieras.',
     KEY_UNAVAILABLE:
       'Tus archivos adjuntos no se pueden leer con la clave de este dispositivo. No se cambió nada.',
     NO_ACTIVITY:
-      'Trezor debe estar abierto en primer plano para elegir un archivo.',
+      'Stash debe estar abierto en primer plano para elegir un archivo.',
     BUSY: 'Ya hay un selector de archivos abierto.',
     PICKER_UNAVAILABLE: 'No hay ninguna app para elegir un archivo.',
     BACKUP_CHANGED:
@@ -694,13 +695,13 @@ export const es: Strings = {
     RESTORE_UNAVAILABLE:
       'No se puede restaurar: la clave de cifrado de este dispositivo falta o ya no es válida. No se cambió nada.',
     RESTORE_STATE_UNKNOWN:
-      'Una restauración anterior dejó archivos que Trezor no puede explicar, así que no empezará otra. No se cambió nada.',
+      'Una restauración anterior dejó archivos que Stash no puede explicar, así que no empezará otra. No se cambió nada.',
     RESTORE_IN_PROGRESS: 'Ya hay una restauración en curso.',
     RESTORE_CANCELLED: 'La restauración se canceló. No se cambió nada.',
     RESTORE_RECOVERY_RETRY:
-      'La restauración se detuvo, pero Trezor no pudo terminar de poner tus datos en orden. Vuelve a intentarlo.',
+      'La restauración se detuvo, pero Stash no pudo terminar de poner tus datos en orden. Vuelve a intentarlo.',
     STORAGE_ERROR:
-      'Trezor no pudo leer tus archivos adjuntos. No se cambió nada.',
+      'Stash no pudo leer tus archivos adjuntos. No se cambió nada.',
     generic: 'Algo salió mal. No se cambió nada.',
     attachment: (
       fileName: string | null,
@@ -725,31 +726,31 @@ export const es: Strings = {
 
   storageError: {
     keepInstalled:
-      'No desinstales Trezor: borrarías tus datos de forma permanente.',
-    keyTitle: 'Trezor no puede desbloquear tus datos',
+      'No desinstales Stash: borrarías tus datos de forma permanente.',
+    keyTitle: 'Stash no puede desbloquear tus datos',
     keyMessage:
       'La clave de cifrado que protege tus datos en este dispositivo falta o ya no es válida. No se ha eliminado nada.',
-    newerTitle: 'Actualiza Trezor para continuar',
+    newerTitle: 'Actualiza Stash para continuar',
     newerMessage:
-      'Tus datos los guardó una versión más reciente de Trezor. Instala la última versión para abrirlos. No se ha cambiado nada.',
+      'Tus datos los guardó una versión más reciente de Stash. Instala la última versión para abrirlos. No se ha cambiado nada.',
     corruptTitle: 'No se pudieron abrir tus datos',
     corruptMessage:
       'El archivo de datos parece estar dañado o no coincide con su clave. No se ha eliminado nada.',
-    genericTitle: 'Trezor no pudo abrir tus datos',
+    genericTitle: 'Stash no pudo abrir tus datos',
     genericMessage:
       'Algo salió mal al abrir el almacenamiento seguro. No se ha eliminado nada.',
-    migrationTitle: 'Trezor no pudo terminar de actualizarse',
+    migrationTitle: 'Stash no pudo terminar de actualizarse',
     migrationMessage:
       'Tus datos no se pudieron adaptar a esta versión, así que se dejaron exactamente como estaban.',
     restoreUnfinishedTitle: 'La restauración aún no ha terminado',
     restoreVerifyMessage:
-      'Trezor no pudo comprobar ahora los datos restaurados. Tus datos de antes de la restauración se conservan hasta que pueda hacerlo.',
+      'Stash no pudo comprobar ahora los datos restaurados. Tus datos de antes de la restauración se conservan hasta que pueda hacerlo.',
     restoreRetryMessage:
       'No se pudo completar un paso de la restauración. No se ha perdido nada; al reintentar se continúa donde se quedó.',
     restoreUnknownTitle: 'Una restauración sin terminar requiere atención',
     restoreUnknownMessage:
-      'Trezor encontró archivos de restauración que no puede explicar. Para proteger tus datos, no se cambia nada automáticamente.',
-    restoreKeyTitle: 'Trezor no puede terminar la restauración',
+      'Stash encontró archivos de restauración que no puede explicar. Para proteger tus datos, no se cambia nada automáticamente.',
+    restoreKeyTitle: 'Stash no puede terminar la restauración',
     restoreKeyMessage:
       'La clave de cifrado de este dispositivo falta o ya no es válida. Se conservan todos los archivos de restauración.',
     wipeTitle: 'La eliminación de tus datos no terminó',
@@ -764,7 +765,7 @@ export const es: Strings = {
     cancelRestore: 'Cancelar la restauración y volver a los datos anteriores',
     cancelTitle: '¿Cancelar la restauración?',
     cancelMessage:
-      'Los datos restaurados se descartarán y Trezor volverá a los datos que tenías antes de la restauración.',
+      'Los datos restaurados se descartarán y Stash volverá a los datos que tenías antes de la restauración.',
     returnToPrevious: 'Volver a los datos anteriores',
     errorCode: (code: string) => `Código de error: ${code}`,
   },
@@ -772,27 +773,27 @@ export const es: Strings = {
   reminders: {
     permissionTitle: '¿Permitir notificaciones de recordatorios?',
     permissionMessage:
-      'Trezor usa notificaciones para avisarte a la hora que elijas. Los detalles de los recordatorios permanecen ocultos salvo que decidas mostrarlos en Ajustes.',
+      'Stash usa notificaciones para avisarte a la hora que elijas. Los detalles de los recordatorios permanecen ocultos salvo que decidas mostrarlos en Ajustes.',
     continue: 'Continuar',
     notNow: 'Ahora no',
     exactTitle: '¿Entregar los recordatorios a tiempo?',
     exactMessage:
-      'Sin esto, Android puede retrasar los recordatorios para ahorrar batería y algunos teléfonos los retienen hasta que abres Trezor. En la siguiente pantalla, permite “Alarmas y recordatorios” para Trezor.',
+      'Sin esto, Android puede retrasar los recordatorios para ahorrar batería y algunos teléfonos los retienen hasta que abres Stash. En la siguiente pantalla, permite “Alarmas y recordatorios” para Stash.',
     openSettings: 'Abrir ajustes',
   },
 
   lock: {
-    locked: 'Trezor está bloqueado',
+    locked: 'Stash está bloqueado',
     unlockHint: 'Desbloquea con tu huella, tu cara o el bloqueo de pantalla.',
     unlock: 'Desbloquear',
     noCredential:
-      'Este dispositivo ya no tiene configurada una huella, cara ni bloqueo de pantalla, así que Trezor no puede confirmar que eres tú. Configura un bloqueo de pantalla en los ajustes de Android o desactiva el bloqueo de la app.',
+      'Este dispositivo ya no tiene configurada una huella, cara ni bloqueo de pantalla, así que Stash no puede confirmar que eres tú. Configura un bloqueo de pantalla en los ajustes de Android o desactiva el bloqueo de la app.',
     turnOff: 'Desactivar el bloqueo de la app',
     lockout:
       'Demasiados intentos. Espera un momento y vuelve a intentarlo, o usa el bloqueo de pantalla.',
     unavailable:
       'Este dispositivo no tiene configurada una huella, cara ni bloqueo de pantalla.',
-    failed: 'Trezor no pudo confirmar que eres tú. Vuelve a intentarlo.',
+    failed: 'Stash no pudo confirmar que eres tú. Vuelve a intentarlo.',
     confirmDeleteAll: 'Eliminar todos los datos',
   },
 };

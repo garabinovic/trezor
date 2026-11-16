@@ -82,7 +82,7 @@ test('the dialog explains what goes and what stays; Cancel deletes nothing', asy
   await pressText(app, 'Delete all data');
   expect(dialog().props.visible).toBe(true);
   expect(dialog().props.message).toBe(
-    'All notes, reminders, cards, documents and attached files on this device are permanently deleted, and Trezor starts empty. Backup files you saved outside Trezor are not affected. This can’t be undone.',
+    'All notes, reminders, cards, documents and attached files on this device are permanently deleted, and Stash starts empty. Backup files you saved outside Stash are not affected. This can’t be undone.',
   );
   await pressText(app, 'Cancel');
   expect(dialog().props.visible).toBe(false);

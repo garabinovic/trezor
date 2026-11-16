@@ -23,7 +23,6 @@ object ReminderNotifications {
   const val CHANNEL_ID = "reminders"
   const val ACTION_OPEN = "com.trezor.app.reminders.OPEN"
   private const val NOTIFICATION_ID = 1
-  private const val GENERIC_TITLE = "Trezor"
 
   private fun manager(context: Context) =
       context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -75,14 +74,16 @@ object ReminderNotifications {
     if (!enabled(context)) return // Permission denied or notifications turned off.
     ensureChannel(context)
     val detailed = showDetails && !entry.title.isNullOrEmpty()
+    // The app's name in the chosen language, as on Home.
+    val genericTitle = LocaleStore.text(context, NativeText.REMINDER_TITLE)
     val genericBody = LocaleStore.text(context, NativeText.REMINDER_BODY)
-    val title = if (detailed) entry.title!! else GENERIC_TITLE
+    val title = if (detailed) entry.title!! else genericTitle
     val body = if (detailed) entry.body?.takeIf { it.isNotBlank() } else genericBody
 
     val publicVersion =
         builder(context)
             .setSmallIcon(R.drawable.ic_stat_reminder)
-            .setContentTitle(GENERIC_TITLE)
+            .setContentTitle(genericTitle)
             .setContentText(genericBody)
             .build()
 

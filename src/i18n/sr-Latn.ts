@@ -86,10 +86,11 @@ export const srLatn: Strings = {
   },
 
   native: {
+    reminderTitle: 'Štek',
     reminderBody: 'Imate podsetnik.',
     channelName: 'Podsetnici',
-    channelDescription: 'Podsetnici koje ste podesili u aplikaciji Trezor',
-    unlockTitle: 'Otključajte Trezor',
+    channelDescription: 'Podsetnici koje ste podesili u aplikaciji Štek',
+    unlockTitle: 'Otključajte Štek',
     confirmSubtitle: 'Potvrdite da ste to vi',
     appLockOnTitle: 'Uključi zaključavanje aplikacije',
     appLockOffTitle: 'Isključi zaključavanje aplikacije',
@@ -244,7 +245,7 @@ export const srLatn: Strings = {
   },
 
   home: {
-    title: 'Trezor',
+    title: 'Štek',
     searchPlaceholder: 'Pretraži sve',
     countAccessibility: (category: string, count: number) =>
       `${category}, ${count}`,
@@ -252,7 +253,7 @@ export const srLatn: Strings = {
     seeAll: 'Prikaži sve',
     pinned: 'Zakačeno',
     recent: 'Nedavno izmenjeno',
-    welcomeTitle: 'Dobro došli u Trezor',
+    welcomeTitle: 'Dobro došli u Štek',
     welcomeMessage:
       'Čuvajte beleške, podsetnike, kartice lojalnosti i važne dokumente zajedno, na jednom privatnom mestu.',
     welcomePrivacy:
@@ -486,7 +487,7 @@ export const srLatn: Strings = {
       keyMessage: 'Njen ključ za šifrovanje nije dostupan na ovom uređaju.',
       passwordTitle: 'PDF je zaštićen lozinkom',
       passwordMessage:
-        'Trezor ne može da otvori PDF datoteke koje traže lozinku.',
+        'Štek ne može da otvori PDF datoteke koje traže lozinku.',
       pdfTitle: 'PDF nije moguće prikazati',
       pdfMessage: 'Android ne može da prikaže ovaj PDF.',
       imageTitle: 'Sliku nije moguće prikazati',
@@ -532,7 +533,7 @@ export const srLatn: Strings = {
     language: 'Jezik',
     notificationPrivacy: 'Privatnost obaveštenja',
     scheduleFailed:
-      'Podsetnike trenutno nije moguće zakazati. Trezor će automatski pokušati ponovo.',
+      'Podsetnike trenutno nije moguće zakazati. Štek će automatski pokušati ponovo.',
     androidSettingsApply:
       'Uvek važe Androidova podešavanja obaveštenja i zaključanog ekrana.',
     showDetails: 'Prikaži detalje podsetnika',
@@ -546,14 +547,14 @@ export const srLatn: Strings = {
       'Dozvolite „Alarme i podsetnike“ u Android podešavanjima da bi podsetnici stizali na vreme.',
     security: 'Bezbednost',
     appLockFooter:
-      'Zaključavanje aplikacije skriva Trezor kad god ga napustite, dok ga ne otključate otiskom prsta, licem ili zaključavanjem ekrana. Vaši podaci su šifrovani u svakom slučaju.',
+      'Zaključavanje aplikacije skriva Štek kad god ga napustite, dok ga ne otključate otiskom prsta, licem ili zaključavanjem ekrana. Vaši podaci su šifrovani u svakom slučaju.',
     appLock: 'Zaključavanje aplikacije',
     appLockSubtitle: 'Traži otisak prsta, lice ili zaključavanje ekrana',
     appLockNeedsScreenLock:
       'Prvo podesite zaključavanje ekrana u Android podešavanjima',
     data: 'Podaci',
     dataFooter:
-      'Trezor čuva sve na ovom uređaju. Nema naloga ni sinhronizacije sa oblakom. Rezervna kopija je datoteka koju sami čuvate, šifrovana sopstvenom lozinkom.',
+      'Štek čuva sve na ovom uređaju. Nema naloga ni sinhronizacije sa oblakom. Rezervna kopija je datoteka koju sami čuvate, šifrovana sopstvenom lozinkom.',
     backup: 'Napravi rezervnu kopiju',
     backupSubtitle: 'Sve, šifrovano lozinkom koju izaberete',
     checkBackup: 'Proveri rezervnu kopiju',
@@ -566,7 +567,7 @@ export const srLatn: Strings = {
       'Sve na ovom uređaju; datoteke rezervnih kopija se čuvaju',
     deleteAllTitle: 'Obrisati sve podatke?',
     deleteAllMessage:
-      'Sve beleške, podsetnici, kartice, dokumenti i priložene datoteke na ovom uređaju biće trajno obrisani, a Trezor će početi prazan. Rezervne kopije koje ste sačuvali van Trezora ostaju netaknute. Ovo se ne može poništiti.',
+      'Sve beleške, podsetnici, kartice, dokumenti i priložene datoteke na ovom uređaju biće trajno obrisani, a Štek će početi prazan. Rezervne kopije koje ste sačuvali van Šteka ostaju netaknute. Ovo se ne može poništiti.',
     deleteEverything: 'Obriši sve',
     backUpFirst: 'Prvo napravi kopiju',
     deleting: 'Brisanje…',
@@ -579,16 +580,16 @@ export const srLatn: Strings = {
     sampleDataSubtitle: 'Isključite da biste videli prvo pokretanje',
     about: 'O aplikaciji',
     version: 'Verzija',
-    aboutTitle: 'O Trezoru',
+    aboutTitle: 'O Šteku',
     aboutParagraphs: [
-      'Trezor je jednostavan lični organizator koji vam pomaže da važne stvari u životu držite na jednom mestu.',
+      'Štek je jednostavan lični organizator koji vam pomaže da važne stvari u životu držite na jednom mestu.',
       'Čuvajte beleške, podsetnike, kartice lojalnosti i dokumente, a svoje podatke držite uređenim i lako dostupnim.',
-      'Trezor je napravljen sa idejom privatnosti i jednostavnosti. Vaši podaci se čuvaju lokalno na vašem uređaju, zaštićeni šifrovanjem, i ostaju pod vašom kontrolom. Možete napraviti šifrovanu rezervnu kopiju da biste sačuvali podatke kada menjate ili resetujete uređaj.',
+      'Štek je napravljen sa idejom privatnosti i jednostavnosti. Vaši podaci se čuvaju lokalno na vašem uređaju, zaštićeni šifrovanjem, i ostaju pod vašom kontrolom. Možete napraviti šifrovanu rezervnu kopiju da biste sačuvali podatke kada menjate ili resetujete uređaj.',
       'Naš cilj je jednostavan: korisno i pouzdano mesto za vaše lične podatke, bez nepotrebne složenosti.',
     ],
     feedbackTitle: 'Utisci i predlozi',
     feedbackParagraphs: [
-      'Imate ideju kako da Trezor bude bolji?',
+      'Imate ideju kako da Štek bude bolji?',
       'Rado ćemo vas saslušati. Bilo da imate predlog, naišli ste na problem ili samo želite da podelite svoje iskustvo, slobodno nam se javite.',
     ],
     email: 'E-pošta: ',
@@ -599,7 +600,7 @@ export const srLatn: Strings = {
   backup: {
     title: 'Rezervna kopija',
     intro:
-      'Datoteka rezervne kopije sadrži sve vaše beleške, podsetnike, kartice, dokumente i priložene datoteke, šifrovane lozinkom koju ovde izaberete. Trezor ne može da povrati zaboravljenu lozinku.',
+      'Datoteka rezervne kopije sadrži sve vaše beleške, podsetnike, kartice, dokumente i priložene datoteke, šifrovane lozinkom koju ovde izaberete. Štek ne može da povrati zaboravljenu lozinku.',
     password: 'Lozinka rezervne kopije',
     passwordHelper: 'Od 10 do 256 znakova.',
     repeatPassword: 'Ponovite lozinku',
@@ -608,15 +609,15 @@ export const srLatn: Strings = {
     chooseDestination: 'Izaberi gde da se sačuva',
     running: 'Pravljenje rezervne kopije…',
     runningMessage:
-      'Vaši podaci se upisuju, a zatim proveravaju. Ne zatvarajte Trezor dok se ovo ne završi.',
-    keepOpen: 'Ne zatvarajte Trezor dok se ovo ne završi.',
+      'Vaši podaci se upisuju, a zatim proveravaju. Ne zatvarajte Štek dok se ovo ne završi.',
+    keepOpen: 'Ne zatvarajte Štek dok se ovo ne završi.',
     savedTitle: 'Rezervna kopija je sačuvana i proverena',
     savedMessage: (size: string) =>
       `Datoteka rezervne kopije (${size}) je ponovo pročitana i proverena. Čuvajte je na sigurnom, zajedno sa lozinkom: bez lozinke ne može da se vrati.`,
     incompleteTitle: 'Možda je ostala nepotpuna rezervna kopija',
     incompleteMessage: (fileName: string) =>
-      `Pravljenje rezervne kopije nije završeno i Trezor nije mogao da obriše njenu datoteku „${fileName}“. Obrišite je tamo gde ste je sačuvali; ne može da se vrati.`,
-    fileName: (date: string) => `Trezor rezervna kopija ${date}.tzbk`,
+      `Pravljenje rezervne kopije nije završeno i Štek nije mogao da obriše njenu datoteku „${fileName}“. Obrišite je tamo gde ste je sačuvali; ne može da se vrati.`,
+    fileName: (date: string) => `Štek rezervna kopija ${date}.tzbk`,
   },
 
   check: {
@@ -642,7 +643,7 @@ export const srLatn: Strings = {
   restore: {
     title: 'Vraćanje',
     warning:
-      'Sve u Trezoru na ovom uređaju biće zamenjeno sadržajem rezervne kopije: vaše trenutne beleške, podsetnici, kartice, dokumenti i priložene datoteke. Ovo se ne može poništiti.',
+      'Sve u Šteku na ovom uređaju biće zamenjeno sadržajem rezervne kopije: vaše trenutne beleške, podsetnici, kartice, dokumenti i priložene datoteke. Ovo se ne može poništiti.',
     noDataFile:
       'Na ovom uređaju ne postoji datoteka sa podacima preko koje bi se vratila kopija. Umesto toga pokušajte ponovo.',
     stopped: 'Vraćanje je zaustavljeno. Vaši podaci su kao i pre.',
@@ -650,15 +651,15 @@ export const srLatn: Strings = {
     preparingMessage: 'Proverava se da li je vraćanje moguće.',
     restoring: 'Vraćanje…',
     restoringMessage:
-      'Rezervna kopija se čita i proverava. Ne zatvarajte Trezor dok se ovo ne završi.',
+      'Rezervna kopija se čita i proverava. Ne zatvarajte Štek dok se ovo ne završi.',
     sharingTitle: 'Datoteka se još deli',
     sharingMessage:
-      'Trezor predaje datoteku drugoj aplikaciji. Sačekajte da se to završi ili otkažite vraćanje.',
+      'Štek predaje datoteku drugoj aplikaciji. Sačekajte da se to završi ili otkažite vraćanje.',
     checkAgain: 'Proveri ponovo',
     cancelRestore: 'Otkaži vraćanje',
     finishing: 'Završavanje vraćanja…',
     finishingMessage:
-      'Trezor se sada sam ponovo pokreće. Ako se to ne desi: vraćanje još nije završeno. Zatvorite i ponovo otvorite Trezor da biste ga dovršili.',
+      'Štek se sada sam ponovo pokreće. Ako se to ne desi: vraćanje još nije završeno. Zatvorite i ponovo otvorite Štek da biste ga dovršili.',
     cleaningUp: 'Dovođenje vaših podataka u red…',
     chooseFile: 'Izaberi datoteku kopije',
     chooseAnother: 'Izaberi drugu datoteku',
@@ -676,13 +677,13 @@ export const srLatn: Strings = {
     PASSWORD_LENGTH: 'Lozinka mora imati od 10 do 256 znakova.',
     PASSWORD_MISMATCH: 'Lozinke se ne podudaraju.',
     BACKUP_PASSWORD_OR_HEADER:
-      'Lozinka nije ispravna ili ovo nije Trezor rezervna kopija.',
+      'Lozinka nije ispravna ili ovo nije Štek rezervna kopija.',
     BACKUP_CORRUPT:
       'Datoteka rezervne kopije je oštećena ili nepotpuna. Ne može da se koristi.',
     BACKUP_INCONSISTENT:
       'Delovi datoteke rezervne kopije se međusobno ne slažu. Ne može da se koristi.',
     BACKUP_UNSUPPORTED:
-      'Ovu rezervnu kopiju je napravila druga verzija Trezora i ovde ne može da se koristi.',
+      'Ovu rezervnu kopiju je napravila druga verzija Šteka i ovde ne može da se koristi.',
     BACKUP_TOO_LARGE: 'Datoteka rezervne kopije je prevelika.',
     BACKUP_INSUFFICIENT_MEMORY:
       'Trenutno nema dovoljno slobodne memorije. Zatvorite druge aplikacije i pokušajte ponovo.',
@@ -691,11 +692,11 @@ export const srLatn: Strings = {
     DESTINATION_NOT_EMPTY:
       'Izabrana datoteka nije prazna. Umesto toga izaberite novo ime datoteke.',
     DESTINATION_UNVERIFIED:
-      'Trezor nije mogao da proveri rezervnu kopiju na toj lokaciji. Izaberite folder u memoriji samog uređaja (u meniju birača datoteka, naziv uređaja), a zatim kopirajte rezervnu kopiju gde god želite.',
+      'Štek nije mogao da proveri rezervnu kopiju na toj lokaciji. Izaberite folder u memoriji samog uređaja (u meniju birača datoteka, naziv uređaja), a zatim kopirajte rezervnu kopiju gde god želite.',
     KEY_UNAVAILABLE:
       'Vaše priložene datoteke ne mogu da se pročitaju ključem ovog uređaja. Ništa nije promenjeno.',
     NO_ACTIVITY:
-      'Trezor mora biti otvoren u prvom planu da biste izabrali datoteku.',
+      'Štek mora biti otvoren u prvom planu da biste izabrali datoteku.',
     BUSY: 'Birač datoteka je već otvoren.',
     PICKER_UNAVAILABLE: 'Nema aplikacije za izbor datoteke.',
     BACKUP_CHANGED:
@@ -703,13 +704,13 @@ export const srLatn: Strings = {
     RESTORE_UNAVAILABLE:
       'Vraćanje nije moguće: ključ za šifrovanje na ovom uređaju nedostaje ili više ne važi. Ništa nije promenjeno.',
     RESTORE_STATE_UNKNOWN:
-      'Prethodno vraćanje je ostavilo datoteke koje Trezor ne može da objasni, pa neće pokrenuti novo. Ništa nije promenjeno.',
+      'Prethodno vraćanje je ostavilo datoteke koje Štek ne može da objasni, pa neće pokrenuti novo. Ništa nije promenjeno.',
     RESTORE_IN_PROGRESS: 'Vraćanje je već u toku.',
     RESTORE_CANCELLED: 'Vraćanje je otkazano. Ništa nije promenjeno.',
     RESTORE_RECOVERY_RETRY:
-      'Vraćanje je zaustavljeno, ali Trezor nije uspeo da do kraja dovede vaše podatke u red. Pokušajte ponovo.',
+      'Vraćanje je zaustavljeno, ali Štek nije uspeo da do kraja dovede vaše podatke u red. Pokušajte ponovo.',
     STORAGE_ERROR:
-      'Trezor nije mogao da pročita vaše priložene datoteke. Ništa nije promenjeno.',
+      'Štek nije mogao da pročita vaše priložene datoteke. Ništa nije promenjeno.',
     generic: 'Nešto nije u redu. Ništa nije promenjeno.',
     attachment: (
       fileName: string | null,
@@ -734,31 +735,31 @@ export const srLatn: Strings = {
 
   storageError: {
     keepInstalled:
-      'Nemojte deinstalirati Trezor: time biste trajno izbrisali svoje podatke.',
-    keyTitle: 'Trezor ne može da otključa vaše podatke',
+      'Nemojte deinstalirati Štek: time biste trajno izbrisali svoje podatke.',
+    keyTitle: 'Štek ne može da otključa vaše podatke',
     keyMessage:
       'Ključ za šifrovanje koji štiti vaše podatke na ovom uređaju nedostaje ili više ne važi. Ništa nije obrisano.',
-    newerTitle: 'Ažurirajte Trezor da biste nastavili',
+    newerTitle: 'Ažurirajte Štek da biste nastavili',
     newerMessage:
-      'Vaše podatke je sačuvala novija verzija Trezora. Instalirajte najnoviju verziju da biste ih otvorili. Ništa nije promenjeno.',
+      'Vaše podatke je sačuvala novija verzija Šteka. Instalirajte najnoviju verziju da biste ih otvorili. Ništa nije promenjeno.',
     corruptTitle: 'Vaše podatke nije moguće otvoriti',
     corruptMessage:
       'Datoteka sa podacima izgleda oštećeno ili ne odgovara svom ključu. Ništa nije obrisano.',
-    genericTitle: 'Trezor nije mogao da otvori vaše podatke',
+    genericTitle: 'Štek nije mogao da otvori vaše podatke',
     genericMessage:
       'Nešto nije u redu prilikom otvaranja bezbednog skladišta. Ništa nije obrisano.',
-    migrationTitle: 'Trezor nije mogao da završi ažuriranje',
+    migrationTitle: 'Štek nije mogao da završi ažuriranje',
     migrationMessage:
       'Vaše podatke nije bilo moguće prilagoditi ovoj verziji, pa su ostali tačno onakvi kakvi su bili.',
     restoreUnfinishedTitle: 'Vraćanje još nije završeno',
     restoreVerifyMessage:
-      'Trezor trenutno nije mogao da proveri vraćene podatke. Vaši podaci od pre vraćanja čuvaju se dok to ne bude moguće.',
+      'Štek trenutno nije mogao da proveri vraćene podatke. Vaši podaci od pre vraćanja čuvaju se dok to ne bude moguće.',
     restoreRetryMessage:
       'Jedan korak vraćanja nije mogao da se završi. Ništa nije izgubljeno; ponovni pokušaj nastavlja tamo gde je stalo.',
     restoreUnknownTitle: 'Nedovršeno vraćanje traži pažnju',
     restoreUnknownMessage:
-      'Trezor je pronašao datoteke vraćanja koje ne može da objasni. Da bi zaštitio vaše podatke, ništa ne menja automatski.',
-    restoreKeyTitle: 'Trezor ne može da završi vraćanje',
+      'Štek je pronašao datoteke vraćanja koje ne može da objasni. Da bi zaštitio vaše podatke, ništa ne menja automatski.',
+    restoreKeyTitle: 'Štek ne može da završi vraćanje',
     restoreKeyMessage:
       'Ključ za šifrovanje na ovom uređaju nedostaje ili više ne važi. Sve datoteke vraćanja se čuvaju.',
     wipeTitle: 'Brisanje vaših podataka nije završeno',
@@ -773,7 +774,7 @@ export const srLatn: Strings = {
     cancelRestore: 'Otkaži vraćanje i vrati prethodne podatke',
     cancelTitle: 'Otkazati vraćanje?',
     cancelMessage:
-      'Vraćeni podaci biće odbačeni, a Trezor se vraća na podatke koje ste imali pre vraćanja.',
+      'Vraćeni podaci biće odbačeni, a Štek se vraća na podatke koje ste imali pre vraćanja.',
     returnToPrevious: 'Vrati prethodne podatke',
     errorCode: (code: string) => `Kôd greške: ${code}`,
   },
@@ -781,27 +782,27 @@ export const srLatn: Strings = {
   reminders: {
     permissionTitle: 'Dozvoliti obaveštenja za podsetnike?',
     permissionMessage:
-      'Trezor koristi obaveštenja da vas podseti u vreme koje ste podesili. Detalji podsetnika ostaju skriveni osim ako ne izaberete da ih prikažete u Podešavanjima.',
+      'Štek koristi obaveštenja da vas podseti u vreme koje ste podesili. Detalji podsetnika ostaju skriveni osim ako ne izaberete da ih prikažete u Podešavanjima.',
     continue: 'Nastavi',
     notNow: 'Ne sada',
     exactTitle: 'Isporučivati podsetnike na vreme?',
     exactMessage:
-      'Bez ovoga Android može da odloži podsetnike radi uštede baterije, a neki telefoni ih zadržavaju dok ne otvorite Trezor. Na sledećem ekranu dozvolite „Alarme i podsetnike“ za Trezor.',
+      'Bez ovoga Android može da odloži podsetnike radi uštede baterije, a neki telefoni ih zadržavaju dok ne otvorite Štek. Na sledećem ekranu dozvolite „Alarme i podsetnike“ za Štek.',
     openSettings: 'Otvori podešavanja',
   },
 
   lock: {
-    locked: 'Trezor je zaključan',
+    locked: 'Štek je zaključan',
     unlockHint: 'Otključajte otiskom prsta, licem ili zaključavanjem ekrana.',
     unlock: 'Otključaj',
     noCredential:
-      'Na ovom uređaju više nije podešen otisak prsta, lice ni zaključavanje ekrana, pa Trezor ne može da potvrdi da ste to vi. Podesite zaključavanje ekrana u Android podešavanjima ili isključite zaključavanje aplikacije.',
+      'Na ovom uređaju više nije podešen otisak prsta, lice ni zaključavanje ekrana, pa Štek ne može da potvrdi da ste to vi. Podesite zaključavanje ekrana u Android podešavanjima ili isključite zaključavanje aplikacije.',
     turnOff: 'Isključi zaključavanje aplikacije',
     lockout:
       'Previše pokušaja. Sačekajte trenutak, pa pokušajte ponovo ili upotrebite zaključavanje ekrana.',
     unavailable:
       'Na ovom uređaju nije podešen otisak prsta, lice ni zaključavanje ekrana.',
-    failed: 'Trezor nije mogao da potvrdi da ste to vi. Pokušajte ponovo.',
+    failed: 'Štek nije mogao da potvrdi da ste to vi. Pokušajte ponovo.',
     confirmDeleteAll: 'Brisanje svih podataka',
   },
 };

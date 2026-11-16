@@ -67,7 +67,7 @@ const nativeUnlocks = () => {
 };
 const coded = (code: string) => Object.assign(new Error(code), { code });
 
-const LOCKED = 'Trezor is locked';
+const LOCKED = 'Stash is locked';
 let app: ReactTestRenderer.ReactTestRenderer;
 
 async function render() {
@@ -172,7 +172,7 @@ test('Unlock sits low and centered, below the explanation and above the navigati
   // The safe-area mock has no bottom inset: only the thumb-reach margin.
   expect(style(screen).paddingBottom).toBe(spacing.huge);
 
-  const body = textNode('Trezor is locked').parent!;
+  const body = textNode('Stash is locked').parent!;
   const button = ancestors(textNode('Unlock'));
   // Not in the centered explanation, but in its own centered area after it.
   expect(button.includes(body)).toBe(false);
@@ -187,7 +187,7 @@ test('failures and lockout are explained and stay locked', async () => {
     .mockRejectedValueOnce(coded('FAILED'))
     .mockRejectedValueOnce(coded('LOCKOUT'));
   await render();
-  expect(hasText(app, 'Trezor couldn’t confirm it’s you. Try again.')).toBe(
+  expect(hasText(app, 'Stash couldn’t confirm it’s you. Try again.')).toBe(
     true,
   );
   await pressText(app, 'Unlock');

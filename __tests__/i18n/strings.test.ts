@@ -101,8 +101,8 @@ describe('Serbian Latin and Cyrillic', () => {
   test('are distinct, and each is in its own script', () => {
     expect(stringsFor('sr-Latn').settings.title).toBe('Podešavanja');
     expect(stringsFor('sr-Cyrl').settings.title).toBe('Подешавања');
-    expect(stringsFor('sr-Latn').lock.locked).toBe('Trezor je zaključan');
-    expect(stringsFor('sr-Cyrl').lock.locked).toBe('Трезор је закључан');
+    expect(stringsFor('sr-Latn').lock.locked).toBe('Štek je zaključan');
+    expect(stringsFor('sr-Cyrl').lock.locked).toBe('Штек је закључан');
     // Digraphs are single Cyrillic letters: lj → љ, nj → њ.
     expect(stringsFor('sr-Cyrl').backup.password).toBe(
       'Лозинка резервне копије',
@@ -123,6 +123,49 @@ describe('Serbian Latin and Cyrillic', () => {
     expect(srCyrl.common.settings).toBe('Подешавања');
     expect(shape(srCyrl)).toEqual(shape(srLatn));
     expect(texts(srCyrl)).toHaveLength(texts(srLatn).length);
+  });
+});
+
+describe('the app name, in the language chosen in the app', () => {
+  test.each([
+    ['en', 'Stash', 'Stash is locked', 'About Stash', 'Unlock Stash'],
+    [
+      'es',
+      'Stash',
+      'Stash está bloqueado',
+      'Acerca de Stash',
+      'Desbloquear Stash',
+    ],
+    ['sr-Latn', 'Štek', 'Štek je zaključan', 'O Šteku', 'Otključajte Štek'],
+    ['sr-Cyrl', 'Штек', 'Штек је закључан', 'О Штеку', 'Откључајте Штек'],
+    [
+      'ru',
+      'Тайник',
+      'Тайник заблокирован',
+      'О Тайнике',
+      'Разблокировать Тайник',
+    ],
+  ] as const)('%s', (language, name, locked, about, unlock) => {
+    const t = stringsFor(language);
+    expect(t.home.title).toBe(name);
+    expect(t.lock.locked).toBe(locked);
+    expect(t.settings.aboutTitle).toBe(about);
+    expect(nativeTexts(language).unlockTitle).toBe(unlock);
+    expect(nativeTexts(language).reminderTitle).toBe(name);
+    // New backups are named after the app; the format stays .tzbk.
+    expect(t.backup.fileName('2026-11-16')).toContain(
+      language === 'ru' ? 'Тайника' : name,
+    );
+    expect(t.backup.fileName('2026-11-16')).toMatch(/ 2026-11-16\.tzbk$/);
+  });
+
+  test('the old name is gone from every dictionary, text and functions alike', () => {
+    for (const [code, dictionary] of Object.entries(dictionaries)) {
+      const all = JSON.stringify(dictionary, (_, v) =>
+        typeof v === 'function' ? String(v) : v,
+      );
+      expect([code, /Trezor|Трезор/.test(all)]).toEqual([code, false]);
+    }
   });
 });
 
