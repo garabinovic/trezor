@@ -1,5 +1,6 @@
 import React from 'react';
-import ReactTestRenderer from 'react-test-renderer';
+import { StyleSheet } from 'react-native';
+import ReactTestRenderer, { ReactTestInstance } from 'react-test-renderer';
 import App from '../../App';
 import NativeTrezorAppLock from '../../src/native/NativeTrezorAppLock';
 import { runMigrations } from '../../src/storage/migrations';
@@ -11,6 +12,7 @@ import {
   settle,
   texts,
 } from '../../test-utils/appHarness';
+import { palettes } from '../../src/theme';
 import { createNodeSqliteDatabase } from '../../test-utils/nodeSqlite';
 
 // Settings → Delete all data (Phase 7). The operation itself is faked here;
@@ -84,6 +86,53 @@ test('the dialog explains what goes and what stays; Cancel deletes nothing', asy
   );
   await pressText(app, 'Cancel');
   expect(dialog().props.visible).toBe(false);
+  expect(mockDeleteAll).not.toHaveBeenCalled();
+});
+
+test('Delete everything stands apart from the safe actions, which keep the usual place', async () => {
+  await pressText(app, 'Delete all data');
+  const shown = dialog();
+  const button = (label: string) => {
+    let node = shown.find(
+      n =>
+        n.type === ('Text' as never) &&
+        ([] as unknown[]).concat(n.props.children).join('') === label,
+    ).parent!;
+    while (node.props.accessibilityRole !== 'button') {
+      node = node.parent!;
+    }
+    return node;
+  };
+  const remove = button('Delete everything');
+  const backUp = button('Back up first');
+  const cancel = button('Cancel');
+  const rowOf = (b: ReactTestInstance) => {
+    let row = b.parent!;
+    while (StyleSheet.flatten(row.props.style)?.flexDirection !== 'row') {
+      row = row.parent!;
+    }
+    return row;
+  };
+  // Back up first and Cancel share the bottom row, Cancel at its end, where
+  // the confirming action usually is; Delete everything isn't in it.
+  const safe = rowOf(cancel);
+  expect(safe.findAll(n => n === backUp || n === cancel)).toEqual([
+    backUp,
+    cancel,
+  ]);
+  expect(safe.findAll(n => n === remove)).toHaveLength(0);
+  // Above them, behind a divider, and still marked as destructive.
+  const all = shown.findAll(n => n === remove || n === safe);
+  expect(all).toEqual([remove, safe]);
+  let apart = remove.parent!;
+  while (!StyleSheet.flatten(apart.props.style)?.borderBottomWidth) {
+    apart = apart.parent!;
+  }
+  expect(apart.findAll(n => n === cancel)).toHaveLength(0);
+  const color = (b: ReactTestInstance) =>
+    StyleSheet.flatten(b.find(n => n.type === ('Text' as never)).props.style)
+      .color;
+  expect(Object.values(palettes).map(p => p.danger)).toContain(color(remove));
   expect(mockDeleteAll).not.toHaveBeenCalled();
 });
 

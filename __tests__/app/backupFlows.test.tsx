@@ -1,5 +1,6 @@
 import React from 'react';
-import ReactTestRenderer from 'react-test-renderer';
+import { StyleSheet } from 'react-native';
+import ReactTestRenderer, { ReactTestInstance } from 'react-test-renderer';
 import App from '../../App';
 import type { DocumentItem } from '../../src/data/types';
 import { runMigrations } from '../../src/storage/migrations';
@@ -543,4 +544,90 @@ test('an incomplete backup file left by an earlier run is reported once', async 
   expect(texts(app).join(' ')).toContain('Trezor backup 2026-11-09.tzbk');
   await pressText(app, 'OK');
   expect(hasText(app, 'An incomplete backup file may remain')).toBe(false);
+});
+
+describe('the bottom action area', () => {
+  /** The visible screen's button with this label (hidden screens come first). */
+  function button(label: string): ReactTestInstance {
+    const text = app.root
+      .findAll(
+        n =>
+          n.type === ('Text' as never) &&
+          ([] as unknown[]).concat(n.props.children).join('') === label,
+      )
+      .pop()!;
+    let node = text.parent!;
+    while (node.props.accessibilityRole !== 'button') {
+      node = node.parent!;
+    }
+    return node;
+  }
+
+  /** The scrolling form the password field is in. */
+  function form(): ReactTestInstance {
+    let node = app.root.find(
+      n =>
+        n.type === ('TextInput' as never) &&
+        n.props.accessibilityLabel === 'Backup password',
+    );
+    while (node.type !== ('RCTScrollView' as never)) {
+      node = node.parent!;
+    }
+    return node;
+  }
+
+  /** The pressable's own style (it takes a function of the pressed state). */
+  const buttonStyle = (b: ReactTestInstance) =>
+    StyleSheet.flatten(
+      typeof b.props.style === 'function'
+        ? b.props.style({ pressed: false })
+        : b.props.style,
+    );
+
+  test.each([
+    ['Back up to a file', 'Choose where to save'],
+    ['Check a backup', 'Choose backup file'],
+  ])(
+    '%s: the action is full width below the scrolling form, at least 48dp tall',
+    async (entry, label) => {
+      await openSettingsEntry(entry);
+      const action = button(label);
+      expect(form().findAll(n => n === action)).toHaveLength(0);
+      expect(buttonStyle(action)).toMatchObject({
+        alignSelf: 'stretch',
+        minHeight: 48,
+      });
+    },
+  );
+
+  test('Restore: Cancel and Restore side by side below the form, Restore last; the warning stays', async () => {
+    await openSettingsEntry('Restore from a backup');
+    expect(
+      hasText(
+        app,
+        'Everything in Trezor on this device is replaced by the contents of the backup: your current notes, reminders, cards, documents and attached files. This can’t be undone.',
+      ),
+    ).toBe(true);
+    const restore = button('Restore');
+    const cancel = button('Cancel');
+    for (const action of [restore, cancel]) {
+      expect(form().findAll(n => n === action)).toHaveLength(0);
+      expect(buttonStyle(action)).toMatchObject({
+        alignSelf: 'stretch',
+        minHeight: 48,
+      });
+    }
+    // The same row, each half of it.
+    let row = restore.parent!;
+    while (!row.findAll(n => n === cancel).length) {
+      row = row.parent!;
+    }
+    expect(StyleSheet.flatten(row.props.style).flexDirection).toBe('row');
+    const order = row.findAll(n => n === cancel || n === restore);
+    expect(order).toEqual([cancel, restore]);
+    // Restore stays the marked, data-replacing action; Cancel the quiet one.
+    expect(restore.props.accessibilityState.disabled).toBe(true);
+    expect(buttonStyle(cancel).backgroundColor).toBe('transparent');
+    expect(buttonStyle(restore).borderWidth).toBeGreaterThan(0);
+  });
 });

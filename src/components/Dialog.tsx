@@ -18,6 +18,11 @@ interface DialogProps {
   /** An optional third action, shown before Cancel. */
   secondaryLabel?: string;
   onSecondary?: () => void;
+  /**
+   * For an irreversible action: the confirm button stands apart, above a
+   * divider, and the safe actions take its usual place at the bottom end.
+   */
+  confirmApart?: boolean;
 }
 
 /** Centered confirmation dialog. */
@@ -32,10 +37,19 @@ export function Dialog({
   onCancel,
   secondaryLabel,
   onSecondary,
+  confirmApart = false,
 }: DialogProps) {
   const styles = useStyles(createStyles);
   const t = useStrings();
   const cancel = cancelLabel === undefined ? t.common.cancel : cancelLabel;
+  const confirm = (
+    <Button
+      label={confirmLabel}
+      onPress={onConfirm}
+      variant={destructive ? 'destructive' : 'primary'}
+      size="sm"
+    />
+  );
   return (
     <Modal
       visible={visible}
@@ -58,6 +72,7 @@ export function Dialog({
               {message}
             </Text>
           )}
+          {confirmApart && <View style={styles.apart}>{confirm}</View>}
           <View style={styles.actions}>
             {secondaryLabel && onSecondary && (
               <Button
@@ -75,12 +90,7 @@ export function Dialog({
                 size="sm"
               />
             )}
-            <Button
-              label={confirmLabel}
-              onPress={onConfirm}
-              variant={destructive ? 'destructive' : 'primary'}
-              size="sm"
-            />
+            {!confirmApart && confirm}
           </View>
         </View>
       </View>
@@ -111,5 +121,12 @@ const createStyles = ({ colors, radius, spacing }: Theme) =>
       justifyContent: 'flex-end',
       gap: spacing.sm,
       marginTop: spacing.md,
+    },
+    apart: {
+      alignItems: 'flex-start',
+      marginTop: spacing.md,
+      paddingBottom: spacing.lg,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
     },
   });

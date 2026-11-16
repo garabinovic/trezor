@@ -384,6 +384,7 @@ export function SettingsScreen({ navigation }: Props) {
         message={t.deleteAllMessage}
         confirmLabel={t.deleteEverything}
         destructive
+        confirmApart
         secondaryLabel={t.backUpFirst}
         onSecondary={() => {
           setConfirmingDelete(false);

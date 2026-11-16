@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  ReactElement,
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { View } from 'react-native';
 import { nativeBackupPlatform } from '../../backup/platform';
 import {
@@ -36,6 +42,11 @@ interface RestoreFlowProps {
   fromErrorScreen: boolean;
   onBusyChange?: (busy: boolean) => void;
   onClose: () => void;
+  /**
+   * Lays the flow out on its screen: the content, and the actions for the
+   * screen's bottom action area (absent while busy).
+   */
+  renderFrame: (content: ReactNode, actions?: ReactNode) => ReactElement;
 }
 
 /**
@@ -51,6 +62,7 @@ export function RestoreFlow({
   fromErrorScreen,
   onBusyChange,
   onClose,
+  renderFrame,
 }: RestoreFlowProps) {
   const t = useStrings();
   const [phase, setPhase] = useState<Phase>({ kind: 'checking' });
@@ -162,105 +174,130 @@ export function RestoreFlow({
     }
   };
 
-  switch (phase.kind) {
-    case 'checking':
-      return (
-        <Busy
-          title={t.restore.preparing}
-          message={t.restore.preparingMessage}
-        />
-      );
-    case 'refused':
-      return (
-        <View style={styles.form}>
-          <Text variant="callout">{phase.message}</Text>
+  /** The phase's content, and its actions for the bottom action area. */
+  function layout(): [ReactNode, ReactNode?] {
+    switch (phase.kind) {
+      case 'checking':
+        return [
+          <Busy
+            title={t.restore.preparing}
+            message={t.restore.preparingMessage}
+          />,
+        ];
+      case 'refused':
+        return [
+          <View style={styles.form}>
+            <Text variant="callout">{phase.message}</Text>
+          </View>,
           <Button
             label={t.common.close}
             variant="secondary"
             onPress={onClose}
-          />
-        </View>
-      );
-    case 'running':
-      return (
-        <>
+            fullWidth
+          />,
+        ];
+      case 'running':
+        return [
+          <>
+            <Busy
+              title={t.restore.restoring}
+              message={t.restore.restoringMessage}
+            />
+            <Dialog
+              visible={shares !== null}
+              title={t.restore.sharingTitle}
+              message={t.restore.sharingMessage}
+              confirmLabel={t.restore.checkAgain}
+              cancelLabel={t.restore.cancelRestore}
+              onConfirm={() => answerShares('wait')}
+              onCancel={() => answerShares('cancel')}
+            />
+          </>,
+        ];
+      case 'replacing':
+        return [
           <Busy
-            title={t.restore.restoring}
-            message={t.restore.restoringMessage}
-          />
-          <Dialog
-            visible={shares !== null}
-            title={t.restore.sharingTitle}
-            message={t.restore.sharingMessage}
-            confirmLabel={t.restore.checkAgain}
-            cancelLabel={t.restore.cancelRestore}
-            onConfirm={() => answerShares('wait')}
-            onCancel={() => answerShares('cancel')}
-          />
-        </>
-      );
-    case 'replacing':
-      return (
-        <Busy
-          title={t.restore.finishing}
-          message={t.restore.finishingMessage}
-        />
-      );
-    case 'cleaning':
-      return <Busy title={t.restore.cleaningUp} />;
-    case 'cleanup':
-      return (
-        <View style={styles.form}>
-          <Text variant="callout">
-            {phase.error ??
-              restoreErrorMessage({ code: 'RESTORE_RECOVERY_RETRY' })}
-          </Text>
-          <Button label={t.common.tryAgain} onPress={finishCleanup} />
-        </View>
-      );
-    case 'form':
-      return (
-        <View style={styles.form}>
-          <Text variant="callout" color="textSecondary">
-            {t.restore.warning}
-          </Text>
-          <Button
-            label={uri ? t.restore.chooseAnother : t.restore.chooseFile}
-            variant="secondary"
-            onPress={chooseFile}
-          />
-          {uri && (
-            <Text variant="caption" color="textTertiary">
-              {t.restore.fileChosen}
+            title={t.restore.finishing}
+            message={t.restore.finishingMessage}
+          />,
+        ];
+      case 'cleaning':
+        return [<Busy title={t.restore.cleaningUp} />];
+      case 'cleanup':
+        return [
+          <View style={styles.form}>
+            <Text variant="callout">
+              {phase.error ??
+                restoreErrorMessage({ code: 'RESTORE_RECOVERY_RETRY' })}
             </Text>
-          )}
-          <PasswordField
-            label={t.backup.password}
-            value={password}
-            onChangeText={setPassword}
-          />
-          {!!phase.error && (
-            <Text variant="callout" color="danger">
-              {phase.error}
-            </Text>
-          )}
+          </View>,
           <Button
-            label={t.restore.restore}
-            variant="destructive"
-            onPress={() => setConfirming(true)}
-            disabled={!uri || password.length === 0}
-          />
-          <Button label={t.common.cancel} variant="ghost" onPress={onClose} />
-          <Dialog
-            visible={confirming}
-            title={t.restore.replaceTitle}
-            message={t.restore.warning}
-            confirmLabel={t.restore.replace}
-            destructive
-            onConfirm={restore}
-            onCancel={() => setConfirming(false)}
-          />
-        </View>
-      );
+            label={t.common.tryAgain}
+            onPress={finishCleanup}
+            fullWidth
+          />,
+        ];
+      case 'form':
+        return [
+          <View style={styles.form}>
+            <Text variant="callout" color="textSecondary">
+              {t.restore.warning}
+            </Text>
+            <Button
+              label={uri ? t.restore.chooseAnother : t.restore.chooseFile}
+              variant="secondary"
+              onPress={chooseFile}
+            />
+            {uri && (
+              <Text variant="caption" color="textTertiary">
+                {t.restore.fileChosen}
+              </Text>
+            )}
+            <PasswordField
+              label={t.backup.password}
+              value={password}
+              onChangeText={setPassword}
+            />
+            {!!phase.error && (
+              <Text variant="callout" color="danger">
+                {phase.error}
+              </Text>
+            )}
+            <Dialog
+              visible={confirming}
+              title={t.restore.replaceTitle}
+              message={t.restore.warning}
+              confirmLabel={t.restore.replace}
+              destructive
+              onConfirm={restore}
+              onCancel={() => setConfirming(false)}
+            />
+          </View>,
+          // Side by side, the same height; Restore last, where the
+          // confirming action sits, and Cancel the quieter of the two.
+          <View style={styles.actionRow}>
+            <View style={styles.action}>
+              <Button
+                label={t.common.cancel}
+                variant="ghost"
+                onPress={onClose}
+                fullWidth
+              />
+            </View>
+            <View style={styles.action}>
+              <Button
+                label={t.restore.restore}
+                variant="destructive"
+                onPress={() => setConfirming(true)}
+                disabled={!uri || password.length === 0}
+                fullWidth
+              />
+            </View>
+          </View>,
+        ];
+    }
   }
+
+  const [content, actions] = layout();
+  return renderFrame(content, actions);
 }

@@ -96,4 +96,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   form: { gap: spacing.xl, paddingTop: spacing.sm },
+  /** Two actions side by side in the bottom action area, equally wide. */
+  actionRow: { flexDirection: 'row', gap: spacing.md },
+  action: { flex: 1 },
 });

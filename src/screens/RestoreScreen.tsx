@@ -22,25 +22,25 @@ export function RestoreScreen({ navigation }: Props) {
   usePreventRemove(busy, () => undefined);
 
   return (
-    <Screen
-      header={
-        <BarHeader
-          title={t.restore.title}
-          onBack={busy ? undefined : navigation.goBack}
-        />
-      }
-      keyboardAware
-    >
-      <View style={styles.body}>
-        <RestoreFlow
-          database={
-            state.status === 'ready' ? state.storage.database : undefined
+    <RestoreFlow
+      database={state.status === 'ready' ? state.storage.database : undefined}
+      fromErrorScreen={false}
+      onBusyChange={setBusy}
+      onClose={navigation.goBack}
+      renderFrame={(content, actions) => (
+        <Screen
+          header={
+            <BarHeader
+              title={t.restore.title}
+              onBack={busy ? undefined : navigation.goBack}
+            />
           }
-          fromErrorScreen={false}
-          onBusyChange={setBusy}
-          onClose={navigation.goBack}
-        />
-      </View>
-    </Screen>
+          keyboardAware
+          footer={actions}
+        >
+          <View style={styles.body}>{content}</View>
+        </Screen>
+      )}
+    />
   );
 }

@@ -201,11 +201,15 @@ export function StorageErrorScreen({
   if (restoring) {
     // §8.1: restore over data that can't be opened; no live connection.
     return (
-      <Screen keyboardAware>
-        <View style={styles.body}>
-          <RestoreFlow fromErrorScreen onClose={() => setRestoring(false)} />
-        </View>
-      </Screen>
+      <RestoreFlow
+        fromErrorScreen
+        onClose={() => setRestoring(false)}
+        renderFrame={(content, actions) => (
+          <Screen keyboardAware footer={actions}>
+            <View style={styles.body}>{content}</View>
+          </Screen>
+        )}
+      />
     );
   }
 

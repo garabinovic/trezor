@@ -85,6 +85,18 @@ export function BackupScreen({ navigation }: Props) {
         />
       }
       keyboardAware
+      footer={
+        phase.kind === 'done' ? (
+          <Button label={t.common.done} onPress={navigation.goBack} fullWidth />
+        ) : phase.kind === 'form' ? (
+          <Button
+            label={t.backup.chooseDestination}
+            onPress={start}
+            disabled={password.length === 0 || confirmation.length === 0}
+            fullWidth
+          />
+        ) : undefined
+      }
     >
       <View style={styles.body}>
         {phase.kind === 'running' && (
@@ -96,7 +108,6 @@ export function BackupScreen({ navigation }: Props) {
             <Text variant="callout" color="textSecondary">
               {t.backup.savedMessage(formatSize(phase.bytes))}
             </Text>
-            <Button label={t.common.done} onPress={navigation.goBack} />
           </View>
         )}
         {phase.kind === 'form' && (
@@ -120,11 +131,6 @@ export function BackupScreen({ navigation }: Props) {
                 {phase.error}
               </Text>
             )}
-            <Button
-              label={t.backup.chooseDestination}
-              onPress={start}
-              disabled={password.length === 0 || confirmation.length === 0}
-            />
           </View>
         )}
       </View>

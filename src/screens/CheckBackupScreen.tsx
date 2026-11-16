@@ -52,6 +52,18 @@ export function CheckBackupScreen({ navigation }: Props) {
         />
       }
       keyboardAware
+      footer={
+        phase.kind === 'valid' ? (
+          <Button label={t.common.done} onPress={navigation.goBack} fullWidth />
+        ) : phase.kind === 'form' ? (
+          <Button
+            label={t.check.chooseFile}
+            onPress={start}
+            disabled={password.length === 0}
+            fullWidth
+          />
+        ) : undefined
+      }
     >
       <View style={styles.body}>
         {phase.kind === 'running' && <Busy title={t.check.running} />}
@@ -61,7 +73,6 @@ export function CheckBackupScreen({ navigation }: Props) {
             <Text variant="callout" color="textSecondary">
               {t.check.validMessage(phase.attachments)}
             </Text>
-            <Button label={t.common.done} onPress={navigation.goBack} />
           </View>
         )}
         {phase.kind === 'form' && (
@@ -79,11 +90,6 @@ export function CheckBackupScreen({ navigation }: Props) {
                 {phase.error}
               </Text>
             )}
-            <Button
-              label={t.check.chooseFile}
-              onPress={start}
-              disabled={password.length === 0}
-            />
           </View>
         )}
       </View>
